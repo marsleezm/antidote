@@ -437,20 +437,20 @@ prepare(Transaction, TxWriteSet, CommittedTx, PreparedTx, PrepareTime, IfCertify
 
 set_prepared(_PreparedTx,[],_TxId,_Time,Acc) ->
     lists:reverse(Acc);
-set_prepared(PreparedTx,[{Key, _Type, _Op} | Rest],TxId,Time,Acc) ->
+set_prepared(PreparedTx,[{Key, Type, Op} | Rest],TxId,Time,Acc) ->
     ActiveTxs = case ets:lookup(PreparedTx, Key) of
 		    [] ->
 			[];
 		    [{Key, List}] ->
 			List
 		end,
-    true = ets:insert(PreparedTx, {Key, [{TxId, Time}|ActiveTxs]}),
+    true = ets:insert(PreparedTx, {Key, [{TxId, Time, Type, Op}|ActiveTxs]}),
     set_prepared(PreparedTx,Rest,TxId,Time,[ActiveTxs|Acc]).
 
 reset_prepared(_PreparedTx,[],_TxId,_Time,[]) ->
     ok;
-reset_prepared(PreparedTx,[{Key, _Type, _Op} | Rest],TxId,Time,[ActiveTxs|Rest2]) ->
-    true = ets:insert(PreparedTx, {Key, [{TxId, Time}|ActiveTxs]}),
+reset_prepared(PreparedTx,[{Key, Type, Op} | Rest],TxId,Time,[ActiveTxs|Rest2]) ->
+    true = ets:insert(PreparedTx, {Key, [{TxId, Time, Type, Op}|ActiveTxs]}),
     reset_prepared(PreparedTx,Rest,TxId,Time,Rest2).
 
 
@@ -468,7 +468,6 @@ commit(Transaction, TxCommitTime, Updates, CommittedTx,
             %[Node] = log_utilities:get_preflist_from_key(Key),
             %case logging_vnode:append(Node,LogId,LogRecord) of
             %    {ok, _} ->
-    
                     update_store(Updates, Transaction, TxCommitTime, InMemoryStore),
                     NewDict = dict:store(Key, TxCommitTime, CommittedTx),
                     clean_and_notify(TxId,Updates,State),

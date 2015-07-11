@@ -53,6 +53,8 @@
 -record(state, {partition :: non_neg_integer(),
 		id :: non_neg_integer(),
 		snapshot_cache :: cache_id(),
+        specula_cache :: cache_id(),
+        specula_dep :: cache_id(),
 		prepared_cache :: cache_id(),
 		self :: atom()}).
 
@@ -156,43 +158,51 @@ generate_random_server_name(Node, Partition) ->
 init([Partition, Id]) ->
     Addr = node(),
     SnapshotCache = clocksi_vnode:get_cache_name(Partition,inmemory_store),
-    PreparedCache = clocksi_vnode:get_cache_name(Partition,prepared),
+    PreparedCache = clocksi_vnode:get_cache_name(Partition, prepared),
+    SpeculaCache = clocksi_vnode:get_cache_name(Partition, specula_store),
+    SpeculaDep = clocksi_vnode:get_cache_name(Partition, specula_dep),
     Self = generate_server_name(Addr,Partition,Id),
     {ok, #state{partition=Partition, id=Id, 
 		snapshot_cache=SnapshotCache,
+		specula_cache=SpeculaCache,
+        specula_dep=SpeculaDep,
 		prepared_cache=PreparedCache,self=Self}}.
 
 handle_call({perform_read, Key, Type, Transaction},Coordinator,
-	    SD0=#state{snapshot_cache=SnapshotCache,prepared_cache=PreparedCache,self=Self}) ->
+	    SD0=#state{snapshot_cache=SnapshotCache,prepared_cache=PreparedCache,
+                        specula_cache=SpeculaCache,self=Self}) ->
     %lager:info("Got read request for ~w", Key),
-    perform_read_internal({sync,Coordinator},Key,Type,Transaction, SnapshotCache,PreparedCache,Self),
+    perform_read_internal({sync,Coordinator},Key,Type,Transaction, 
+                        SnapshotCache, SpeculaCache, PreparedCache,Self),
     {noreply,SD0};
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
 handle_cast({perform_read_cast, Coordinator, Key, Type, Transaction},
-	    SD0=#state{snapshot_cache=SnapshotCache,prepared_cache=PreparedCache,self=Self}) ->
-    perform_read_internal(Coordinator,Key,Type,Transaction,SnapshotCache,PreparedCache,Self),
+	    SD0=#state{snapshot_cache=SnapshotCache,prepared_cache=PreparedCache,
+                    specula_cache=SpeculaCache,self=Self}) ->
+    perform_read_internal(Coordinator,Key,Type,Transaction,SnapshotCache,SpeculaCache,PreparedCache,Self),
     {noreply,SD0}.
 
-perform_read_internal(Coordinator,Key,Type,Transaction,SnapshotCache,PreparedCache,Self) ->
+perform_read_internal(Coordinator,Key,Type,Transaction,SnapshotCache,SpeculaCache,PreparedCache,Self) ->
     case check_clock(Key,Transaction,PreparedCache) of
 	not_ready ->
         %lager:info("Clock not ready"),
-	    spin_wait(Coordinator,Key,Type,Transaction,SnapshotCache,PreparedCache,Self);
+	    spin_wait(Coordinator,Key,Type,Transaction,SnapshotCache,SpeculaCache,PreparedCache,Self);
 	ready ->
         %lager:info("Ready to read for key ~w to ~w",[Key, Coordinator]),
-	    return(Coordinator,Key,Type,Transaction,SnapshotCache)
+	    return(Coordinator,Key,Type,Transaction,SnapshotCache,SpeculaCache)
     end.
 
-spin_wait(Coordinator,Key,Type,Transaction,SnapshotCache,PreparedCache,Self) ->
+spin_wait(Coordinator,Key,Type,Transaction,SnapshotCache,SpeculaCache,PreparedCache,Self) ->
     {message_queue_len,Length} = process_info(self(), message_queue_len),
     case Length of
 	0 ->
         %lager:info("Sleeping to wati for read ~w",[Key]),
 	    timer:sleep(?SPIN_WAIT),
-	    perform_read_internal(Coordinator,Key,Type,Transaction,SnapshotCache,PreparedCache,Self);
+	    perform_read_internal(Coordinator,Key,Type,Transaction,SnapshotCache,
+                        SpeculaCache,PreparedCache,Self);
 	_ ->
         %lager:info("Sending myself to read ~w",[Key]),
 	    gen_server:cast({global,Self},{perform_read_cast,Coordinator,Key,Type,Transaction})
@@ -228,14 +238,20 @@ check_prepared(Key,Transaction,PreparedCache) ->
 	    [{Key,AList}] ->
 		AList
 	end,
-    check_prepared_list(Key,SnapshotTime,ActiveTxs).
+    check_prepared_list(Key,SnapshotTime,ActiveTxs, ActiveTxs).
 
-check_prepared_list(_Key,_SnapshotTime,[]) ->
+check_prepared_list(_Key,_SnapshotTime,[], _FullList) ->
     ready;
-check_prepared_list(Key,SnapshotTime,[{_TxId,Time}|Rest]) ->
+check_prepared_list(Key,SnapshotTime,[{TxId,Time}|Rest], FullList) ->
     case Time =< SnapshotTime of
 	true ->
-        %lager:info("Prepared not ready"),
+        case specula_utilities:should_specula(Time, SnapshotTime) of
+            true ->
+                specula_utilities:make_prepared_specula(Key, {TxId, Time}, SnapshotTime, PreparedCache, 
+                    SpeculaCache, SpeculaDep, FullList);
+            false ->
+                ok 
+        end,
 	    not_ready;
 	false ->
 	    check_prepared_list(Key,SnapshotTime,Rest)
@@ -243,7 +259,7 @@ check_prepared_list(Key,SnapshotTime,[{_TxId,Time}|Rest]) ->
 
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
-return(Coordinator,Key, Type,Transaction, SnapshotCache) ->
+return(Coordinator,Key, Type,Transaction, SnapshotCache, _SpeculaCache) ->
     VecSnapshotTime = Transaction#transaction.vec_snapshot_time,
     %lager:info("Returning for key ~w",[Key]),
     Reply = case ets:lookup(SnapshotCache, Key) of
