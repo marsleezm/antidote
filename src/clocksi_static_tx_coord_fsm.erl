@@ -84,7 +84,6 @@
 	  num_to_read :: non_neg_integer(),
 	  prepare_time :: non_neg_integer(),
 	  commit_time :: non_neg_integer(),
-      dependencies :: dict(),
       updated_partitions :: dict(),
       read_set :: [term()],
 	  state :: active | prepared | committing | committed | undefined | aborted}).
@@ -115,7 +114,6 @@ init([From, ClientClock, Operations]) ->
             num_to_read=0,
             num_to_ack=0,
             operations = Operations,
-            dependencies = dict:new(),
             updated_partitions = dict:new(),
             from = From
            },
@@ -127,18 +125,16 @@ init([From, ClientClock, Operations]) ->
 %%      to execute the next operation.
 execute_batch_ops(timeout, SD=#state{
                                      tx_id = TxId,
-                                     dependencies = Dependencies,
                                      operations = Operations}) ->
     [Tx1|OtherTxs] = Operations,
-    ProcessOp = fun(Operation, {UpdatedPartitions, NumToRead, Dependencies}) ->
+    ProcessOp = fun(Operation, {UpdatedPartitions, NumToRead}) ->
                     case Operation of
                         {read, Key, Type} ->
                             Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
                             IndexNode = hd(Preflist),
                             %%lager:info("NumToRead count: ~w",[NumToRead+1]),
                             ok = ?CLOCKSI_VNODE:async_read_data_item(IndexNode, Key, Type, TxId),
-                            NewDependencies = dict:append(TxId, {read, Key}, Dependencies),
-                            {UpdatedPartitions, NumToRead+1, NewDependencies};
+                            {UpdatedPartitions, NumToRead+1};
                         {update, Key, Type, Op} ->
                             Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
                             IndexNode = hd(Preflist),
