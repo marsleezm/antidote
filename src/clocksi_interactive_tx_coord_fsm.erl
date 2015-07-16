@@ -17,7 +17,7 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
-%% @doc The coordinator for a given Clock SI interactive transaction.
+%% @doc The coordinator for a given Clock SI interactive tx_id.
 %%      It handles the state of the tx and executes the operations sequentially
 %%      by sending each operation to the responsible clockSI_vnode of the
 %%      involved key. when a tx is finalized (committed or aborted, the fsm
@@ -85,7 +85,7 @@
 %%----------------------------------------------------------------------
 -record(state, {
 	  from :: {pid(), term()},
-	  transaction :: tx(),
+	  tx_id :: txid(),
 	  %%updated_partitions :: list(),
 	  num_to_ack :: non_neg_integer(),
 	  prepare_time :: non_neg_integer(),
@@ -116,40 +116,22 @@ stop(Pid) -> gen_fsm:sync_send_all_state_event(Pid,stop).
 
 %% @doc Initialize the state.
 init([From, ClientClock]) ->
-    {Transaction,TransactionId} = create_transaction_record(ClientClock),
+    TxId = tx_utilities:create_transaction_record(ClientClock),
     SD = #state{
-            transaction = Transaction,
+            tx_id = TxId,
             updated_partitions = dict:new(),
             read_set = dict:new(),
             prepare_time=0
            },
-    From ! {ok, TransactionId},
+    From ! {ok, TxId},
     {ok, execute_op, SD}.
-
--spec create_transaction_record(snapshot_time() | ignore) -> {tx(),txid()}.
-create_transaction_record(ClientClock) ->
-    %% Seed the random because you pick a random read server, this is stored in the process state
-    _Res = random:seed(now()),
-    {ok, SnapshotTime} = case ClientClock of
-        ignore ->
-            get_snapshot_time();
-        _ ->
-            get_snapshot_time(ClientClock)
-    end,
-    DcId = ?DC_UTIL:get_my_dc_id(),
-    {ok, LocalClock} = ?VECTORCLOCK:get_clock_of_dc(DcId, SnapshotTime),
-    TransactionId = #tx_id{snapshot_time=LocalClock, server_pid=self()},
-    Transaction = #transaction{snapshot_time=LocalClock,
-                               vec_snapshot_time=SnapshotTime,
-                               txn_id=TransactionId},
-    {Transaction,TransactionId}.
 
 -spec perform_singleitem_read(key(),type()) -> {ok,val()} | {error,reason()}.
 perform_singleitem_read(Key,Type) ->
-    {Transaction,_TransactionId} = create_transaction_record(ignore),
+    TxId = tx_utilities:create_transaction_record(ignore),
     Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
     IndexNode = hd(Preflist),
-    case ?CLOCKSI_VNODE:read_data_item(IndexNode, Key, Type, Transaction) of
+    case ?CLOCKSI_VNODE:read_data_item(IndexNode, Key, Type, TxId) of
 	error ->
 	    {error, unknown};
 	{error, Reason} ->
@@ -164,7 +146,7 @@ perform_singleitem_read(Key,Type) ->
 %%      operation, wait for it to finish (synchronous) and go to the prepareOP
 %%       to execute the next operation.
 execute_op({Op_type, Args}, Sender,
-           SD0=#state{transaction=Transaction,
+           SD0=#state{tx_id=TxId,
                     updated_partitions=UpdatedPartitions,
                     read_set=ReadSet
 		      }) ->
@@ -185,7 +167,7 @@ execute_op({Op_type, Args}, Sender,
                             Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
                             IndexNode = hd(Preflist),
                             %lager:info("Read from node for ~w", [Key]),
-                            ?CLOCKSI_VNODE:read_data_item(IndexNode, Key, Type, Transaction); 
+                            ?CLOCKSI_VNODE:read_data_item(IndexNode, Key, Type, TxId); 
                         {ok, SnapshotState} ->
                             {ok, {Type,SnapshotState}}
                     end,
@@ -231,11 +213,11 @@ execute_op({Op_type, Args}, Sender,
 %% @doc this state sends a prepare message to all updated partitions and goes
 %%      to the "receive_prepared"state.
 prepare(timeout, SD0=#state{
-                        transaction = Transaction,
+                        tx_id = TxId,
                         updated_partitions=UpdatedPartitions, from=_From}) ->
     case dict:size(UpdatedPartitions) of
         0->
-            Snapshot_time=Transaction#transaction.snapshot_time,
+            Snapshot_time=TxId#tx_id.snapshot_time,
             {next_state, committing,
             SD0#state{state=committing, commit_time=Snapshot_time}, 0};
         1->
@@ -243,27 +225,27 @@ prepare(timeout, SD0=#state{
             %lists:foldl(fun(X, Acc) -> {Part, Keys}= X,
             %                            Acc++[{Part, [Key || {Key, _Type, _Op} <- Keys]} ]
             %            end, [], UpdatedPart),
-            ?CLOCKSI_VNODE:single_commit(UpdatedPart, Transaction),
+            ?CLOCKSI_VNODE:single_commit(UpdatedPart, TxId),
             {next_state, single_committing,
             SD0#state{state=committing, num_to_ack=1}};
         N->
-            ?CLOCKSI_VNODE:prepare(UpdatedPartitions, Transaction),
+            ?CLOCKSI_VNODE:prepare(UpdatedPartitions, TxId),
             {next_state, receive_prepared,
             SD0#state{num_to_ack=N, state=prepared}}
     end.
 %% @doc state called when 2pc is forced independently of the number of partitions
 %%      involved in the txs.
 prepare_2pc(timeout, SD0=#state{
-                        transaction = Transaction,
+                        tx_id = TxId,
                         updated_partitions=UpdatedPartitions, from=From}) ->
     case dict:size(UpdatedPartitions) of
         0->
-            Snapshot_time=Transaction#transaction.snapshot_time,
+            Snapshot_time=TxId#tx_id.snapshot_time,
             _Res = gen_fsm:reply(From, {ok, Snapshot_time}),
             {next_state, committing_2pc,
             SD0#state{state=committing, commit_time=Snapshot_time}};
         N->
-            ?CLOCKSI_VNODE:prepare(UpdatedPartitions, Transaction),
+            ?CLOCKSI_VNODE:prepare(UpdatedPartitions, TxId),
             {next_state, receive_prepared,
             SD0#state{num_to_ack=N, state=prepared}}
     end.
@@ -308,14 +290,14 @@ single_committing(abort, S0=#state{from=_From}) ->
 %%      updated partitions, and go to the "receive_committed" state.
 %%      This state expects other process to sen the commit message to 
 %%      start the commit phase.
-committing_2pc(commit, Sender, SD0=#state{transaction = Transaction,
+committing_2pc(commit, Sender, SD0=#state{tx_id = TxId,
                               updated_partitions=UpdatedPartitions,
                               commit_time=Commit_time}) ->
     case dict:size(UpdatedPartitions) of
         0 ->
             reply_to_client(SD0#state{state=committed, from=Sender});
         N ->
-            ?CLOCKSI_VNODE:commit(UpdatedPartitions, Transaction, Commit_time),
+            ?CLOCKSI_VNODE:commit(UpdatedPartitions, TxId, Commit_time),
             {next_state, receive_committed,
              SD0#state{num_to_ack=N, from=Sender, state=committing}}
     end.
@@ -324,14 +306,14 @@ committing_2pc(commit, Sender, SD0=#state{transaction = Transaction,
 %%      updated partitions, and go to the "receive_committed" state.
 %%      This state is used when no commit message from the client is
 %%      expected 
-committing(timeout, SD0=#state{transaction = Transaction,
+committing(timeout, SD0=#state{tx_id = TxId,
                               updated_partitions=UpdatedPartitions,
                               commit_time=Commit_time}) ->
     case dict:size(UpdatedPartitions) of
         0 ->
             reply_to_client(SD0#state{state=committed});
         N ->
-            ?CLOCKSI_VNODE:commit(UpdatedPartitions, Transaction, Commit_time),
+            ?CLOCKSI_VNODE:commit(UpdatedPartitions, TxId, Commit_time),
             {next_state, receive_committed,
              SD0#state{num_to_ack=N, state=committing}}
     end.
@@ -352,33 +334,29 @@ receive_committed(committed, S0=#state{num_to_ack= NumToAck}) ->
 
 %% @doc when an error occurs or an updated partition 
 %% does not pass the certification check, the transaction aborts.
-abort(timeout, SD0=#state{transaction = Transaction,
+abort(timeout, SD0=#state{tx_id = TxId,
                           updated_partitions=UpdatedPartitions}) ->
-    ?CLOCKSI_VNODE:abort(UpdatedPartitions, Transaction),
+    ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted});
 
-abort(abort, SD0=#state{transaction = Transaction,
+abort(abort, SD0=#state{tx_id = TxId,
                         updated_partitions=UpdatedPartitions}) ->
-    ?CLOCKSI_VNODE:abort(UpdatedPartitions, Transaction),
+    ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted});
 
-abort({prepared, _}, SD0=#state{transaction=Transaction,
+abort({prepared, _}, SD0=#state{tx_id=TxId,
                         updated_partitions=UpdatedPartitions}) ->
-    ?CLOCKSI_VNODE:abort(UpdatedPartitions, Transaction),
+    ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted}).
 
 %% @doc when the transaction has committed or aborted,
-%%       a reply is sent to the client that started the transaction.
-reply_to_client(SD=#state{from=From, transaction=Transaction,
+%%       a reply is sent to the client that started the tx_id.
+reply_to_client(SD=#state{from=From, tx_id=TxId,
                                    state=TxState, commit_time=CommitTime}) ->
     if undefined =/= From ->
-        TxId = Transaction#transaction.txn_id,
         Reply = case TxState of
             committed ->
-                DcId = ?DC_UTIL:get_my_dc_id(),
-                CausalClock = ?VECTORCLOCK:set_clock_of_dc(
-                  DcId, CommitTime, Transaction#transaction.vec_snapshot_time),
-                {ok, {TxId, CausalClock}};
+                {ok, {TxId, CommitTime}};
             aborted->
                 {aborted, TxId}
         end,
@@ -406,44 +384,6 @@ code_change(_OldVsn, StateName, State, _Extra) -> {ok, StateName, State}.
 terminate(_Reason, _SN, _SD) ->
     ok.
 
-%%%===================================================================
-%%% Internal Functions
-%%%===================================================================
-
-%%@doc Set the transaction Snapshot Time to the maximum value of:
-%%     1.ClientClock, which is the last clock of the system the client
-%%       starting this transaction has seen, and
-%%     2.machine's local time, as returned by erlang:now().
--spec get_snapshot_time(snapshot_time())
-                       -> {ok, snapshot_time()}.
-get_snapshot_time(ClientClock) ->
-    wait_for_clock(ClientClock).
-
--spec get_snapshot_time() -> {ok, snapshot_time()}.
-get_snapshot_time() ->
-    Now = clocksi_vnode:now_microsec(erlang:now()) - ?OLD_SS_MICROSEC,
-    {ok, VecSnapshotTime} = ?VECTORCLOCK:get_stable_snapshot(),
-    DcId = ?DC_UTIL:get_my_dc_id(),
-    SnapshotTime = dict:update(DcId,
-                    fun (_Old) -> Now end,
-                        Now, VecSnapshotTime),
-    {ok, SnapshotTime}.
-
--spec wait_for_clock(snapshot_time()) ->
-                           {ok, snapshot_time()}.
-wait_for_clock(Clock) ->
-    {ok, VecSnapshotTime} = get_snapshot_time(),
-    case vectorclock:ge(VecSnapshotTime, Clock) of
-	true ->
-	    %% No need to wait
-	    {ok, VecSnapshotTime};
-	false ->
-	    %% wait for snapshot time to catch up with Client Clock
-	    timer:sleep(10),
-	    wait_for_clock(Clock)
-    end.
-
-
 -ifdef(TEST).
 
 main_test_() ->
@@ -461,10 +401,8 @@ main_test_() ->
       fun update_multi_success_test/1,
 
       fun read_single_fail_test/1,
-      fun read_success_test/1,
+      fun read_success_test/1
 
-      fun get_snapshot_time_test/0,
-      fun wait_for_clock_test/0
      ]}.
 
 % Setup and Cleanup
@@ -533,17 +471,5 @@ read_success_test(Pid) ->
                     gen_fsm:sync_send_event(Pid, {read, {set, riak_dt_gset}}, infinity)),
             ?assertMatch({ok, _}, gen_fsm:sync_send_event(Pid, {prepare, empty}, infinity))
     end.
-
-get_snapshot_time_test() ->
-    {ok, SnapshotTime} = get_snapshot_time(),
-    ?assertMatch([{mock_dc,_}],dict:to_list(SnapshotTime)).
-
-wait_for_clock_test() ->
-    {ok, SnapshotTime} = wait_for_clock(vectorclock:from_list([{mock_dc,10}])),
-    ?assertMatch([{mock_dc,_}],dict:to_list(SnapshotTime)),
-    VecClock = clocksi_vnode:now_microsec(now()),
-    {ok, SnapshotTime2} = wait_for_clock(vectorclock:from_list([{mock_dc, VecClock}])),
-    ?assertMatch([{mock_dc,_}],dict:to_list(SnapshotTime2)).
-
 
 -endif.

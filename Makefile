@@ -32,6 +32,12 @@ stage : rel
 currentdevrel: stagedevrel compile-riak-test
 	riak_test/bin/antidote-current.sh
 
+fakedevrel:  compile-riak-test
+	riak_test/bin/antidote-current.sh
+
+easy-riak-test: fakedevrel
+	$(foreach dep,$(wildcard riak_test/*.erl), ../riak_test/riak_test -v -c antidote -t $(dep);)
+
 riak-test: currentdevrel
 	$(foreach dep,$(wildcard riak_test/*.erl), ../riak_test/riak_test -v -c antidote -t $(dep);)
 

@@ -50,7 +50,6 @@
 
 -record(state, {partition :: non_neg_integer(),
 		id :: non_neg_integer(),
-        my_log :: cache_id(),
         log_size :: non_neg_integer(),
         quorum :: non_neg_integer(),
         successors :: [atom()],
@@ -88,40 +87,30 @@ init([Partition]) ->
     Quorum = antidote_config:get(quorum),
     LogSize = antidote_config:get(log_size),
     Successors = [get_replfsm_name(Index) || {Index, _Node} <- log_utilities:get_my_next(Partition, ReplFactor-1)],
-    MyLog = clocksi_vnode:open_table(Partition, my_log),
     ReplicatedLog = clocksi_vnode:open_table(Partition, repl_log),
     {ok, #state{partition=Partition,
-                my_log= MyLog,
                 log_size = LogSize,
                 quorum = Quorum,
                 successors = Successors,
                 replicated_log = ReplicatedLog}}.
 
 handle_call({retrieve_log, LogName},  _Sender,
-	    SD0=#state{partition=Partition, my_log=MyLog, 
-                    replicated_log=ReplicatedLog}) ->
-    Table= case LogName of
-                Partition ->
-                    {durable, Log} = ets:lookup(MyLog, durable),
-                    Log;
-                _ ->
-                    case ets:lookup(ReplicatedLog, Partition) of
-                        [{Partition, Log}] ->
-                            Log;
-                        [] ->
-                            []
-                    end
-            end,
-    {reply, Table, SD0};
+	    SD0=#state{replicated_log=ReplicatedLog}) ->
+    case ets:lookup(ReplicatedLog, LogName) of
+        [{LogName, Log}] ->
+            {reply, Log, SD0};
+        [] ->
+            {reply, [], SD0}
+    end;
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
 handle_cast({replicate, PendingLog}, 
-	    SD0=#state{partition=Partition, my_log=MyLog, successors=Successors}) ->
+	    SD0=#state{partition=Partition, replicated_log=ReplicatedLog, successors=Successors}) ->
     {TxId, PendingRecord} = PendingLog,        
     {Type, _, _, _, TxInfo} = PendingRecord,
-    ets:insert(MyLog, {TxId, PendingRecord}),
+    ets:insert(ReplicatedLog, {TxId, PendingRecord}),
     replicate_log(Successors, Partition, {Type, {TxId, TxInfo}}),
     {noreply, SD0};
 
@@ -138,28 +127,29 @@ handle_cast({replicate_log, PrimaryPart, Log},
     repl_ack(PrimaryPart, {Type,TxId}),
     {noreply, SD0};
 
-handle_cast({repl_ack, {Type, TxId}}, SD0=#state{my_log=MyLog,
+handle_cast({repl_ack, {Type, TxId}}, SD0=#state{replicated_log=ReplicatedLog,
+            partition=Partition,
             log_size=LogSize}) ->
-    case ets:lookup(MyLog, TxId) of
+    case ets:lookup(ReplicatedLog, TxId) of
         [{TxId, {RecordType, AckNeeded, Sender, MsgToReply, Record}}] ->
             case Type of
                 RecordType ->
                     case AckNeeded of
                         1 -> %%Has got all neede ack, can log message already
                             %lager:info("Returned to client"),
-                            DurableLog = case ets:lookup(MyLog, durable) of
+                            DurableLog = case ets:lookup(ReplicatedLog, Partition) of
                                             [] ->
                                                 [];
-                                            [{durable, Result}] ->
+                                            [{Partition, Result}] ->
                                                 lists:sublist(Result, LogSize)
                                         end,
-                            ets:insert(MyLog, {durable, [{TxId, Record}|DurableLog]}),
-                            ets:delete(MyLog, TxId),
+                            ets:insert(ReplicatedLog, {Partition, [{TxId, Record}|DurableLog]}),
+                            ets:delete(ReplicatedLog, TxId),
                             %lager:info("#####DONE#####Sending ~p to ~p", [Sender, MsgToReply]),
                             {fsm, undefined, FSMSender} = Sender,
                             gen_fsm:send_event(FSMSender, MsgToReply);
                         _ -> %%Wait for more replies
-                            ets:insert(MyLog, {TxId, {RecordType, AckNeeded-1,
+                            ets:insert(ReplicatedLog, {TxId, {RecordType, AckNeeded-1,
                                     Sender, MsgToReply, Record}})
                     end;
                 _ ->

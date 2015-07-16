@@ -72,7 +72,8 @@
 -type log_id() :: [partition_id()].
 -type type() :: atom().
 -type snapshot() :: term().
--type snapshot_time() ::  vectorclock:vectorclock().
+%%-type snapshot_time() ::  vectorclock:vectorclock().
+-type snapshot_time() ::  non_neg_integer().
 -type commit_time() ::  {dcid(), non_neg_integer()}.
 -type txid() :: #tx_id{}.
 -type clocksi_payload() :: #clocksi_payload{}.

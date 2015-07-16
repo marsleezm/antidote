@@ -68,7 +68,7 @@ get_primaries_preflist(Key)->
     Pos = Key rem length(PartitionList) + 1,
     [lists:nth(Pos, PartitionList)].
 
--spec get_my_previous(chash:index_as_int(), non_neg_integer) -> preflist().
+-spec get_my_previous(chash:index_as_int(), non_neg_integer()) -> preflist().
 get_my_previous(Partition, N) ->
     {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
     Size = chashbin:num_partitions(CHBin),
@@ -76,7 +76,7 @@ get_my_previous(Partition, N) ->
     {Primaries, _} = chashbin:itr_pop(Size-1, Itr),
     lists:sublist(Primaries, Size-N, N).
 
--spec get_my_next(chash:index_as_int(), non_neg_integer) -> preflist().
+-spec get_my_next(chash:index_as_int(), non_neg_integer()) -> preflist().
 get_my_next(Partition, N) ->
     {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
     Itr = chashbin:iterator(Partition, CHBin),

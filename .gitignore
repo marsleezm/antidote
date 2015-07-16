@@ -10,7 +10,7 @@ apps/antidote/src/*
 src/*.swo
 dialyzer_unhandled_warnings
 .local_dialyzer_plt
-dialyzer_warnings
+dialyzer.ignore-warnings
 doc/
 .DS_Store
 log/

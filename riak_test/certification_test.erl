@@ -29,8 +29,19 @@
 -define(HARNESS, (rt_config:get(rt_harness))).
 
 confirm() ->
+    rt:update_app_config(all,[
+        {riak_core, [{ring_creation_size, 8}]}
+    ]),
     [Nodes] = rt:build_clusters([3]),
+    lager:info("Waiting for ring to converge."),
+    rt:wait_until_ring_converged(Nodes),
+
+    lager:info("Waiting until vnodes are started up"),
+    rt:wait_until(hd(Nodes),fun wait_init:check_ready/1),
+    lager:info("Vnodes are started up"),
+
     lager:info("Nodes: ~p", [Nodes]),
+
     clocksi_test_certification_check(Nodes),
     clocksi_pending_prepare_abort_check(Nodes),
     clocksi_multiple_test_certification_check(Nodes),

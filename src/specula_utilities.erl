@@ -20,7 +20,7 @@
 -module(specula_utilities).
 -define(SPECULA_TIMEOUT, 10000).
 
--export([should_specula/2, make_prepared_specula/3]).
+-export([should_specula/2, make_prepared_specula/8]).
 
 should_specula(PreparedTime, SnapshotTime) ->
     case SnapshotTime - ?SPECULA_TIMEOUT > PreparedTime of
@@ -37,24 +37,24 @@ make_prepared_specula(Key, Record, SnapshotTime, PreparedCache, SnapshotCache,
                              SpeculaCache, SpeculaDep, PreparedList) ->
     PList0 = lists:delete(Record, PreparedList),
     {TxId, Time, Type, {Param, Actor}} = Record,
-    NewSpeculaVlue = case ets:lookup(SpeculaCache, Key) of 
-                        [] ->
-                            %fetch from committed store
-                            case ets:lookup(SnapshotCache, Key) of
-                                [] ->
-                                    NewSpeculaValue = generate_snapshot([], Type, Param, Actor),
-                                    true = ets:insert(SpeculaCache, [{Time, NewSpeculaValue}]);
-                                [{Key, CommittedVersions}] ->
-                                    [{_CommitTime, Snapshot}|_] = CommittedVersions,
-                                    NewSpeculaValue = generate_snapshot(Snapshot, Type, Param, Actor),
-                                    true = ets:insert(SpeculaCache, [{Time, NewSpeculaValue}])
-                            end;
-                        [{Key, SpeculaVersions}] ->
-                            [{_CommitTime, Snapshot}|_] = SpeculaVersions,
-                            NewSpeculaValue = generate_snapshot(Snapshot, Type, Param, Actor),
-                            true = ets:insert(SpeculaCache, [{Time, NewSpeculaValue}|SpeculaVersions]),
-                            add_specula_meta(SpeculaDep, , TxId, SnapshotTime)
-                    end,
+    case ets:lookup(SpeculaCache, Key) of 
+        [] ->
+            %fetch from committed store
+            case ets:lookup(SnapshotCache, Key) of
+                [] ->
+                    NewSpeculaValue = generate_snapshot([], Type, Param, Actor),
+                    true = ets:insert(SpeculaCache, [{Time, TxId, NewSpeculaValue}]);
+                [{Key, CommittedVersions}] ->
+                    [{_CommitTime, Snapshot}|_] = CommittedVersions,
+                    NewSpeculaValue = generate_snapshot(Snapshot, Type, Param, Actor),
+                    true = ets:insert(SpeculaCache, [{Time, TxId, NewSpeculaValue}])
+            end;
+        [{Key, SpeculaVersions}] ->
+            [{_CommitTime, SpeculaTxId, Snapshot}|_] = SpeculaVersions,
+            NewSpeculaValue = generate_snapshot(Snapshot, Type, Param, Actor),
+            true = ets:insert(SpeculaCache, [{Time, TxId, NewSpeculaValue}|SpeculaVersions]),
+            add_specula_meta(SpeculaDep, SpeculaTxId, TxId, SnapshotTime)
+    end,
     true = ets:insert(PreparedCache, {Key, PList0}).
 
 
@@ -70,11 +70,11 @@ generate_snapshot(Snapshot, Type, Param, Actor) ->
             NewSnapshot
     end.          
 
-add_specula_meta(SpeculaDep, DependingTxId, TxId) ->
+add_specula_meta(SpeculaDep, DependingTxId, TxId, SnapshotTime) ->
     case ets:lookup(SpeculaDep, DependingTxId) of
         [] ->
-            true = ets:insert(SpeculaDep, {DependingTxId, [TxId]});
+            true = ets:insert(SpeculaDep, {DependingTxId, [{TxId, SnapshotTime}]});
         [{DependingTxId, DepList}] ->
-            true = ets:insert(SpeculaDep, {DependingTxId, [TxId|DepList]})
+            true = ets:insert(SpeculaDep, {DependingTxId, [{TxId, SnapshotTime}|DepList]})
     end.
     

@@ -75,21 +75,21 @@ stop_read_servers(Partition) ->
     stop_read_servers_internal(Addr, Partition, ?READ_CONCURRENCY).
 
 
-read_data_item({Partition,Node},Key,Type,Transaction) ->
+read_data_item({Partition,Node},Key,Type,TxId) ->
     try
 	gen_server:call({global,generate_random_server_name(Node,Partition)},
-			{perform_read,Key,Type,Transaction},infinity)
+			{perform_read,Key,Type,TxId},infinity)
     catch
         _:Reason ->
             lager:error("Exception caught: ~p", [Reason]),
             {error, Reason}
     end.
 
-async_read_data_item({Partition,Node},Key,Type,Transaction) ->
+async_read_data_item({Partition,Node},Key,Type,TxId) ->
     %lager:info("Sending read for ~w",[Key]),
     try
 	gen_server:cast({global,generate_random_server_name(Node,Partition)},
-			{perform_read_cast, {async,self()}, Key, Type, Transaction})
+			{perform_read_cast, {async,self()}, Key, Type, TxId})
     catch
         _:Reason ->
             lager:error("Exception caught: ~p", [Reason]),
@@ -168,52 +168,47 @@ init([Partition, Id]) ->
         specula_dep=SpeculaDep,
 		prepared_cache=PreparedCache,self=Self}}.
 
-handle_call({perform_read, Key, Type, Transaction},Coordinator,
-	    SD0=#state{snapshot_cache=SnapshotCache,prepared_cache=PreparedCache,
-                        specula_cache=SpeculaCache,self=Self}) ->
+handle_call({perform_read, Key, Type, TxId},Coordinator,
+	    SD0=#state{self=Self}) ->
     %lager:info("Got read request for ~w", Key),
-    perform_read_internal({sync,Coordinator},Key,Type,Transaction, 
-                        SnapshotCache, SpeculaCache, PreparedCache,Self),
+    perform_read_internal({sync,Coordinator},Key,Type,TxId, 
+                        Self, SD0),
     {noreply,SD0};
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
-handle_cast({perform_read_cast, Coordinator, Key, Type, Transaction},
-	    SD0=#state{snapshot_cache=SnapshotCache,prepared_cache=PreparedCache,
-                    specula_cache=SpeculaCache,self=Self}) ->
-    perform_read_internal(Coordinator,Key,Type,Transaction,SnapshotCache,SpeculaCache,PreparedCache,Self),
+handle_cast({perform_read_cast, Coordinator, Key, Type, TxId},
+	    SD0=#state{self=Self}) ->
+    perform_read_internal(Coordinator,Key,Type,TxId,Self, SD0),
     {noreply,SD0}.
 
-perform_read_internal(Coordinator,Key,Type,Transaction,SnapshotCache,SpeculaCache,PreparedCache,Self) ->
-    case check_clock(Key,Transaction,PreparedCache) of
+perform_read_internal(Coordinator,Key,Type,TxId,Self,State) ->
+    case check_clock(Key,TxId,State) of
 	not_ready ->
         %lager:info("Clock not ready"),
-	    spin_wait(Coordinator,Key,Type,Transaction,SnapshotCache,SpeculaCache,PreparedCache,Self);
+	    spin_wait(Coordinator,Key,Type,TxId,Self,State);
 	ready ->
         %lager:info("Ready to read for key ~w to ~w",[Key, Coordinator]),
-	    return(Coordinator,Key,Type,Transaction,SnapshotCache,SpeculaCache)
+	    return(Coordinator,Key,Type,TxId,State#state.snapshot_cache,State#state.specula_cache)
     end.
 
-spin_wait(Coordinator,Key,Type,Transaction,SnapshotCache,SpeculaCache,PreparedCache,Self) ->
+spin_wait(Coordinator,Key,Type,TxId,Self,State) ->
     {message_queue_len,Length} = process_info(self(), message_queue_len),
     case Length of
 	0 ->
         %lager:info("Sleeping to wati for read ~w",[Key]),
 	    timer:sleep(?SPIN_WAIT),
-	    perform_read_internal(Coordinator,Key,Type,Transaction,SnapshotCache,
-                        SpeculaCache,PreparedCache,Self);
+	    perform_read_internal(Coordinator,Key,Type,TxId,Self,State);
 	_ ->
         %lager:info("Sending myself to read ~w",[Key]),
-	    gen_server:cast({global,Self},{perform_read_cast,Coordinator,Key,Type,Transaction})
+	    gen_server:cast({global,Self},{perform_read_cast,Coordinator,Key,Type,TxId})
     end.
 
 %% @doc check_clock: Compares its local clock with the tx timestamp.
 %%      if local clock is behind, it sleeps the fms until the clock
 %%      catches up. CLOCK-SI: clock skew.
-%%
-check_clock(Key,Transaction,PreparedCache) ->
-    TxId = Transaction#transaction.txn_id,
+check_clock(Key,TxId,State) ->
     T_TS = TxId#tx_id.snapshot_time,
     Time = clocksi_vnode:now_microsec(erlang:now()),
     case T_TS > Time of
@@ -224,50 +219,48 @@ check_clock(Key,Transaction,PreparedCache) ->
 	    not_ready;
         false ->
         %lager:info("Clock ready"),
-	    check_prepared(Key,Transaction,PreparedCache)
+	    check_prepared(Key,TxId,State)
     end.
 
-
-check_prepared(Key,Transaction,PreparedCache) ->
-    TxId = Transaction#transaction.txn_id,
+check_prepared(Key,TxId,State) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     ActiveTxs = 
-	case ets:lookup(PreparedCache, Key) of
+	case ets:lookup(State#state.prepared_cache, Key) of
 	    [] ->
 		[];
 	    [{Key,AList}] ->
 		AList
 	end,
-    check_prepared_list(Key,SnapshotTime,ActiveTxs, ActiveTxs).
+    check_prepared_list(Key,SnapshotTime,ActiveTxs, ActiveTxs,State).
 
-check_prepared_list(_Key,_SnapshotTime,[], _FullList) ->
+check_prepared_list(_Key,_SnapshotTime,[], _FullList, _State) ->
     ready;
-check_prepared_list(Key,SnapshotTime,[{TxId,Time}|Rest], FullList) ->
+check_prepared_list(Key,SnapshotTime,[{TxId, Time, Type, Op}|Rest], FullList,State) ->
     case Time =< SnapshotTime of
-	true ->
-        case specula_utilities:should_specula(Time, SnapshotTime) of
-            true ->
-                specula_utilities:make_prepared_specula(Key, {TxId, Time}, SnapshotTime, PreparedCache, 
-                    SpeculaCache, SpeculaDep, FullList);
-            false ->
-                ok 
-        end,
-	    not_ready;
-	false ->
-	    check_prepared_list(Key,SnapshotTime,Rest)
+	    true ->
+            case specula_utilities:should_specula(Time, SnapshotTime) of
+                true ->
+                    specula_utilities:make_prepared_specula(Key, {TxId, Time, Type, Op}, SnapshotTime, 
+                        State#state.prepared_cache, State#state.snapshot_cache, State#state.specula_cache, 
+                        State#state.specula_dep, FullList);
+                false ->
+                    ok 
+            end,
+	        not_ready;
+	    false ->
+	        check_prepared_list(Key,SnapshotTime,Rest, FullList, State)
     end.
 
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
-return(Coordinator,Key, Type,Transaction, SnapshotCache, _SpeculaCache) ->
-    VecSnapshotTime = Transaction#transaction.vec_snapshot_time,
+return(Coordinator,Key, Type,TxId, SnapshotCache, _SpeculaCache) ->
     %lager:info("Returning for key ~w",[Key]),
     Reply = case ets:lookup(SnapshotCache, Key) of
                 [] ->
                     {ok, {Type,Type:new()}};
                 [{Key, ValueList}] ->
-    %lager:info("Key is ~w, Transaciton is ~w, Valuelist ~w", [Key, Transaction, ValueList]),
-                    MyClock = vectorclock:get_clock_of_dc(dc_utilities:get_my_dc_id(), VecSnapshotTime),
+    %lager:info("Key is ~w, Transaciton is ~w, Valuelist ~w", [Key, TxId, ValueList]),
+                    MyClock = TxId#tx_id.snapshot_time,
                     find_version(ValueList, MyClock, Type)
             end,
     case Coordinator of

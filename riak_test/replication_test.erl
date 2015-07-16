@@ -61,6 +61,7 @@ check_log_replicated(Node, Key) ->
     [{Part,_N}] = rpc:call(Node, log_utilities, get_preflist_from_key, [Key]),
     Successors = rpc:call(Node, log_utilities, get_my_next, [Part, 2]),
     MyOwnLog = rpc:call(Node, repl_fsm, retrieve_log, [Part,Part]),
+    lager:info("My log is: ~w", [MyOwnLog]),
     lists:foreach(fun({Successor, _Node}) ->
                     SuccLog = rpc:call(Node, repl_fsm,retrieve_log,[Successor, Part]),
                     ?assertEqual(SuccLog, MyOwnLog) end,
