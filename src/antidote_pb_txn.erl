@@ -26,7 +26,7 @@
 
 -behaviour(riak_api_pb_service).
 
--include_lib("antidote_pb/include/antidote_pb.hrl").
+-include_lib("riak_pb/include/antidote_pb.hrl").
 
 -export([init/0,
          decode/2,
@@ -49,7 +49,9 @@ decode(Code, Bin) ->
         #fpbatomicupdatetxnreq{} ->
             {ok, Msg, {"antidote.atomicupdate", <<>>}};
         #fpbsnapshotreadtxnreq{} ->
-            {ok, Msg, {"antidote.snapshotread",<<>>}}
+            {ok, Msg, {"antidote.snapshotread",<<>>}};
+        #fpbgeneraltxnreq{} ->
+            {ok, Msg, {"antidote.generaltxn",<<>>}}
     end.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
@@ -66,6 +68,23 @@ process(#fpbatomicupdatetxnreq{ops = Ops}, State) ->
             {reply, #fpbatomicupdatetxnresp{success = true,
                                             clock=term_to_binary(CommitTime)},
              State}
+    end;
+
+%% @doc process/2 callback. Handles an incoming request message.
+process(#fpbgeneraltxnreq{ops = Ops}, State) ->
+    Updates = decode_general_txn(Ops),
+    case antidote:clocksi_execute_g_tx(Updates) of
+        {error, _Reason} ->
+            {reply, #fpbsnapshotreadtxnresp{success = false}, State};
+        {ok, {_Txid, ReadSet, CommitTime}} ->
+            FlattenedList = lists:flatten(Updates),
+            ReadReqs = lists:filter(fun(Op) -> case Op of 
+                            {update, _, _, _} -> false; {read, _, _} -> true end end, FlattenedList),
+            Zipped = lists:zip(ReadReqs, ReadSet),
+            Reply = encode_snapshot_read_response(Zipped),
+            {reply, #fpbsnapshotreadtxnresp{success=true,
+                                            clock= term_to_binary(CommitTime),
+                                            results=Reply}, State}
     end;
 
 process(#fpbsnapshotreadtxnreq{ops = Ops}, State) ->
@@ -89,47 +108,78 @@ process(#fpbsnapshotreadtxnreq{ops = Ops}, State) ->
 process_stream(_,_,State) ->
     {ignore, State}.
 
-decode_au_txn_ops(Ops) ->
-    lists:foldl(fun(Op, Acc) ->
-                     Acc ++ decode_au_txn_op(Op)
-                end, [], Ops).
+decode_general_txn(Ops) ->
+    lists:foldl(fun(#fpbgeneraltxnlist{op=OpList}, Acc) -> 
+            [lists:map(fun(Op) -> decode_general_txn_op(Op) end, OpList)|Acc] 
+            end, [], Ops).
+    
 %% Counter
-decode_au_txn_op(#fpbatomicupdatetxnop{counterinc=#fpbincrementreq{key=Key, amount=Amount}}) ->
-    [{update, Key, riak_dt_pncounter, {{increment, Amount}, node()}}];
-decode_au_txn_op(#fpbatomicupdatetxnop{counterdec=#fpbdecrementreq{key=Key, amount=Amount}}) ->
-    [{update, Key, riak_dt_pncounter, {{decrement, Amount}, node()}}];
+decode_general_txn_op(#fpbgeneraltxnop{counterinc=#fpbincrementreq{key=Key, amount=Amount}}) ->
+    {update, Key, riak_dt_pncounter, {{increment, Amount}, node()}};
+decode_general_txn_op(#fpbgeneraltxnop{counterdec=#fpbdecrementreq{key=Key, amount=Amount}}) ->
+    {update, Key, riak_dt_pncounter, {{decrement, Amount}, node()}};
 %% Set
-decode_au_txn_op(#fpbatomicupdatetxnop{setupdate=#fpbsetupdatereq{key=Key, adds=AddElems, rems=RemElems}}) ->
-     Adds = lists:map(fun(X) ->
+decode_general_txn_op(#fpbgeneraltxnop{setupdate=#fpbsetupdatereq{key=Key, adds=AddElems, rems=RemElems}}) ->
+    Adds = lists:map(fun(X) ->
                               binary_to_term(X)
                       end, AddElems),
-     Rems = lists:map(fun(X) ->
+    _Rems = lists:map(fun(X) ->
                               binary_to_term(X)
                       end, RemElems),
     Op = case length(Adds) of
              0 -> [];
-             1 -> [{update, Key, riak_dt_orset, {{add,Adds}, node()}}];
-             _ -> [{update, Key, riak_dt_orset, {{add_all, Adds},node()}}]
-         end, 
+             1 -> {update, Key, riak_dt_orset, {{add,Adds}, node()}};
+             _ -> {update, Key, riak_dt_orset, {{add_all, Adds},node()}}
+         end,
+    Op;
+    %case length(Rems) of
+    %    0 -> Op;
+    %    1 -> [{update, Key, riak_dt_orset, {{remove,Adds}, ignore}}] ++ Op;
+    %    _ -> [{update, Key, riak_dt_orset, {{remove_all, Adds},ignore}}] ++ Op
+    %end;
+decode_general_txn_op(#fpbgeneraltxnop{counter=#fpbgetcounterreq{key=Key}}) ->
+    {read, Key, riak_dt_pncounter};
+decode_general_txn_op(#fpbgeneraltxnop{set=#fpbgetsetreq{key=Key}}) ->
+    {read, Key, riak_dt_orset}.
+
+decode_au_txn_ops(Ops) ->
+    lists:foldl(fun(Op, Acc) ->
+                     Acc ++ decode_au_txn_op(Op)
+                end, [], Ops).
+
+%% Counter
+decode_au_txn_op(#fpbatomicupdatetxnop{counterinc=#fpbincrementreq{key=Key, amount=Amount}}) ->
+    {update, Key, riak_dt_pncounter, {{increment, Amount}, node()}};
+decode_au_txn_op(#fpbatomicupdatetxnop{counterdec=#fpbdecrementreq{key=Key, amount=Amount}}) ->
+    {update, Key, riak_dt_pncounter, {{decrement, Amount}, node()}};
+%% Set
+decode_au_txn_op(#fpbatomicupdatetxnop{setupdate=#fpbsetupdatereq{key=Key, adds=AddElems, rems=RemElems}}) ->
+    Adds = lists:map(fun(X) ->
+                              binary_to_term(X)
+                      end, AddElems),
+    Rems = lists:map(fun(X) ->
+                              binary_to_term(X)
+                      end, RemElems),
+    Op = case length(Adds) of
+             0 -> [];
+             1 -> {update, Key, riak_dt_orset, {{add,Adds}, node()}};
+             _ -> {update, Key, riak_dt_orset, {{add_all, Adds},node()}}
+         end,
     case length(Rems) of
         0 -> Op;
         1 -> [{update, Key, riak_dt_orset, {{remove,Adds}, ignore}}] ++ Op;
         _ -> [{update, Key, riak_dt_orset, {{remove_all, Adds},ignore}}] ++ Op
     end.
-        
 
 decode_snapshot_read_ops(Ops) ->
     lists:map(fun(Op) ->
-                      decode_snapshot_read_op(Op)
+                      decode_snapshot_txn_op(Op)
               end, Ops).
 
-decode_snapshot_read_op(#fpbsnapshotreadtxnop{counter=#fpbgetcounterreq{key=Key}}) ->
+decode_snapshot_txn_op(#fpbsnapshotreadtxnop{counter=#fpbgetcounterreq{key=Key}}) ->
     {read, Key, riak_dt_pncounter};
-decode_snapshot_read_op(#fpbsnapshotreadtxnop{set=#fpbgetsetreq{key=Key}}) ->
+decode_snapshot_txn_op(#fpbsnapshotreadtxnop{set=#fpbgetsetreq{key=Key}}) ->
     {read, Key, riak_dt_orset}.
-
-
-
 
 encode_snapshot_read_response(Zipped) ->
     lists:map(fun(Resp) ->

@@ -25,6 +25,7 @@
          read/2,
          clocksi_execute_tx/2,
          clocksi_execute_tx/1,
+         clocksi_execute_g_tx/1,
          clocksi_read/3,
          clocksi_read/2,
          clocksi_bulk_update/2,
@@ -80,6 +81,14 @@ clocksi_execute_tx(Clock, Operations) ->
 -spec clocksi_execute_tx(Operations::[any()]) -> term().
 clocksi_execute_tx(Operations) ->
     {ok, _} = clocksi_static_tx_coord_sup:start_fsm([self(), Operations]),
+    receive
+        EndOfTx ->
+            EndOfTx
+    end.
+
+-spec clocksi_execute_g_tx(Operations::[any()]) -> term().
+clocksi_execute_g_tx(Operations) ->
+    {ok, _} = clocksi_general_tx_coord_sup:start_fsm([self(), Operations]),
     receive
         EndOfTx ->
             EndOfTx
