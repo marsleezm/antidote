@@ -242,9 +242,12 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                     {noreply, State};
                 false ->
-                    riak_core_vnode:reply(OriginalSender, {prepared, NewPrepare}),
+                    riak_core_vnode:reply(OriginalSender, {prepared, TxId, NewPrepare}),
                     {noreply, State}
             end;
+        {specula_prepared, NewPrepare} ->
+            riak_core_vnode:reply(OriginalSender, {specula_prepared, TxId, NewPrepare}),
+            {noreply, State};
         {error, wait_more} ->
             spawn(clocksi_vnode, async_send_msg, [{prepare, TxId, 
                         WriteSet, OriginalSender}, {Partition, node()}]),
@@ -577,10 +580,9 @@ check_prepared(TxId, Key, Tables) ->
                     %% Can I prepare if some updates on this key is specula_committed, or I should always wait?
                     case specula_utilities:should_specula(PrepareTime, SnapshotTime) of
                         true ->
-                            specula_utilities:make_prepared_specula(Key, {TxId, PrepareTime, Type, Op}, 
-                            SnapshotTime, TxMetadata, InMemoryStore, 
-                            SpeculaStore, SpeculaDep, List),
-                            specula_prepare;
+                            _ = specula_utilities:make_prepared_specula(Key, {TxId, PrepareTime, Type, Op}, 
+                                    SnapshotTime, TxMetadata, InMemoryStore, SpeculaStore, SpeculaDep, List),
+                            specula_prepared;
                         false ->
                             case random:uniform(2) of
                                 1 ->

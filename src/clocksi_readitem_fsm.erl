@@ -185,12 +185,17 @@ handle_cast({perform_read_cast, Coordinator, Key, Type, TxId},
 
 perform_read_internal(Coordinator,Key,Type,TxId,Self,State) ->
     case check_clock(Key,TxId,State) of
-	not_ready ->
-        %lager:info("Clock not ready"),
-	    spin_wait(Coordinator,Key,Type,TxId,Self,State);
-	ready ->
-        %lager:info("Ready to read for key ~w to ~w",[Key, Coordinator]),
-	    return(Coordinator,Key,Type,TxId,State#state.snapshot_cache,State#state.specula_cache)
+        {specula, Reply} ->
+            case Coordinator of
+                {sync, Sender} ->
+                    gen_server:reply(Sender, {specula, Reply});
+                {async, Sender} ->
+                    gen_fsm:send_event(Sender, {specula, Reply})
+            end;
+	    not_ready ->
+	        spin_wait(Coordinator,Key,Type,TxId,Self,State);
+	    ready ->
+	        return(Coordinator,Key,Type,TxId,State#state.snapshot_cache,State#state.specula_cache)
     end.
 
 spin_wait(Coordinator,Key,Type,TxId,Self,State) ->
@@ -216,10 +221,9 @@ check_clock(Key,TxId,State) ->
 	    %% dont sleep in case there is another read waiting
             %% timer:sleep((T_TS - Time) div 1000 +1 );
         %lager:info("Clock not ready"),
-	    not_ready;
+	        not_ready;
         false ->
-        %lager:info("Clock ready"),
-	    check_prepared(Key,TxId,State)
+	        check_prepared(Key,TxId,State)
     end.
 
 check_prepared(Key,TxId,State) ->
@@ -253,15 +257,20 @@ check_prepared_list(Key,SnapshotTime,[{TxId, Time, Type, Op}|Rest], FullList,Sta
 
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
-return(Coordinator,Key, Type,TxId, SnapshotCache, _SpeculaCache) ->
+return(Coordinator,Key, Type,TxId, SnapshotCache, SpeculaCache) ->
     %lager:info("Returning for key ~w",[Key]),
-    Reply = case ets:lookup(SnapshotCache, Key) of
+    Reply = case ets:lookup(SpeculaCache, Key) of
                 [] ->
-                    {ok, {Type,Type:new()}};
+                    case ets:lookup(SnapshotCache, Key) of
+                        [] ->
+                            {ok, {Type,Type:new()}};
+                        [{Key, ValueList}] ->
+                            MyClock = TxId#tx_id.snapshot_time,
+                            {ok, find_version(ValueList, MyClock, Type)}
+                    end;
                 [{Key, ValueList}] ->
-    %lager:info("Key is ~w, Transaciton is ~w, Valuelist ~w", [Key, TxId, ValueList]),
                     MyClock = TxId#tx_id.snapshot_time,
-                    find_version(ValueList, MyClock, Type)
+                    {specula, find_version(ValueList, MyClock, Type)}
             end,
     case Coordinator of
         {sync, Sender} ->
@@ -287,12 +296,11 @@ terminate(_Reason, _SD) ->
 
 %%%%%%%%%Intenal%%%%%%%%%%%%%%%%%%
 find_version([], _SnapshotTime, Type) ->
-    %{error, not_found};
-    {ok, {Type,Type:new()}};
+    {Type,Type:new()};
 find_version([{TS, Value}|Rest], SnapshotTime, Type) ->
     case SnapshotTime >= TS of
         true ->
-            {ok, {Type,Value}};
+            {Type,Value};
         false ->
             find_version(Rest, SnapshotTime, Type)
     end.
