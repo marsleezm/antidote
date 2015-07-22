@@ -56,6 +56,7 @@
         specula_cache :: cache_id(),
         specula_dep :: cache_id(),
 		prepared_cache :: cache_id(),
+        from :: pid(),
 		self :: atom()}).
 
 %%%===================================================================
@@ -171,9 +172,10 @@ init([Partition, Id]) ->
 handle_call({perform_read, Key, Type, TxId},Coordinator,
 	    SD0=#state{self=Self}) ->
     %lager:info("Got read request for ~w", Key),
+    SD1=SD0#state{from=Coordinator},
     perform_read_internal({sync,Coordinator},Key,Type,TxId, 
-                        Self, SD0),
-    {noreply,SD0};
+                        Self, SD1),
+    {noreply,SD1};
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
@@ -195,7 +197,8 @@ perform_read_internal(Coordinator,Key,Type,TxId,Self,State) ->
 	    not_ready ->
 	        spin_wait(Coordinator,Key,Type,TxId,Self,State);
 	    ready ->
-	        return(Coordinator,Key,Type,TxId,State#state.snapshot_cache,State#state.specula_cache)
+	        return(Coordinator,Key,Type,TxId,State#state.snapshot_cache,
+                    State#state.specula_cache, State#state.specula_dep)
     end.
 
 spin_wait(Coordinator,Key,Type,TxId,Self,State) ->
@@ -228,49 +231,42 @@ check_clock(Key,TxId,State) ->
 
 check_prepared(Key,TxId,State) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
-    ActiveTxs = 
-	case ets:lookup(State#state.prepared_cache, Key) of
-	    [] ->
-		[];
-	    [{Key,AList}] ->
-		AList
-	end,
-    check_prepared_list(Key,SnapshotTime,ActiveTxs, ActiveTxs,State).
-
-check_prepared_list(_Key,_SnapshotTime,[], _FullList, _State) ->
-    ready;
-check_prepared_list(Key,SnapshotTime,[{TxId, Time, Type, Op}|Rest], FullList,State) ->
-    case Time =< SnapshotTime of
-	    true ->
-            case specula_utilities:should_specula(Time, SnapshotTime) of
+    case ets:lookup(State#state.prepared_cache, Key) of
+        [] ->
+            ready;
+        [{Key, {TxId, Time, Type, Op}}] ->
+            case Time =< SnapshotTime of
                 true ->
-                    specula_utilities:make_prepared_specula(Key, {TxId, Time, Type, Op}, SnapshotTime, 
-                        State#state.prepared_cache, State#state.snapshot_cache, State#state.specula_cache, 
-                        State#state.specula_dep, FullList);
+                    case specula_utilities:should_specula(Time, SnapshotTime) of
+                        true ->
+                            specula_utilities:make_prepared_specula(Key, {TxId, Time, Type, Op}, SnapshotTime, 
+                                State#state.prepared_cache, State#state.snapshot_cache, State#state.specula_cache, 
+                                State#state.specula_dep, read, State#state.from);
+                        false ->
+                            ok 
+                    end,
+                    not_ready;
                 false ->
-                    ok 
-            end,
-	        not_ready;
-	    false ->
-	        check_prepared_list(Key,SnapshotTime,Rest, FullList, State)
+                    ready
+            end
     end.
 
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
-return(Coordinator,Key, Type,TxId, SnapshotCache, SpeculaCache) ->
+return(Coordinator,Key, Type,TxId, SnapshotCache, SpeculaCache, SpeculaDep) ->
     %lager:info("Returning for key ~w",[Key]),
-    Reply = case ets:lookup(SpeculaCache, Key) of
-                [] ->
+    SnapshotTime = TxId#tx_id.snapshot_time,
+    Reply = case specula_utilities:find_specula_version(
+                    TxId, Key, SnapshotTime, SpeculaCache, SpeculaDep) of
+                false ->
                     case ets:lookup(SnapshotCache, Key) of
                         [] ->
                             {ok, {Type,Type:new()}};
                         [{Key, ValueList}] ->
-                            MyClock = TxId#tx_id.snapshot_time,
-                            {ok, find_version(ValueList, MyClock, Type)}
+                            {ok, find_version(ValueList, SnapshotTime, Type)}
                     end;
-                [{Key, ValueList}] ->
-                    MyClock = TxId#tx_id.snapshot_time,
-                    {specula, find_version(ValueList, MyClock, Type)}
+                Value ->
+                    {specula, {Type, Value}}
             end,
     case Coordinator of
         {sync, Sender} ->
