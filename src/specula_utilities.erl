@@ -18,7 +18,7 @@
 %%
 %% -------------------------------------------------------------------
 -module(specula_utilities).
--define(SPECULA_TIMEOUT, 10000).
+-define(SPECULA_TIMEOUT, 2000).
 
 
 -ifdef(TEST).
@@ -43,7 +43,7 @@ coord_should_specula(_) ->
 make_specula_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore, PreparedStore, SpeculaDep) ->
     %% Firstly, make this specula version finally committed.
     case ets:lookup(SpeculaStore, Key) of
-        [{Key, [{TxId, SpeculaValue}|T]}] ->    
+        [{Key, [{TxId, _, SpeculaValue}|T]}] ->    
             case ets:lookup(InMemoryStore, Key) of
                   [] ->
                       true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, SpeculaValue}]});
@@ -73,7 +73,7 @@ make_specula_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore, Prepare
 
 clean_specula_committed(TxId, Key, SpeculaStore, SpeculaDep) ->
     case ets:lookup(SpeculaStore, Key) of
-        [{Key, [{TxId, _SpeculaValue}|T]}] ->
+        [{Key, [{TxId, _, _SpeculaValue}|T]}] ->
             ets:insert(SpeculaStore, {Key, T}),
             case ets:lookup(SpeculaDep, Key) of
                 [] ->
@@ -102,35 +102,39 @@ should_specula(PreparedTime, SnapshotTime) ->
             true
     end.
 
-make_prepared_specula(Key, Record, SnapshotTime, PreparedCache, SnapshotCache,
-                             SpeculaCache, SpeculaDep, OpType, CoordPId) ->
+make_prepared_specula(Key, Record, SnapshotTime, PreparedStore, InMemoryStore,
+                             SpeculaStore, SpeculaDep, OpType, CoordPId) ->
     {TxId, PrepareTime, Type, {Param, Actor}} = Record,
-    SpeculaValue =  case ets:lookup(SpeculaCache, Key) of 
+    SpeculaValue =  case ets:lookup(SpeculaStore, Key) of 
                         [] ->
+                            io:format(user, "no SpeculaVersion ~w ", [TxId]),
                             %% Fetch from committed store
-                            case ets:lookup(SnapshotCache, Key) of
+                            case ets:lookup(InMemoryStore, Key) of
                                 [] ->
                                     NewSpeculaValue = generate_snapshot([], Type, Param, Actor),
-                                    true = ets:insert(SpeculaCache, [{PrepareTime, TxId, NewSpeculaValue}]),
+                                    true = ets:insert(SpeculaStore, {Key, [{TxId, PrepareTime, NewSpeculaValue}]}),
                                     NewSpeculaValue;
                                 [{Key, CommittedVersions}] ->
                                     [{_CommitTime, Snapshot}|_] = CommittedVersions,
                                     NewSpeculaValue = generate_snapshot(Snapshot, Type, Param, Actor),
-                                    true = ets:insert(SpeculaCache, [{TxId, PrepareTime, NewSpeculaValue}]),
+                                    true = ets:insert(SpeculaStore, {Key, [{TxId, PrepareTime, NewSpeculaValue}]}),
                                     NewSpeculaValue
                             end;
                         [{Key, SpeculaVersions}] ->
-                            [{_CommitTime, SpeculaTxId, Snapshot}|_] = SpeculaVersions,
+                            io:format(user, "There is SpeculaVersion ~w ", [TxId]),
+                            [{SpeculaTxId, _PrepareTime, Snapshot}|_] = SpeculaVersions,
                             NewSpeculaValue = generate_snapshot(Snapshot, Type, Param, Actor),
-                            true = ets:insert(SpeculaCache, [{TxId, PrepareTime, NewSpeculaValue}|SpeculaVersions]),
+                            true = ets:insert(SpeculaStore, {Key, 
+                                    [{TxId, PrepareTime, NewSpeculaValue}|SpeculaVersions]}),
+                            io:format(user, "Add to specula dep ~w deping ~w", [SpeculaTxId, TxId]),
                             add_specula_meta(SpeculaDep, SpeculaTxId, TxId, SnapshotTime, OpType, CoordPId),
                             NewSpeculaValue
                     end,
-    true = ets:delete(PreparedCache, Key),
+    true = ets:delete(PreparedStore, Key),
     {specula, {Type, SpeculaValue}}.
 
-find_specula_version(TxId, Key, SnapshotTime, SpeculaCache, SpeculaDep, SenderPId) ->
-    case ets:find(SpeculaCache, Key) of
+find_specula_version(TxId, Key, SnapshotTime, SpeculaStore, SpeculaDep, SenderPId) ->
+    case ets:lookup(SpeculaStore, Key) of
         [] -> %% No specula version
             false;
         [{Key, ValueList}] ->
@@ -176,10 +180,10 @@ add_specula_meta(SpeculaDep, DependingTxId, TxId, SnapshotTime, OpType, CoordPId
     end.
 
     
-handle_dependency([], _TxCommitTime, _PreparedCache, _SpeculaCache, _Key) ->
+handle_dependency([], _TxCommitTime, _PreparedStore, _SpeculaStore, _Key) ->
     ok;
 handle_dependency([{DepTxId, OpType, CoordPId, DepSnapshotTime}|T], TxCommitTime, 
-                PreparedCache, SpeculaCache, Key) ->
+                PreparedStore, SpeculaStore, Key) ->
     case DepSnapshotTime < TxCommitTime of
         true -> %% The transaction committed with larger timestamp which will invalide depending txns..
                 %% Has to abort...
@@ -187,20 +191,20 @@ handle_dependency([{DepTxId, OpType, CoordPId, DepSnapshotTime}|T], TxCommitTime
             ?SEND_MSG(CoordPId, {abort, DepTxId}),
             case OpType of
                 update ->
-                    case ets:lookup(PreparedCache, Key) of                
+                    case ets:lookup(PreparedStore, Key) of                
                         [] ->
-                            case ets:lookup(SpeculaCache, Key) of
+                            case ets:lookup(SpeculaStore, Key) of
                                 [] ->
                                     lager:warning("It's impossible!!");
                                 [{Key, [{DepTxId, _DepPrepareTime, _Value}|T]}] ->
                                     %% TODO: should I do cascading abort in this scenario?
                                     %% Seems not, because aborting txns are announced by coordinators..
-                                    ets:insert(SpeculaCache, {Key, T});
+                                    ets:insert(SpeculaStore, {Key, T});
                                 _ ->
                                     lager:warning("It's impossible!!")
                             end;
                         _ ->
-                            ets:delete(PreparedCache, Key)
+                            ets:delete(PreparedStore, Key)
                     end;
                 read ->
                     ok
@@ -213,7 +217,7 @@ handle_dependency([{DepTxId, OpType, CoordPId, DepSnapshotTime}|T], TxCommitTime
                     ?SEND_MSG(CoordPId, {read_valid, DepTxId, Key})
             end
     end,
-    handle_dependency(T, TxCommitTime, PreparedCache, SpeculaCache, Key).
+    handle_dependency(T, TxCommitTime, PreparedStore, SpeculaStore, Key).
 
 
 handle_abort_dependency([]) ->
@@ -235,7 +239,7 @@ generate_snapshot_test() ->
     Snapshot2 = generate_snapshot(Snapshot1, Type, increment, haha),
     ?assertEqual(2, Type:value(Snapshot2)).
 
-make_specual_find_test() ->
+make_specula_final_test() ->
     TxId1 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
     TxId2 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
     TxId3 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
@@ -245,7 +249,7 @@ make_specual_find_test() ->
     InMemoryStore = ets:new(inmemory_store, [set,named_table,protected]),
     PreparedStore = ets:new(prepared_store, [set,named_table,protected]),
     SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
-    ets:insert(SpeculaStore, {Key, [{TxId1, whatever}]}),
+    ets:insert(SpeculaStore, {Key, [{TxId1, 900, whatever}]}),
 
     %% Will succeed
     Result1 = make_specula_final(TxId1, Key, TxCommitTime, SpeculaStore, InMemoryStore, 
@@ -260,7 +264,7 @@ make_specual_find_test() ->
     
     %% Wrong key
     TxCommitTime2 = 2000,
-    ets:insert(SpeculaStore, {Key, [{TxId2, whereever}]}),
+    ets:insert(SpeculaStore, {Key, [{TxId2, 990, whereever}]}),
     Result3 = make_specula_final(TxId1, Key, TxCommitTime2, SpeculaStore, InMemoryStore, 
                 PreparedStore, SpeculaDep),
     ?assertEqual(Result3, error),
@@ -277,7 +281,7 @@ make_specual_find_test() ->
     CoordPId = self(),
     Dependency = [{TxId3, update, CoordPId, 1500}, {TxId3, update, CoordPId, 2500}, 
             {TxId3, read, CoordPId, 1500}, {TxId3, read, CoordPId, 2500}],
-    ets:insert(SpeculaStore, {Key, [{TxId2, lotsofdep}]}),
+    ets:insert(SpeculaStore, {Key, [{TxId2, 999, lotsofdep}]}),
     ets:insert(SpeculaDep, {Key, Dependency}),
     Result5 = make_specula_final(TxId2, Key, TxCommitTime2, 
                 SpeculaStore, InMemoryStore, PreparedStore, SpeculaDep),
@@ -313,7 +317,7 @@ clean_specula_committed_test() ->
     Result1 = clean_specula_committed(TxId1, Key, SpeculaStore, SpeculaDep),
     ?assertEqual(Result1, false),
 
-    ets:insert(SpeculaStore, {Key, [{TxId1, value1}]}), 
+    ets:insert(SpeculaStore, {Key, [{TxId1, 900, value1}]}), 
     Result2 = clean_specula_committed(TxId2, Key, SpeculaStore, SpeculaDep),
     ?assertEqual(Result2, error),
 
@@ -323,7 +327,7 @@ clean_specula_committed_test() ->
     Result4 = clean_specula_committed(TxId1, Key, SpeculaStore, SpeculaDep),
     ?assertEqual(Result4, false),
 
-    ets:insert(SpeculaStore, {Key, [{TxId1, value1}]}), 
+    ets:insert(SpeculaStore, {Key, [{TxId1, 950, value1}]}), 
     ets:insert(SpeculaDep, {Key, [{TxId2, update, CoordPId, 100}, {TxId2, read, CoordPId, 200}]}), 
     Result5 = clean_specula_committed(TxId1, Key, SpeculaStore, SpeculaDep),
     receive Msg1 ->
@@ -336,6 +340,93 @@ clean_specula_committed_test() ->
     ?assertEqual(ets:lookup(SpeculaDep, Key), []),
 
     ets:delete(SpeculaStore),
-    ets:delete(SpeculaDep).
+    ets:delete(SpeculaDep),
+    pass.
+
+make_prepared_specula_test() ->
+    TxId1 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
+    TxId2 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
+    CoordPId = self(),
+    Type = riak_dt_pncounter,
+    Key = 1,
+    Record1 = {TxId1, 500, Type, {increment, haha}},
+    Record2 = {TxId2, 500, Type, {increment, haha}},
+    SnapshotTime = 300,
+    {ok, Counter1} = Type:update(increment, haha, Type:new()),
+    {ok, Counter2} = Type:update(increment, haha, Counter1),
+    {ok, Counter3} = Type:update(increment, haha, Counter2),
+    SpeculaStore = ets:new(specula_store, [set,named_table,protected]),
+    SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
+    InMemoryStore = ets:new(inmemory_store, [set,named_table,protected]),
+    PreparedStore = ets:new(prepared_cache, [set,named_table,protected]),
+
+    ets:insert(PreparedStore, {Key, whatever}),   
+    Result1 = make_prepared_specula(Key, Record1, SnapshotTime, PreparedStore, InMemoryStore, 
+                SpeculaStore, SpeculaDep, update, CoordPId),
+    ?assertEqual(Result1, {specula, {Type, Counter1}}),
+    ?assertEqual([], ets:lookup(PreparedStore, Key)),
+
+    ets:insert(InMemoryStore, {Key, [{200, Counter1}]}),   
+    ets:delete(SpeculaStore, Key),   
+    Result2 = make_prepared_specula(Key, Record1, SnapshotTime, PreparedStore, InMemoryStore, 
+                SpeculaStore, SpeculaDep, update, CoordPId),
+    ?assertEqual(Result2, {specula, {Type, Counter2}}),
+
+    Result3 = make_prepared_specula(Key, Record2, SnapshotTime, PreparedStore, InMemoryStore, 
+                SpeculaStore, SpeculaDep, update, CoordPId),
+    ?assertEqual(Result3, {specula, {Type, Counter3}}),
+    ?assertEqual(ets:lookup(SpeculaDep, TxId1), [{TxId1, [{TxId2, update, CoordPId, SnapshotTime}]}]),
+    ets:delete(SpeculaStore),
+    ets:delete(InMemoryStore),
+    ets:delete(PreparedStore),
+    ets:delete(SpeculaDep),
+    pass.
+
+find_specula_version_test() ->
+    TxId1 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
+    TxId2 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
+    TxId3 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
+    TxId4 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
+    CoordPId = self(),
+    Type = riak_dt_pncounter,
+    Key = 1,
+    {ok, Counter1} = Type:update(increment, haha, Type:new()),
+    {ok, Counter2} = Type:update(increment, haha, Counter1),
+    Record1 = {TxId1, 400, Type, {increment, haha}},
+    Record2 = {TxId2, 600, Type, {increment, haha}},
+    InMemoryStore = ets:new(inmemory_store, [set,named_table,protected]),
+    PreparedStore = ets:new(prepared_cache, [set,named_table,protected]),
+    SpeculaStore = ets:new(specula_store, [set,named_table,protected]),
+    SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
+
+    SnapshotTime1 = 100,
+    SnapshotTime2 = 500,
+    SnapshotTime3 = 700,
+    _ = make_prepared_specula(Key, Record1, SnapshotTime1, PreparedStore, InMemoryStore, 
+                SpeculaStore, SpeculaDep, update, CoordPId),
+    ?assertEqual(ets:lookup(SpeculaDep, TxId1), []),
+    _ = make_prepared_specula(Key, Record2, SnapshotTime2, PreparedStore, InMemoryStore, 
+                SpeculaStore, SpeculaDep, update, CoordPId),
+    ?assertEqual(ets:lookup(SpeculaDep, TxId1), [{TxId1, [{TxId2, update, CoordPId, SnapshotTime2}]}]),
+
+    Result1 = find_specula_version(TxId2, Key, SnapshotTime1, SpeculaStore, SpeculaDep, CoordPId),
+    ?assertEqual(Result1, false),
+
+    Result2 = find_specula_version(TxId3, Key, SnapshotTime2, SpeculaStore, SpeculaDep, CoordPId),
+    ?assertEqual(Result2, Counter1),
+    ?assertEqual(ets:lookup(SpeculaDep, TxId1), [{TxId1, [{TxId3, read,  CoordPId, SnapshotTime2},
+                    {TxId2, update, CoordPId, SnapshotTime2}]}]),
+
+    Result3 = find_specula_version(TxId4, Key, SnapshotTime3, SpeculaStore, SpeculaDep, CoordPId),
+    ?assertEqual(Result3, Counter2),
+    ?assertEqual(ets:lookup(SpeculaDep, TxId2), [{TxId2, [{TxId4, read,  CoordPId, SnapshotTime3}]}]),
+
+    ets:delete(SpeculaStore),
+    ets:delete(SpeculaDep),
+    ets:delete(InMemoryStore),
+    ets:delete(PreparedStore),
+    pass.
+
+    
 
 -endif.

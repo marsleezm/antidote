@@ -228,8 +228,8 @@ check_clock(Key,TxId,State) ->
 	        check_prepared(Key,TxId,State)
     end.
 
-check_prepared(Key,TxId,State) ->
-    SnapshotTime = TxId#tx_id.snapshot_time,
+check_prepared(Key,MyTxId,State) ->
+    SnapshotTime = MyTxId#tx_id.snapshot_time,
     case ets:lookup(State#state.prepared_cache, Key) of
         [] ->
             ready;
@@ -254,8 +254,9 @@ check_prepared(Key,TxId,State) ->
 return(Coordinator,Key, Type,TxId, SnapshotCache, SpeculaCache, SpeculaDep) ->
     %lager:info("Returning for key ~w",[Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
+    {_, Sender} = Coordinator,
     Reply = case specula_utilities:find_specula_version(
-                    TxId, Key, SnapshotTime, SpeculaCache, SpeculaDep) of
+                    TxId, Key, SnapshotTime, SpeculaCache, SpeculaDep, Sender) of
                 false ->
                     case ets:lookup(SnapshotCache, Key) of
                         [] ->

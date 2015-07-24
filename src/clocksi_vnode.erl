@@ -304,7 +304,7 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                               tx_metadata=TxMetadata
                               }) ->
     PrepareTime = now_microsec(erlang:now()),
-    Tables = {TxMetadata, InMemoryStore, SpeculaStore, SpeculaDep},
+    Tables = {TxMetadata, InMemoryStore, SpeculaStore, SpeculaDep, OriginalSender},
     %[{committed_tx, CommittedTx}] = ets:lookup(TxMetadata, committed_tx),
     Result = prepare(TxId, WriteSet, CommittedTx, PrepareTime, Tables, IfCertify), 
     case Result of
@@ -448,13 +448,13 @@ async_send_msg(Msg, To) ->
 prepare(TxId, TxWriteSet, CommittedTx, PrepareTime, Tables, IfCertify)->
     case certification_check(TxId, TxWriteSet, CommittedTx, Tables, IfCertify) of
         true ->
-            {TxMetadata, _, _, _} = Tables,
+            {TxMetadata, _, _, _, _} = Tables,
 		    set_prepared(TxMetadata, TxWriteSet, TxId,PrepareTime),
 		    NewPrepare = now_microsec(erlang:now()),
 		    set_prepared(TxMetadata, TxWriteSet, TxId,NewPrepare),
 		    {ok, NewPrepare};
         specula_prepared ->
-            {TxMetadata, _, _, _} = Tables,
+            {TxMetadata, _, _, _, _} = Tables,
 		    set_prepared(TxMetadata, TxWriteSet, TxId,PrepareTime),
 		    NewPrepare = now_microsec(erlang:now()),
 		    set_prepared(TxMetadata, TxWriteSet, TxId,NewPrepare),

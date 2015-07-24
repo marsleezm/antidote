@@ -30,7 +30,7 @@
 -include("antidote.hrl").
 -include("speculation.hrl").
 
--define(SPECULA_TIMEOUT, 1).
+-define(SPECULA_TIMEOUT, 10).
 -define(DUMB_TIMEOUT, 5).
 
 -ifdef(TEST).
@@ -89,7 +89,7 @@
 	  tx_id :: txid(),
       current_txn_meta :: txn_metadata(),
       causal_clock :: non_neg_integer(),
-	  state :: active | prepared | committing | committed | undefined | aborted}).
+	  state :: normal | aborted}).
 
 %%%===================================================================
 %%% API
@@ -142,17 +142,17 @@ receive_reply(process_tx,
         0-> %%TODO: has to find some way to deal with read-only transaction
             CommitTime = clocksi_vnode:now_microsec(now()),
             TxnMetadata1 = TxnMetadata#txn_metadata{prepare_time=CommitTime},
-            proceed_txn(SD#state{state=committed, current_txn_meta=TxnMetadata1, 
+            proceed_txn(SD#state{state=normal, current_txn_meta=TxnMetadata1, 
                     tx_id=TxId, causal_clock=CommitTime});
         1->
             UpdatedPart = dict:to_list(WriteSet),
             ?CLOCKSI_VNODE:single_commit(UpdatedPart, TxId),
             TxnMetadata1 = TxnMetadata#txn_metadata{num_updated=1},
-            {next_state, single_committing, SD#state{state=committing, current_txn_meta=TxnMetadata1, tx_id=TxId}};
+            {next_state, single_committing, SD#state{state=normal, current_txn_meta=TxnMetadata1, tx_id=TxId}};
         N->
             ?CLOCKSI_VNODE:prepare(WriteSet, TxId),
             TxnMetadata1 = TxnMetadata#txn_metadata{num_updated=N},
-            {next_state, receive_reply, SD#state{state=prepared, tx_id=TxId,
+            {next_state, receive_reply, SD#state{state=normal, tx_id=TxId,
                      current_txn_meta=TxnMetadata1}, ?SPECULA_TIMEOUT}
     end;
 
@@ -270,8 +270,7 @@ receive_reply(abort, S0) ->
 %% TODO: need to define better this case: is specula_committed allowed, or not?
 %% Why this case brings doubt???
 single_committing({committed, CommitTime}, S0=#state{from=_From, current_txn_meta=CurrentTxnMeta}) ->
-    proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta#txn_metadata{prepare_time=CommitTime},
-             state=committed});
+    proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta#txn_metadata{prepare_time=CommitTime}});
     
 single_committing(abort, S0=#state{from=_From}) ->
     proceed_txn(S0#state{state=aborted}).
@@ -300,7 +299,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, state=TxState, txn_id_list=TxIdList
             current_txn_meta=CurrentTxnMeta, specula_meta=SpeculaMeta, pending_txn_ops=PendingTxnOps}) ->
     CommitTime = CurrentTxnMeta#txn_metadata.prepare_time,
     case TxState of
-        committed ->
+        normal ->
             case length(PendingTxnOps) of
                 1 ->
                     case CurrentTxnMeta#txn_metadata.final_committed of 

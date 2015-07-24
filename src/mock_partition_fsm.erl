@@ -58,31 +58,31 @@
         ]).
 
 -record(state, {
-        key :: atom()}).
+                key :: atom()}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 start_link() ->
-    gen_fsm:start_link(?MODULE, [], []).
+gen_fsm:start_link(?MODULE, [], []).
 
 %% @doc Initialize the state.
 init([]) ->
-    {ok, execute_op, #state{}}.
+{ok, execute_op, #state{}}.
 
 %% Functions that always return the same value no matter the input.
 get_my_dc_id() ->
-    mock_dc.
+mock_dc.
 
 value(_) ->
-    mock_value.
+mock_value.
 
 get_clock_of_dc(_DcId, _SnapshotTime) ->
-    {ok, 0}.
+{ok, 0}.
 
 set_clock_of_dc(_DcId, _CommitTime, _VecSnapshotTime) ->
-    dict:new().
+dict:new().
 
 get_preflist_from_key(_Key) ->
     {ok, Pid} = mock_partition_fsm:start_link(),
@@ -105,7 +105,21 @@ read_data_item(_IndexNode, Key, _Type, _Transaction) ->
             {ok, Counter1} = riak_dt_gcounter:update(increment, haha, Counter),
             {ok, Counter2} = riak_dt_gcounter:update(increment, nono, Counter1),
             {ok, {riak_dt_gcounter,Counter2}};
+        {counter, _} ->
+            Counter = riak_dt_gcounter:new(),
+            {ok, Counter1} = riak_dt_gcounter:update(increment, haha, Counter),
+            {ok, Counter2} = riak_dt_gcounter:update(increment, nono, Counter1),
+            {ok, {riak_dt_gcounter,Counter2}};
+        {specula, _} -> %% Assume this txn depends on some other transaction
+            Counter = riak_dt_gcounter:new(),
+            {ok, Counter1} = riak_dt_gcounter:update(increment, haha, Counter),
+            {ok, Counter2} = riak_dt_gcounter:update(increment, nono, Counter1),
+            {specula, {riak_dt_gcounter,Counter2}};
         set ->
+            Set = riak_dt_gset:new(),
+            {ok, Set1} = riak_dt_gset:update({add, a}, haha, Set),
+            {ok, {riak_dt_gset,Set1}}; 
+        {set, _} ->
             Set = riak_dt_gset:new(),
             {ok, Set1} = riak_dt_gset:update({add, a}, haha, Set),
             {ok, {riak_dt_gset,Set1}}; 
