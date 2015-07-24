@@ -171,7 +171,6 @@ init([Partition, Id]) ->
 
 handle_call({perform_read, Key, Type, TxId},Coordinator,
 	    SD0=#state{self=Self}) ->
-    %lager:info("Got read request for ~w", Key),
     SD1=SD0#state{from=Coordinator},
     perform_read_internal({sync,Coordinator},Key,Type,TxId, 
                         Self, SD1),
@@ -243,9 +242,8 @@ check_prepared(Key,TxId,State) ->
                                 State#state.prepared_cache, State#state.snapshot_cache, State#state.specula_cache, 
                                 State#state.specula_dep, read, State#state.from);
                         false ->
-                            ok 
-                    end,
-                    not_ready;
+                            not_ready 
+                    end;
                 false ->
                     ready
             end

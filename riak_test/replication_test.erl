@@ -44,18 +44,22 @@ confirm() ->
     rt:log_to_nodes(Nodes, "Starting write operation 1"),
 
 
-    random:seed({1,2,3}),
-
-    Keys = [ random:uniform(1000)  ||  _X <- lists:seq(1,20)],
-    lists:foreach(fun(Key) -> 
-            {ok, _} = rpc:call(Node, antidote, append, [Key, riak_dt_pncounter, {increment, haha}])
-                end, Keys),
-    
-    lists:foreach(fun(Key) -> 
-                check_log_replicated(Node, Key)
-                end, Keys),
-
-    pass.
+    IfRepl = rpc:call(Node, antidote_config, get, [do_repl]),
+    case IfRepl of 
+        true ->
+            random:seed({1,2,3}),
+            Keys = [ random:uniform(1000)  ||  _X <- lists:seq(1,20)],
+            lists:foreach(fun(Key) -> 
+                    {ok, _} = rpc:call(Node, antidote, append, [Key, riak_dt_pncounter, {increment, haha}])
+                        end, Keys),
+            
+            lists:foreach(fun(Key) -> 
+                        check_log_replicated(Node, Key)
+                        end, Keys),
+            pass;
+        false ->
+            pass
+    end.
 
 check_log_replicated(Node, Key) ->
     [{Part,_N}] = rpc:call(Node, log_utilities, get_preflist_from_key, [Key]),

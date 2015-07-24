@@ -26,22 +26,26 @@
 	    read_data_item/4,
 	    async_read_data_item/4,
 	    get_cache_name/2,
-         update_store/5,
-         check_prepared/3,
-         prepare/2,
-         commit/3,
-         set_prepared/4,
-         async_send_msg/2,
-         single_commit/2,
-         abort/2,
-         now_microsec/1,
-         init/1,
-         terminate/2,
-         handle_command/3,
-         is_empty/1,
-         delete/1,
-         open_table/2,
-	 check_tables_ready/0,
+        check_prepared_empty/0,
+        update_store/5,
+        prepare/2,
+        commit/3,
+        async_send_msg/2,
+        single_commit/2,
+        abort/2,
+
+        set_prepared/4,
+        now_microsec/1,
+        init/1,
+        terminate/2,
+        handle_command/3,
+        is_empty/1,
+        delete/1,
+        open_table/2,
+        check_prepared/3,
+	    check_tables_ready/0]).
+
+-export([
          handle_handoff_command/3,
          handoff_starting/2,
          handoff_cancelled/1,
@@ -192,6 +196,26 @@ check_table_ready([{Partition,Node}|Rest]) ->
 	    false
     end.
 
+check_prepared_empty() ->
+    {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
+    PartitionList = chashbin:to_list(CHBin),
+    check_prepared_empty(PartitionList).
+
+check_prepared_empty([]) ->
+    ok;
+check_prepared_empty([{Partition,Node}|Rest]) ->
+    Result = riak_core_vnode_master:sync_command({Partition,Node},
+						 {check_prepared_empty},
+						 ?CLOCKSI_MASTER,
+						 infinity),
+    case Result of
+	    true ->
+            ok;
+	    false ->
+            lager:info("Prepared not empty!")
+    end,
+	check_prepared_empty(Rest).
+
 open_table(Partition, Name) ->
     try
 	ets:new(get_cache_name(Partition,Name),
@@ -211,6 +235,16 @@ handle_command({check_tables_ready},_Sender,SD0=#state{partition=Partition}) ->
 	     end,
     {reply, Result, SD0};
     
+handle_command({check_prepared_empty},_Sender,SD0=#state{tx_metadata=TxMetadata}) ->
+    PreparedList = ets:tab2list(TxMetadata),
+    case length(PreparedList) of
+		 0 ->
+            {reply, true, SD0};
+		 _ ->
+            lager:warning("Not empty!! ~w", [PreparedList]),
+            {reply, false, SD0}
+    end;
+
 handle_command({check_servers_ready},_Sender,SD0=#state{partition=Partition}) ->
     Node = node(),
     Result = clocksi_readitem_fsm:check_partition_ready(Node,Partition,?READ_CONCURRENCY),
@@ -347,7 +381,7 @@ handle_command({abort, TxId, Updates}, _Sender,
         [_Something] -> 
             clean_and_notify(TxId, Updates, State),
             {noreply, State};
-            %{reply, ack_abort, State};
+            %%{reply, ack_abort, State};
         [] ->
             {reply, {error, no_tx_record}, State}
     end;
@@ -435,12 +469,6 @@ prepare(TxId, TxWriteSet, CommittedTx, PrepareTime, Tables, IfCertify)->
 set_prepared(_TxMetadata,[],_TxId,_Time) ->
     ok;
 set_prepared(TxMetadata,[{Key, Type, Op} | Rest],TxId,Time) ->
-    %ActiveTxs = case ets:lookup(TxMetadata, Key) of
-	%	    [] ->
-	%		[];
-	%	    [{Key, List}] ->
-	%		List
-	%	end,
     true = ets:insert(TxMetadata, {Key, {TxId, Time, Type, Op}}),
     set_prepared(TxMetadata,Rest,TxId,Time).
 
@@ -481,6 +509,7 @@ clean_prepared(TxMetadata,[{Key, _Type, _Op} | Rest],TxId) ->
             specula_utilities:clean_specula_committed()
     end,
     clean_prepared(TxMetadata,Rest,TxId).
+
 
 %% @doc converts a tuple {MegaSecs,Secs,MicroSecs} into microseconds
 now_microsec({MegaSecs, Secs, MicroSecs}) ->
@@ -547,12 +576,7 @@ check_prepared(TxId, Key, Tables) ->
                                     SnapshotTime, TxMetadata, InMemoryStore, SpeculaStore, SpeculaDep, update, SenderPId),
                             specula_prepared;
                         false ->
-                            case random:uniform(2) of
-                                1 ->
-                                    false;
-                                2 ->
-                                    wait  
-                            end
+                            false
                     end
             end
     end.

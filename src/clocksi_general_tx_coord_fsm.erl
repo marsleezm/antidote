@@ -28,6 +28,7 @@
 -behavior(gen_fsm).
 
 -include("antidote.hrl").
+-include("speculation.hrl").
 
 -define(SPECULA_TIMEOUT, 1).
 -define(DUMB_TIMEOUT, 5).
@@ -76,30 +77,17 @@
 %%    commit_time: transaction commit time.
 %%    state: state of the transaction: {active|prepared|committing|committed}
 %%----------------------------------------------------------------------
--record(tx_metadata, {
-        read_dep :: non_neg_integer(),
-        num_updated :: non_neg_integer(),
-        num_specula_prepared = 0 :: non_neg_integer(),
-        num_prepared = 0 :: non_neg_integer(),
-        prepare_time :: non_neg_integer(),
-        final_committed = false :: boolean(),
-        updated_parts :: dict(),
-        read_set :: [],
-        index :: pos_integer()
-        }).
-
--type tx_metadata() :: #tx_metadata{}.
 
 -record(state, {
       %% Metadata for all transactions
 	  from :: {pid(), term()},
-      tx_id_list :: [txid()],
+      txn_id_list :: [txid()],
       all_txn_ops :: [],
       pending_txn_ops :: [],
       specula_meta :: dict(),
       %% Metadata for a single txn
 	  tx_id :: txid(),
-      current_tx_meta :: tx_metadata(),
+      current_txn_meta :: txn_metadata(),
       causal_clock :: non_neg_integer(),
 	  state :: active | prepared | committing | committed | undefined | aborted}).
 
@@ -124,11 +112,12 @@ stop(Pid) -> gen_fsm:sync_send_all_state_event(Pid,stop).
 
 %% @doc Initialize the state.
 init([From, ClientClock, Txns]) ->
+    random:seed(now()),
     SD = #state{
             all_txn_ops = Txns,
             pending_txn_ops = Txns,
             specula_meta = dict:new(),
-            tx_id_list = [],
+            txn_id_list = [],
             causal_clock = ClientClock,
             from = From
            },
@@ -140,37 +129,39 @@ init([From, ClientClock, Txns]) ->
 %%       to execute the next operation.
 receive_reply(process_tx, 
            SD=#state{causal_clock=CausalClock,
-                    tx_id_list=TxIdList,
+                    txn_id_list=TxIdList,
                     pending_txn_ops=PendingTxnOps
 		      }) ->
     TxId = tx_utilities:create_transaction_record(CausalClock),
     [CurrentTxn|_RestTxn] = PendingTxnOps,
     {WriteSet, ReadSet, _, ReadDep} = process_operations(TxId, CurrentTxn,
                 {dict:new(), [], dict:new(), []}),
-    TxMetadata = #tx_metadata{read_dep=ReadDep, updated_parts=WriteSet, num_updated=dict:size(WriteSet), 
-            read_set=ReadSet, index=length(TxIdList)},
+    TxnMetadata = #txn_metadata{read_dep=ReadDep, updated_parts=WriteSet, num_updated=dict:size(WriteSet), 
+            read_set=ReadSet, index=length(TxIdList)+1},
     case dict:size(WriteSet) of
         0-> %%TODO: has to find some way to deal with read-only transaction
             CommitTime = clocksi_vnode:now_microsec(now()),
-            TxMetadata1 = TxMetadata#tx_metadata{prepare_time=CommitTime},
-            proceed_txn(SD#state{state=committed, current_tx_meta=TxMetadata1, causal_clock=CommitTime});
+            TxnMetadata1 = TxnMetadata#txn_metadata{prepare_time=CommitTime},
+            proceed_txn(SD#state{state=committed, current_txn_meta=TxnMetadata1, 
+                    tx_id=TxId, causal_clock=CommitTime});
         1->
             UpdatedPart = dict:to_list(WriteSet),
             ?CLOCKSI_VNODE:single_commit(UpdatedPart, TxId),
-            TxMetadata1 = TxMetadata#tx_metadata{num_updated=1},
-            {next_state, single_committing, SD#state{state=committing, current_tx_meta=TxMetadata1}};
+            TxnMetadata1 = TxnMetadata#txn_metadata{num_updated=1},
+            {next_state, single_committing, SD#state{state=committing, current_txn_meta=TxnMetadata1, tx_id=TxId}};
         N->
             ?CLOCKSI_VNODE:prepare(WriteSet, TxId),
-            TxMetadata1 = TxMetadata#tx_metadata{num_updated=N},
-            {next_state, receive_reply, SD#state{state=prepared, current_tx_meta=TxMetadata1}, ?SPECULA_TIMEOUT}
+            TxnMetadata1 = TxnMetadata#txn_metadata{num_updated=N},
+            {next_state, receive_reply, SD#state{state=prepared, tx_id=TxId,
+                     current_txn_meta=TxnMetadata1}, ?SPECULA_TIMEOUT}
     end;
 
 %% @doc in this state, the fsm waits for prepare_time from each updated
 %%      partitions in order to compute the final tx timestamp (the maximum
 %%      of the received prepare_time).
 receive_reply(timeout,
-                 S0=#state{current_tx_meta=CurrentTxMeta}) ->
-    case specula_utilities:coord_should_specula(CurrentTxMeta) of
+                 S0=#state{current_txn_meta=CurrentTxnMeta}) ->
+    case specula_utilities:coord_should_specula(CurrentTxnMeta) of
         true ->
             proceed_txn(S0);
         false ->
@@ -178,21 +169,21 @@ receive_reply(timeout,
     end;
 
 receive_reply({specula_prepared, TxId, ReceivedPrepareTime},
-                 S0=#state{current_tx_meta=CurrentTxMeta,
+                 S0=#state{current_txn_meta=CurrentTxnMeta,
                             tx_id=CurrentTxId
                             }) ->
     case TxId of
         CurrentTxId -> %% Got reply to current Tx
-            MaxPrepareTime = max(CurrentTxMeta#tx_metadata.prepare_time, ReceivedPrepareTime),
-            NumSpeculaPrepared = CurrentTxMeta#tx_metadata.num_specula_prepared,
-            CurrentTxMeta1 = CurrentTxMeta#tx_metadata{prepare_time=MaxPrepareTime,
+            MaxPrepareTime = max(CurrentTxnMeta#txn_metadata.prepare_time, ReceivedPrepareTime),
+            NumSpeculaPrepared = CurrentTxnMeta#txn_metadata.num_specula_prepared,
+            CurrentTxnMeta1 = CurrentTxnMeta#txn_metadata{prepare_time=MaxPrepareTime,
                          num_specula_prepared=NumSpeculaPrepared+1},
-            case specula_utilities:coord_should_specula(CurrentTxMeta) of
+            case specula_utilities:coord_should_specula(CurrentTxnMeta) of
                 true ->
-                    proceed_txn(S0#state{current_tx_meta=CurrentTxMeta1});
+                    proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta1});
                 false ->
                     {next_state, receive_reply,
-                     S0#state{current_tx_meta=CurrentTxMeta1}}
+                     S0#state{current_txn_meta=CurrentTxnMeta1}}
             end;
         _ ->
             ok
@@ -200,37 +191,37 @@ receive_reply({specula_prepared, TxId, ReceivedPrepareTime},
 
 receive_reply({prepared, TxId, ReceivedPrepareTime},
                  S0=#state{tx_id=CurrentTxId,
-                           tx_id_list=TxIdList,
+                           txn_id_list=TxIdList,
                            specula_meta=SpeculaMeta,
-                           current_tx_meta=CurrentTxMeta}) ->
+                           current_txn_meta=CurrentTxnMeta}) ->
     case TxId of
         CurrentTxId ->
-            MaxPrepareTime = max(CurrentTxMeta#tx_metadata.prepare_time, ReceivedPrepareTime),
-            NumPrepared = CurrentTxMeta#tx_metadata.num_prepared,
-            CurrentTxMeta1 = CurrentTxMeta#tx_metadata{prepare_time=MaxPrepareTime,
+            MaxPrepareTime = max(CurrentTxnMeta#txn_metadata.prepare_time, ReceivedPrepareTime),
+            NumPrepared = CurrentTxnMeta#txn_metadata.num_prepared,
+            CurrentTxnMeta1 = CurrentTxnMeta#txn_metadata{prepare_time=MaxPrepareTime,
                          num_prepared=NumPrepared+1},
-            case can_commit(CurrentTxMeta, SpeculaMeta) of
+            case can_commit(CurrentTxnMeta, SpeculaMeta, TxIdList) of
                 true ->
-                    CurrentTxMeta1 = commit_tx(CurrentTxId, CurrentTxMeta),
-                    proceed_txn(S0#state{current_tx_meta=CurrentTxMeta1});
+                    CurrentTxnMeta1 = commit_tx(CurrentTxId, CurrentTxnMeta),
+                    proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta1});
                 false ->
-                    case specula_utilities:coord_should_specula(CurrentTxMeta1) of
+                    case specula_utilities:coord_should_specula(CurrentTxnMeta1) of
                         true ->
-                            proceed_txn(S0#state{current_tx_meta=CurrentTxMeta1});
+                            proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta1});
                         false ->
                             {next_state, receive_reply,
-                             S0#state{current_tx_meta=CurrentTxMeta1}}
+                             S0#state{current_txn_meta=CurrentTxnMeta1}}
                     end
             end;
         _ ->
-            TxMeta = dict:find(TxId, SpeculaMeta),
-            MaxPrepareTime = max(TxMeta#tx_metadata.prepare_time, ReceivedPrepareTime),
-            NumPrepared1 = TxMeta#tx_metadata.num_prepared + 1,
-            TxMeta1 = TxMeta#tx_metadata{num_prepared=NumPrepared1, prepare_time=MaxPrepareTime},
-            SpeculaMeta1 = dict:store(TxId, TxMeta1, SpeculaMeta),
-            case can_commit(TxMeta1, SpeculaMeta1) of
+            TxnMeta = dict:fetch(TxId, SpeculaMeta),
+            MaxPrepareTime = max(TxnMeta#txn_metadata.prepare_time, ReceivedPrepareTime),
+            NumPrepared1 = TxnMeta#txn_metadata.num_prepared + 1,
+            TxnMeta1 = TxnMeta#txn_metadata{num_prepared=NumPrepared1, prepare_time=MaxPrepareTime},
+            SpeculaMeta1 = dict:store(TxId, TxnMeta1, SpeculaMeta),
+            case can_commit(TxnMeta1, SpeculaMeta1, TxIdList) of
                 true -> 
-                    SpeculaMeta2 = cascading_commit_tx(TxId, TxMeta#tx_metadata.index, SpeculaMeta1, TxIdList),
+                    SpeculaMeta2 = cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta1, TxIdList),
                     {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta2}}; 
                 false ->
                     {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta1}} 
@@ -240,29 +231,29 @@ receive_reply({prepared, TxId, ReceivedPrepareTime},
 receive_reply({read_valid, TxId, Key},
                  S0=#state{specula_meta=SpeculaMeta,
                            tx_id=CurrentTxId,
-                           tx_id_list=TxIdList,
-                           current_tx_meta=CurrentTxMeta}) ->
+                           txn_id_list=TxIdList,
+                           current_txn_meta=CurrentTxnMeta}) ->
     case TxId of
         CurrentTxId ->
-            ReadDep = CurrentTxMeta#tx_metadata.read_dep,
+            ReadDep = CurrentTxnMeta#txn_metadata.read_dep,
             ReadDep1 = lists:delete(Key, ReadDep),
-            CurrentTxMeta1 = CurrentTxMeta#tx_metadata{read_dep=ReadDep1},
-            case specula_utilities:coord_should_specula(CurrentTxMeta1) of
+            CurrentTxnMeta1 = CurrentTxnMeta#txn_metadata{read_dep=ReadDep1},
+            case specula_utilities:coord_should_specula(CurrentTxnMeta1) of
                 true ->
-                    proceed_txn(S0#state{current_tx_meta=CurrentTxMeta1});
+                    proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta1});
                 false ->
                     {next_state, receive_reply,
-                     S0#state{current_tx_meta=CurrentTxMeta1}}
+                     S0#state{current_txn_meta=CurrentTxnMeta1}}
             end;
         _ ->
-            TxMeta = dict:find(TxId, SpeculaMeta),
-            ReadDep = TxMeta#tx_metadata.read_dep,
+            TxnMeta = dict:fetch(TxId, SpeculaMeta),
+            ReadDep = TxnMeta#txn_metadata.read_dep,
             ReadDep1 = lists:delete(Key, ReadDep),
-            TxMeta1 = TxMeta#tx_metadata{read_dep=ReadDep1},
-            SpeculaMeta1 = dict:store(TxId, TxMeta1, SpeculaMeta),
-            case can_commit(TxMeta1, SpeculaMeta1) of
+            TxnMeta1 = TxnMeta#txn_metadata{read_dep=ReadDep1},
+            SpeculaMeta1 = dict:store(TxId, TxnMeta1, SpeculaMeta),
+            case can_commit(TxnMeta1, SpeculaMeta1, TxIdList) of
                 true ->
-                    SpeculaMeta2 = cascading_commit_tx(TxId, TxMeta#tx_metadata.index, SpeculaMeta1, TxIdList),
+                    SpeculaMeta2 = cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta1, TxIdList),
                     {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta2}}; 
                 _ -> %%Still have prepare to wait for
                    {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta1}} 
@@ -270,15 +261,16 @@ receive_reply({read_valid, TxId, Key},
     end;
 
 receive_reply({abort, TxId}, S0) ->
-    cascading_abort(TxId, S0);
+    S1 = cascading_abort(TxId, S0),
+    {next_state, receive_reply, S1};
 
 receive_reply(abort, S0) ->
     {next_state, abort, S0, 0}.
 
 %% TODO: need to define better this case: is specula_committed allowed, or not?
 %% Why this case brings doubt???
-single_committing({committed, CommitTime}, S0=#state{from=_From, current_tx_meta=CurrentTxMeta}) ->
-    proceed_txn(S0#state{current_tx_meta=CurrentTxMeta#tx_metadata{prepare_time=CommitTime},
+single_committing({committed, CommitTime}, S0=#state{from=_From, current_txn_meta=CurrentTxnMeta}) ->
+    proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta#txn_metadata{prepare_time=CommitTime},
              state=committed});
     
 single_committing(abort, S0=#state{from=_From}) ->
@@ -288,34 +280,34 @@ single_committing(abort, S0=#state{from=_From}) ->
 %% @doc when an error occurs or an updated partition 
 %% does not pass the certification check, the transaction aborts.
 abort(timeout, SD0=#state{tx_id = TxId,
-                        current_tx_meta=CurrentTxMeta}) ->
-    ?CLOCKSI_VNODE:abort(CurrentTxMeta#tx_metadata.updated_parts, TxId),
+                        current_txn_meta=CurrentTxnMeta}) ->
+    ?CLOCKSI_VNODE:abort(CurrentTxnMeta#txn_metadata.updated_parts, TxId),
     proceed_txn(SD0#state{state=aborted});
 
 abort(abort, SD0=#state{tx_id = TxId,
-                        current_tx_meta=CurrentTxMeta}) ->
-    ?CLOCKSI_VNODE:abort(CurrentTxMeta#tx_metadata.updated_parts, TxId),
+                        current_txn_meta=CurrentTxnMeta}) ->
+    ?CLOCKSI_VNODE:abort(CurrentTxnMeta#txn_metadata.updated_parts, TxId),
     proceed_txn(SD0#state{state=aborted});
 
 abort({prepared, _}, SD0=#state{tx_id=TxId,
-                        current_tx_meta=CurrentTxMeta}) ->
-    ?CLOCKSI_VNODE:abort(CurrentTxMeta#tx_metadata.updated_parts, TxId),
+                        current_txn_meta=CurrentTxnMeta}) ->
+    ?CLOCKSI_VNODE:abort(CurrentTxnMeta#txn_metadata.updated_parts, TxId),
     proceed_txn(SD0#state{state=aborted}).
 
 %% @doc when the transaction has committed or aborted,
 %%       a reply is sent to the client that started the tx_id.
-proceed_txn(S0=#state{from=From, tx_id=TxId, state=TxState, tx_id_list=TxIdList, 
-            current_tx_meta=CurrentTxMeta, specula_meta=SpeculaMeta, pending_txn_ops=PendingTxnOps}) ->
-    CommitTime = CurrentTxMeta#tx_metadata.prepare_time,
+proceed_txn(S0=#state{from=From, tx_id=TxId, state=TxState, txn_id_list=TxIdList, 
+            current_txn_meta=CurrentTxnMeta, specula_meta=SpeculaMeta, pending_txn_ops=PendingTxnOps}) ->
+    CommitTime = CurrentTxnMeta#txn_metadata.prepare_time,
     case TxState of
         committed ->
             case length(PendingTxnOps) of
                 1 ->
-                    case CurrentTxMeta#tx_metadata.final_committed of 
+                    case CurrentTxnMeta#txn_metadata.final_committed of 
                         true -> %%All transactions must have finished
                             %lager:info("Finishing txn"),
                             ReverseReadSet = get_readset(TxIdList, SpeculaMeta, []),
-                            RevReadSet1 = [CurrentTxMeta#tx_metadata.read_set|ReverseReadSet],
+                            RevReadSet1 = [CurrentTxnMeta#txn_metadata.read_set|ReverseReadSet],
                             From ! {ok, {TxId, lists:flatten(lists:reverse(RevReadSet1)), 
                                 CommitTime}},
                             {stop, normal, S0};
@@ -323,14 +315,15 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, state=TxState, tx_id_list=TxIdList,
                             {next_state, receive_reply, S0}
                     end;
                 _ -> %%Start the next transaction
-                    SpeculaMeta1 = dict:store(TxId, CurrentTxMeta, SpeculaMeta),
+                    SpeculaMeta1 = dict:store(TxId, CurrentTxnMeta, SpeculaMeta),
                     [_ExecutedTxn|RestTxns] = PendingTxnOps,
                     TxIdList1 = TxIdList ++ [TxId],
                     gen_fsm:send_event(self(), process_tx),
                     {next_state, receive_reply, S0#state{pending_txn_ops=RestTxns,
-                        specula_meta=SpeculaMeta1, tx_id_list=TxIdList1, causal_clock=CommitTime}}
+                        specula_meta=SpeculaMeta1, txn_id_list=TxIdList1, causal_clock=CommitTime}}
             end;
         aborted -> %%Try current transaction again
+            timer:sleep(random:uniform(?DUMB_TIMEOUT)),
             gen_fsm:send_event(self(), process_tx),
             {next_state, receive_reply, S0}
     end.
@@ -353,6 +346,8 @@ code_change(_OldVsn, StateName, State, _Extra) -> {ok, StateName, State}.
 
 terminate(_Reason, _SN, _SD) ->
     ok.
+
+%%%%% Private function %%%%%%%%%%
 
 process_operations(_TxId, [], Acc) ->
     Acc;
@@ -396,55 +391,52 @@ process_operations(TxId, [{update, Key, Type, Op}|Rest], {UpdatedParts, RSet, Bu
                 end,
     process_operations(TxId, Rest, {UpdatedParts1, RSet, Buffer1, ReadDep}).
 
-cascading_abort(TxId, #state{all_txn_ops=AllTxn, tx_id=TxId, current_tx_meta=CurrentTxMeta,
-                             specula_meta=SpeculaMeta,tx_id_list=TxIdList}=S0) ->
-    TxMeta = dict:find(TxId, SpeculaMeta),
-    ToAbortIndex = TxMeta#tx_metadata.index-1,
-    AbortTxList = lists:nthtail(ToAbortIndex, TxIdList),
+cascading_abort(AbortTxId, #state{all_txn_ops=AllTxn, tx_id=CurrentTxId, current_txn_meta=CurrentTxnMeta,
+                             specula_meta=SpeculaMeta,txn_id_list=TxIdList}=S0) ->
+    AbortTxnMeta = dict:fetch(AbortTxId, SpeculaMeta),
+    AbortIndex = AbortTxnMeta#txn_metadata.index-1,
+    AbortTxList = lists:nthtail(AbortIndex, TxIdList),
     AbortFun = fun(Id, Dict) -> 
-                                AbortTxMeta = dict:find(Id, Dict),  
-                                UpdatedParts = AbortTxMeta#tx_metadata.updated_parts, 
-                                ?CLOCKSI_VNODE:abort(UpdatedParts, Id),
+                                TmpTxnMeta = dict:fetch(Id, Dict),  
+                                TmpUpdatedParts = TmpTxnMeta#txn_metadata.updated_parts, 
+                                ?CLOCKSI_VNODE:abort(TmpUpdatedParts, Id),
                                 dict:erase(Id, Dict)
                 end, 
     lists:foldl(AbortFun, SpeculaMeta, AbortTxList),
     
     %Abort current transaction
-    CurrentUpdatedParts = CurrentTxMeta#tx_metadata.updated_parts, 
-    ?CLOCKSI_VNODE:abort(CurrentUpdatedParts, TxId),
+    CurrentUpdatedParts = CurrentTxnMeta#txn_metadata.updated_parts, 
+    ?CLOCKSI_VNODE:abort(CurrentUpdatedParts, CurrentTxId),
 
-    PendingTxnOps = list:nthtail(ToAbortIndex, AllTxn), 
-    %%Tag
+    PendingTxnOps = lists:nthtail(AbortIndex, AllTxn), 
     gen_fsm:send_event(self(), process_tx),
-    {next_state, receive_reply, S0#state{pending_txn_ops=PendingTxnOps, 
-                tx_id_list=lists:sublist(ToAbortIndex, TxIdList)}}.
+    S0#state{pending_txn_ops=PendingTxnOps, txn_id_list=lists:sublist(TxIdList, AbortIndex)}.
 
 
-cascading_commit_tx(TxId, Index, SpeculaMeta, TxIdList) ->
-    TxMeta = dict:find(TxId, SpeculaMeta),
-    TxMeta1 = commit_tx(TxId, TxMeta),
-    SpeculaMeta1 = dict:store(TxId, TxMeta1, SpeculaMeta),
-    try_commit_successors(lists:nth(Index,TxIdList), SpeculaMeta1).
+cascading_commit_tx(TxId, TxnMeta, SpeculaMeta, TxIdList) ->
+    TxnMeta1 = commit_tx(TxId, TxnMeta),
+    SpeculaMeta1 = dict:store(TxId, TxnMeta1, SpeculaMeta),
+    try_commit_successors(lists:nthtail(TxnMeta#txn_metadata.index, TxIdList), SpeculaMeta1).
 
-commit_tx(TxId, TxMeta) ->
-    UpdatedParts = TxMeta#tx_metadata.updated_parts,
-    ?CLOCKSI_VNODE:commit(UpdatedParts, TxId, TxMeta#tx_metadata.prepare_time),
-    TxMeta#tx_metadata{final_committed=true}. 
+commit_tx(TxId, TxnMeta) ->
+    UpdatedParts = TxnMeta#txn_metadata.updated_parts,
+    ?CLOCKSI_VNODE:commit(UpdatedParts, TxId, TxnMeta#txn_metadata.prepare_time),
+    TxnMeta#txn_metadata{final_committed=true}. 
 
 try_commit_successors([], SpeculaMetadata) ->
     SpeculaMetadata;
 try_commit_successors([TxId|Rest], SpeculaMetadata) ->
-    TxMeta = dict:find(TxId, SpeculaMetadata),
-    ReadDep = TxMeta#tx_metadata.read_dep,
+    TxnMeta = dict:fetch(TxId, SpeculaMetadata),
+    ReadDep = TxnMeta#txn_metadata.read_dep,
     case ReadDep of
         [] ->
-            NumUpdated = TxMeta#tx_metadata.read_dep,
-            case TxMeta#tx_metadata.num_prepared of
+            NumUpdated = TxnMeta#txn_metadata.num_updated,
+            case TxnMeta#txn_metadata.num_prepared of
                 NumUpdated ->
-                    UpdatedParts = TxMeta#tx_metadata.updated_parts,
-                    ?CLOCKSI_VNODE:commit(UpdatedParts, TxId, TxMeta#tx_metadata.prepare_time),
+                    UpdatedParts = TxnMeta#txn_metadata.updated_parts,
+                    ?CLOCKSI_VNODE:commit(UpdatedParts, TxId, TxnMeta#txn_metadata.prepare_time),
                     SpeculaMetadata1 = dict:store(TxId, 
-                        TxMeta#tx_metadata{final_committed=true}, SpeculaMetadata),
+                        TxnMeta#txn_metadata{final_committed=true}, SpeculaMetadata),
                     try_commit_successors(Rest, SpeculaMetadata1);
                 _ ->
                     SpeculaMetadata
@@ -453,19 +445,19 @@ try_commit_successors([TxId|Rest], SpeculaMetadata) ->
             SpeculaMetadata
     end.
 
-can_commit(TxMeta, SpeculaMeta) ->
-    NumberUpdated = TxMeta#tx_metadata.num_updated,
-    case TxMeta#tx_metadata.read_dep of
+can_commit(TxnMeta, SpeculaMeta, TxnList) ->
+    NumberUpdated = TxnMeta#txn_metadata.num_updated,
+    case TxnMeta#txn_metadata.read_dep of
         [] -> %%No read dependency
-            case TxMeta#tx_metadata.num_prepared of
+            case TxnMeta#txn_metadata.num_prepared of
                 NumberUpdated ->
-                    Index = TxMeta#tx_metadata.index,
+                    Index = TxnMeta#txn_metadata.index,
                     case Index of 
                         1 ->
                             true; 
                         _ ->
-                            DependentTx = dict:find(Index-1, SpeculaMeta),
-                            DependentTx#tx_metadata.final_committed
+                            DependentTx = dict:fetch(lists:nth(Index-1, TxnList), SpeculaMeta),
+                            DependentTx#txn_metadata.final_committed
                     end;
                 _ ->
                     false
@@ -477,5 +469,153 @@ can_commit(TxMeta, SpeculaMeta) ->
 get_readset([], _SpeculaMeta, Acc) ->
     Acc;
 get_readset([H|T], SpeculaMeta, Acc) ->
-    Tx = dict:find(H, SpeculaMeta),
-    get_readset(T, SpeculaMeta, [Tx#tx_metadata.read_set|Acc]).
+    Tx = dict:fetch(H, SpeculaMeta),
+    get_readset(T, SpeculaMeta, [Tx#txn_metadata.read_set|Acc]).
+
+
+-ifdef(TEST).
+process_op_test() ->
+    %% Common read
+    TxId = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
+    Key1 = {counter, 1},
+    Key2 = {counter, 2},
+    Type = riak_dt_gcounter,
+    Op1 = {increment, haha},
+    Operations = [{read, Key1, Type}, {update, Key1, Type, Op1}, {read, Key1, Type}, {read, Key2, Type},
+                {read, Key2, Type}],
+    {UpdatedPart, RSet, _Buffer, ReadDep} = process_operations(TxId, Operations, 
+            {dict:new(), [], dict:new(), []}),
+
+    ?assertEqual(lists:reverse(RSet), [2, 3, 2, 2]),
+    ?assertEqual(ReadDep, []),
+    ?assertEqual(dict:size(UpdatedPart), 1),
+
+    %% Read with dependency
+    Key3 = {specula, 1}, 
+    Operations1 = [{read, Key1, Type}, {update, Key1, Type, Op1}, {read, Key1, Type}, {read, Key2, Type},
+                {read, Key2, Type}, {read, Key3, Type}],
+    {UpdatedPart1, RSet1, _Buffer1, ReadDep1} = process_operations(TxId, Operations1, 
+            {dict:new(), [], dict:new(), []}),
+    
+    ?assertEqual(lists:reverse(RSet1), [2, 3, 2, 2, 2]),
+    ?assertEqual(ReadDep1, [{specula, 1}]),
+    ?assertEqual(dict:size(UpdatedPart1), 1).
+    
+cascading_abort_test() ->
+    State = generate_specula_meta(4, 3, 1, 1),
+    [_Tx1, Tx2, Tx3, Tx4] = State#state.all_txn_ops,
+    [TxId1, TxId2, _] = State#state.txn_id_list,
+    State1 = cascading_abort(TxId2, State),
+    PendingTxOps = State1#state.pending_txn_ops,
+    RemainingTxId = State1#state.txn_id_list,
+    ?assertEqual(PendingTxOps, [Tx2, Tx3, Tx4]),
+    ?assertEqual(RemainingTxId, [TxId1]).
+
+cascading_commit_test() ->
+    State = generate_specula_meta(5, 3, 4, 0),
+    [TxId1, TxId2, TxId3] = State#state.txn_id_list,
+    SpeculaMeta = State#state.specula_meta,
+
+    Tx1Meta = dict:fetch(TxId1, SpeculaMeta),
+    SpeculaMeta2 = cascading_commit_tx(TxId1, Tx1Meta, SpeculaMeta, [TxId1, TxId2, TxId3]),
+    FinalCommitted = lists:map(fun(X) -> Meta=dict:fetch(X, SpeculaMeta2), 
+                                Meta#txn_metadata.final_committed end, [TxId1, TxId2, TxId3]),
+    ?assertEqual([true, true, true], FinalCommitted),
+
+    %% Without committing the first..
+    Tx2Meta = dict:fetch(TxId2, SpeculaMeta),
+    SpeculaMeta02 = cascading_commit_tx(TxId2, Tx2Meta, SpeculaMeta, [TxId1, TxId2, TxId3]),
+    FinalCommitted0 = lists:map(fun(X) -> Meta=dict:fetch(X, SpeculaMeta02), 
+                                Meta#txn_metadata.final_committed end, [TxId1, TxId2, TxId3]),
+    ?assertEqual([false, true, true], FinalCommitted0),
+
+    State1 = generate_specula_meta(5, 4, 2, 1),
+    TxnList1 = State1#state.txn_id_list,
+    [_TxId11, TxId12, _TxId13, _Txn14] = TxnList1, 
+    SpeculaMeta1 = State1#state.specula_meta,
+
+    TxMeta12 = dict:fetch(TxId12, SpeculaMeta1),
+    SpeculaMeta12 = cascading_commit_tx(TxId12, TxMeta12, SpeculaMeta1, TxnList1),
+    FinalCommitted1 = lists:map(fun(X) -> Meta=dict:fetch(X, SpeculaMeta12), 
+                                Meta#txn_metadata.final_committed end, TxnList1),
+    ?assertEqual([true, true, false, false], FinalCommitted1).
+
+    
+can_commit_test() ->
+    State = generate_specula_meta(4,3,3,1),
+    SpeculaMeta = State#state.specula_meta,
+    [TxId1, TxId2, TxId3] = State#state.txn_id_list,
+    TxMeta1 = dict:fetch(TxId1, SpeculaMeta), 
+    TxMeta2 = dict:fetch(TxId2, SpeculaMeta), 
+    TxMeta3 = dict:fetch(TxId3, SpeculaMeta), 
+    ?assertEqual(true, can_commit(TxMeta1, SpeculaMeta, State#state.txn_id_list)),
+    ?assertEqual(true, can_commit(TxMeta2, SpeculaMeta, State#state.txn_id_list)),
+    ?assertEqual(false, can_commit(TxMeta3, SpeculaMeta, State#state.txn_id_list)).
+
+generate_specula_meta(NumTotalTxn, NumSpeculaTxn, NumCanCommit, NumCommitted) ->
+    Seq0 = lists:seq(1, NumTotalTxn),
+    AllTxnOps = lists:map(fun(_) -> generate_random_op(1, 1, []) end, Seq0),
+
+    %% TxIds of specually committed transaction
+    Seq1 = lists:seq(1, NumSpeculaTxn),
+    TxnIdList = lists:map(fun(_) -> tx_utilities:create_transaction_record(
+                        clocksi_vnode:now_microsec(now())) end, Seq1),
+
+    %% Metadatas of txns that can finally commit
+    Seq2 = lists:seq(1, NumCanCommit),
+    CanCommitTxn0 = lists:map(fun(_) -> generate_txn_meta(false, false) end, Seq2),
+    CanCommitTxn = make_commit(NumCommitted, CanCommitTxn0, []),
+
+    {TxnList, [CurrentTxn]} = case NumSpeculaTxn >= NumCanCommit of
+                        true ->
+                            PendingTxn = lists:map(fun(_) -> generate_txn_meta(false, true) end,
+                                lists:seq(1, NumSpeculaTxn - NumCanCommit+1)),
+                            {PendingTxn1, Txn2} = lists:split(length(PendingTxn) - 1, PendingTxn),
+                            {CanCommitTxn++PendingTxn1, Txn2};
+                        false ->
+                            lists:split(length(CanCommitTxn) - 1, CanCommitTxn)
+                        end,
+
+    Zipped = lists:zip(TxnIdList, TxnList),
+    {SpeculaMeta, _} = lists:foldl(fun({Id, Txn}, {Dict, Acc}) ->
+                {dict:store(Id, Txn#txn_metadata{index=Acc}, Dict), Acc+1} end, {dict:new(),1}, Zipped),
+
+    CurrentTxId = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
+
+    #state{all_txn_ops=AllTxnOps, txn_id_list=TxnIdList, tx_id=CurrentTxId,
+        current_txn_meta=CurrentTxn#txn_metadata{index=NumSpeculaTxn+1}, specula_meta=SpeculaMeta}.
+
+generate_txn_meta(false, false) ->
+    #txn_metadata{read_dep=[], num_prepared=0, num_updated=0};
+generate_txn_meta(PendingRead, PendingPrepare) ->
+    ReadDep = case PendingRead of true -> [1,2]; false -> [] end,
+    NumUpdated = case PendingPrepare of true -> 1; false -> 0 end,
+    #txn_metadata{read_dep=ReadDep, num_prepared=0, num_updated=NumUpdated}.
+
+
+make_commit(0, H, Acc) ->
+    lists:reverse(Acc)++H;
+make_commit(Num, [H|T], Acc) ->
+    make_commit(Num-1, T, [H#txn_metadata{final_committed=true}|Acc]).
+
+generate_random_op(0, 0, Acc) ->
+    Acc;
+generate_random_op(0, N, Acc) ->
+    Key = {counter, random:uniform(10)},
+    generate_random_op(0, N-1,
+            [{update, Key, riak_dt_gcounter, {increment, random:uniform(100)}}|Acc]);
+generate_random_op(N, 0, Acc) ->
+    Key = {counter, random:uniform(10)},
+    generate_random_op(N-1, 0, [{read, Key, riak_dt_gcounter}|Acc]);
+generate_random_op(NumRead, NumWrite, Acc) ->
+    Key = {counter, random:uniform(10)},
+    case random:uniform(10) rem 2 of
+        0 ->
+            generate_random_op(NumRead-1, NumWrite, [{read, Key, riak_dt_gcounter}|Acc]);
+        1 ->
+            generate_random_op(NumRead, NumWrite-1,
+                    [{update, Key, riak_dt_gcounter, {increment, random:uniform(100)}}|Acc])
+    end.
+
+
+-endif.
