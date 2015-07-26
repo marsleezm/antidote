@@ -21,7 +21,19 @@ load(File) ->
               {error, Reason} ->
                   io:format("Failed to parse config file ~s: ~p\n", [FileName, Reason])
           end,
-    load_config(TermsList).
+    load_config(TermsList),
+    case antidote_config:get(do_repl) of
+        true ->
+            lager:info("Will do replication");
+        false ->
+            lager:info("No replication")
+    end,
+    case antidote_config:get(do_cert) of
+        true ->
+            lager:info("Will do certification");
+        false ->
+            lager:info("No certification")
+    end.
 
 set(Key, Value) ->
     ok = application:set_env(basho_bench, Key, Value).

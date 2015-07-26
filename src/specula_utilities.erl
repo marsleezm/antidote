@@ -20,18 +20,25 @@
 -module(specula_utilities).
 -define(SPECULA_TIMEOUT, 2000).
 
+-include("include/speculation.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -define(SEND_MSG(PID, MSG), PID ! MSG).
 -else.
--define(SEND_MSG(PID, MSG), gen_fsm:send_event(PID, MSG)).
+-define(SEND_MSG(PID, MSG), riak_core_vnode:reply(PID, MSG)).
 -endif.
 
 -export([should_specula/2, make_prepared_specula/9, find_specula_version/6,
             clean_specula_committed/4, coord_should_specula/1, make_specula_final/7]).
 
-coord_should_specula(_) ->
+coord_should_specula(_TxnMetadata) ->
+    %case TxnMetadata#txn_metadata.final_committed of
+    %    true ->
+    %        true;
+    %    false ->
+    %        false
+    %end.
     true.
 
 %% If this txn corresponds to any specula-committed version,
@@ -107,7 +114,6 @@ make_prepared_specula(Key, Record, SnapshotTime, PreparedStore, InMemoryStore,
     {TxId, PrepareTime, Type, {Param, Actor}} = Record,
     SpeculaValue =  case ets:lookup(SpeculaStore, Key) of 
                         [] ->
-                            io:format(user, "no SpeculaVersion ~w ", [TxId]),
                             %% Fetch from committed store
                             case ets:lookup(InMemoryStore, Key) of
                                 [] ->
@@ -121,12 +127,10 @@ make_prepared_specula(Key, Record, SnapshotTime, PreparedStore, InMemoryStore,
                                     NewSpeculaValue
                             end;
                         [{Key, SpeculaVersions}] ->
-                            io:format(user, "There is SpeculaVersion ~w ", [TxId]),
                             [{SpeculaTxId, _PrepareTime, Snapshot}|_] = SpeculaVersions,
                             NewSpeculaValue = generate_snapshot(Snapshot, Type, Param, Actor),
                             true = ets:insert(SpeculaStore, {Key, 
                                     [{TxId, PrepareTime, NewSpeculaValue}|SpeculaVersions]}),
-                            io:format(user, "Add to specula dep ~w deping ~w", [SpeculaTxId, TxId]),
                             add_specula_meta(SpeculaDep, SpeculaTxId, TxId, SnapshotTime, OpType, CoordPId),
                             NewSpeculaValue
                     end,

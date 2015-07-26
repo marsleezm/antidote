@@ -96,7 +96,7 @@ abort(_UpdatedPartitions, _Transactions) ->
 
 
 %% Functions that will return different value depending on Key.
-read_data_item(_IndexNode, Key, _Type, _Transaction) ->
+read_data_item(_IndexNode, Key, _Type, TxId) ->
     case Key of 
         read_fail ->
             {error, mock_read_fail};
@@ -110,10 +110,12 @@ read_data_item(_IndexNode, Key, _Type, _Transaction) ->
             {ok, Counter1} = riak_dt_gcounter:update(increment, haha, Counter),
             {ok, Counter2} = riak_dt_gcounter:update(increment, nono, Counter1),
             {ok, {riak_dt_gcounter,Counter2}};
-        {specula, _} -> %% Assume this txn depends on some other transaction
+        {specula, _, Delay} -> %% Assume this txn depends on some other transaction
             Counter = riak_dt_gcounter:new(),
             {ok, Counter1} = riak_dt_gcounter:update(increment, haha, Counter),
             {ok, Counter2} = riak_dt_gcounter:update(increment, nono, Counter1),
+            Sender = self(),
+            spawn(fun() -> timer:sleep(Delay), Sender ! {read_valid, TxId, Key} end),
             {specula, {riak_dt_gcounter,Counter2}};
         set ->
             Set = riak_dt_gset:new(),
@@ -151,9 +153,9 @@ commit(UpdatedPartitions, _Transaction, _CommitTime) ->
     dict:fold(fun(Fsm, _WriteSet, _) -> gen_fsm:send_event(Fsm, {commit, Self}), 
         ok end, [], UpdatedPartitions).
 
-prepare(UpdatedPartitions, _Transaction) ->
+prepare(UpdatedPartitions, TxId) ->
     Self = self(),
-    dict:fold(fun(Fsm, WriteSet, _) -> gen_fsm:send_event(Fsm, {prepare, Self, WriteSet}), 
+    dict:fold(fun(Fsm, WriteSet, _) -> gen_fsm:send_event(Fsm, {prepare, TxId, Self, WriteSet}), 
         ok end, [], UpdatedPartitions).
 
 %% We spawn a new mock_partition_fsm for each update request, therefore
@@ -161,26 +163,26 @@ prepare(UpdatedPartitions, _Transaction) ->
 %% single updated key. In contrast, clocksi_vnode may receive multiple
 %% update request for a single transaction.
 execute_op({update_data_item, Key}, _From, State) ->
-    Result = case Key of 
-                fail_update ->
-                    {error, mock_downstream_fail};
-                _ ->
-                    ok
-            end,
-    {reply, Result, execute_op, State#state{key=Key}}.
+    case Key of 
+        fail_update ->
+            {reply, {error, mock_downstream_fail}, execute_op, State#state{key=Key}};
+        _ ->
+            {reply, ok, execute_op, State#state{key=Key}}
+    end.
 
 execute_op({async_read_data_item, Key, From}, State) ->
     {ok,Value} = read_data_item(nothig, no, Key, no),
     gen_fsm:send_event(From, {ok, Value}),
     {next_state, execute_op, State#state{key=Key}};
 
-execute_op({prepare,From, [{Key, _, _}]}, State) ->
-    Result = case Key of 
-                success -> {prepared, 10};
-                timeout -> timeout;
-                _ -> abort
-            end,
-    gen_fsm:send_event(From, Result),
+execute_op({prepare, TxId, From, [{Key, _, _}]}, State) ->
+    case Key of 
+        success -> gen_fsm:send_event(From, {prepared, TxId, 10});
+        timeout -> gen_fsm:send_event(From, timeout);
+        {wait, Delay} -> timer:sleep(Delay), gen_fsm:send(From, {prepared, TxId, 10});
+        {abort, wait, Delay} -> timer:sleep(Delay), gen_fsm:send(From, {abort, TxId});
+        _ -> gen_fsm:send_event(From, abort) 
+    end,
     {next_state, execute_op, State#state{key=Key}};
 
 execute_op({commit,From}, State) ->
