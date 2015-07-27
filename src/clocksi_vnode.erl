@@ -236,14 +236,13 @@ check_prepared_empty([{Partition,Node}|Rest]) ->
 	    true ->
             ok;
 	    false ->
-            %lager:info("Prepared not empty!")
+            lager:wanring("Prepared not empty!")
     end,
 	check_prepared_empty(Rest).
 
 handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, specula_store=S2, prepared_txs=S3,
             partition=Partition}) ->
-    %lager:info("Partition ~w: Dep is ~w, Store is ~w, Prepared is ~w",
-                [Partition, ets:tab2list(S1), ets:tab2list(S2), ets:tab2list(S3)]),
+    lager:warning("Partition ~w: Dep is ~w, Store is ~w, Prepared is ~w", [Partition, ets:tab2list(S1), ets:tab2list(S2), ets:tab2list(S3)]),
     {reply, ok, SD0};
 
 handle_command({check_tables_ready},_Sender,SD0=#state{partition=Partition}) ->
