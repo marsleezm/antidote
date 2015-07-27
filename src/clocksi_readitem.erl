@@ -28,7 +28,7 @@
 
 
 %% States
--export([return/7,
+-export([return/5,
         check_clock/4]).
 
 
@@ -50,17 +50,18 @@ check_clock(Key,TxId, Tables, From) ->
 
 check_prepared(Key, MyTxId, Tables, From) ->
     SnapshotTime = MyTxId#tx_id.snapshot_time,
-    {PreparedTx, InMemoryStore, SpeculaStore, SpeculaDep} = Tables,
+    {PreparedTx, _, _, _} = Tables,
     case ets:lookup(PreparedTx, Key) of
         [] ->
             ready;
-        [{Key, {TxId, Time, Type, Op}}] ->
+        [{Key, {TxId, Time, Type, Op, Sender}}] ->
             case Time =< SnapshotTime of
                 true ->
                     case specula_utilities:should_specula(Time, SnapshotTime) of
                         true ->
-                            specula_utilities:make_prepared_specula(Key, {TxId, Time, Type, Op}, SnapshotTime, 
-                                PreparedTx, InMemoryStore, SpeculaStore, SpeculaDep, read, From);
+                            lager:info("Specula and read, sender is ~w",[Sender]), 
+                            specula_utilities:speculate_and_read(Key, MyTxId, {TxId, Time, Type, Op, Sender}, Tables, 
+                                From);
                         false ->
                             not_ready 
                     end;
@@ -71,13 +72,14 @@ check_prepared(Key, MyTxId, Tables, From) ->
 
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
-return(Coordinator, Key, Type,TxId, SnapshotCache, SpeculaCache, SpeculaDep) ->
+return(Coordinator, Key, Type,TxId, Tables) ->
     %lager:info("Returning for key ~w",[Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
+    {_PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep} = Tables,
     case specula_utilities:find_specula_version(
-            TxId, Key, SnapshotTime, SpeculaCache, SpeculaDep, Coordinator) of
+            TxId, Key, SnapshotTime, SpeculaStore, SpeculaDep, Coordinator) of
         false ->
-            case ets:lookup(SnapshotCache, Key) of
+            case ets:lookup(InMemoryStore, Key) of
                 [] ->
                     {ok, {Type,Type:new()}};
                 [{Key, ValueList}] ->
