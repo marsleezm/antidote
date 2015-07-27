@@ -28,14 +28,14 @@
 
 
 %% States
--export([return/5,
-        check_clock/4]).
+-export([return/4,
+        check_clock/3]).
 
 
 %% @doc check_clock: Compares its local clock with the tx timestamp.
 %%      if local clock is behind, it sleeps the fms until the clock
 %%      catches up. CLOCK-SI: clock skew.
-check_clock(Key,TxId, Tables, From) ->
+check_clock(Key,TxId, Tables) ->
     T_TS = TxId#tx_id.snapshot_time,
     Time = clocksi_vnode:now_microsec(erlang:now()),
     case T_TS > Time of
@@ -45,23 +45,22 @@ check_clock(Key,TxId, Tables, From) ->
         %%lager:info("Clock not ready"),
 	        not_ready;
         false ->
-	        check_prepared(Key,TxId, Tables, From)
+	        check_prepared(Key,TxId, Tables)
     end.
 
-check_prepared(Key, MyTxId, Tables, From) ->
+check_prepared(Key, MyTxId, Tables) ->
     SnapshotTime = MyTxId#tx_id.snapshot_time,
     {PreparedTx, _, _, _} = Tables,
     case ets:lookup(PreparedTx, Key) of
         [] ->
             ready;
-        [{Key, {TxId, Time, Type, Op, Sender}}] ->
+        [{Key, {TxId, Time, Type, Op}}] ->
             case Time =< SnapshotTime of
                 true ->
                     case specula_utilities:should_specula(Time, SnapshotTime) of
                         true ->
                             %lager:info("Specula and read, sender is ~w",[Sender]), 
-                            specula_utilities:speculate_and_read(Key, MyTxId, {TxId, Time, Type, Op, Sender}, Tables, 
-                                From);
+                            specula_utilities:speculate_and_read(Key, MyTxId, {TxId, Time, Type, Op}, Tables);
                         false ->
                             not_ready 
                     end;
@@ -72,12 +71,12 @@ check_prepared(Key, MyTxId, Tables, From) ->
 
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
-return(Coordinator, Key, Type,TxId, Tables) ->
+return(Key, Type,TxId, Tables) ->
     %%lager:info("Returning for key ~w",[Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     {_PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep} = Tables,
     case specula_utilities:find_specula_version(
-            TxId, Key, SnapshotTime, SpeculaStore, SpeculaDep, Coordinator) of
+            TxId, Key, SpeculaStore, SpeculaDep) of
         false ->
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
