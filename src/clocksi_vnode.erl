@@ -236,13 +236,13 @@ check_prepared_empty([{Partition,Node}|Rest]) ->
 	    true ->
             ok;
 	    false ->
-            lager:info("Prepared not empty!")
+            %lager:info("Prepared not empty!")
     end,
 	check_prepared_empty(Rest).
 
 handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, specula_store=S2, prepared_txs=S3,
             partition=Partition}) ->
-    lager:info("Partition ~w: Dep is ~w, Store is ~w, Prepared is ~w",
+    %lager:info("Partition ~w: Dep is ~w, Store is ~w, Prepared is ~w",
                 [Partition, ets:tab2list(S1), ets:tab2list(S2), ets:tab2list(S3)]),
     {reply, ok, SD0};
 
@@ -277,10 +277,10 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
         not_ready ->
             spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
                          Sender}, {Partition, node()}]),
-            lager:info("Not ready for key ~w ~w, reader is ~w",[Key, TxId, Sender]),
+            %lager:info("Not ready for key ~w ~w, reader is ~w",[Key, TxId, Sender]),
             {noreply, SD0};
         {specula, Value} ->
-            lager:info("Replying specula value for key ~w of tx ~w",[Key, TxId]),
+            %lager:info("Replying specula value for key ~w of tx ~w",[Key, TxId]),
             {reply, {specula, Value}, SD0};
         ready ->
             Result = clocksi_readitem:return(Pid, Key, Type, TxId, Tables),
@@ -290,24 +290,24 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
 handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, 
             specula_store=SpeculaStore, specula_dep=SpeculaDep, partition=Partition}) ->
-    lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
+    %lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
     Pid = get_pid(OrgSender),
     Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     case clocksi_readitem:check_clock(Key, TxId, Tables, Pid) of
         not_ready ->
             spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
                          OrgSender}, {Partition, node()}]),
-            lager:info("Not ready for key ~w ~w",[Key, TxId]),
+            %lager:info("Not ready for key ~w ~w",[Key, TxId]),
             {noreply, SD0};
         {specula, Value} ->
-            lager:info("Async: repling specula value for key ~w of tx ~w to ~w",[Key, TxId, OrgSender]),
+            %lager:info("Async: repling specula value for key ~w of tx ~w to ~w",[Key, TxId, OrgSender]),
             riak_core_vnode:reply(OrgSender, {specula, Value}),
             %%OrgSender ! {specula, Value},
             %gen_fsm:reply(OrgSender, {specula, Value}),
             {noreply, SD0};
         ready ->
             Result = clocksi_readitem:return(Pid, Key, Type, TxId, Tables),
-            lager:info("Ready!! ~w ~w, Result is ~w",[Key, TxId, Result]),
+            %lager:info("Ready!! ~w ~w, Result is ~w",[Key, TxId, Result]),
             riak_core_vnode:reply(OrgSender, Result),
             {noreply, SD0}
     end;
@@ -338,7 +338,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                     {noreply, State};
                 false ->
-                    lager:info("Returning prepare of ~w ~w",[TxId, NewPrepare]),
+                    %lager:info("Returning prepare of ~w ~w",[TxId, NewPrepare]),
                     riak_core_vnode:reply(OriginalSender, {prepared, TxId, NewPrepare}),
                     {noreply, State}
             end;
@@ -416,7 +416,7 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                       if_replicate=IfReplicate
                       } = State) ->
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
-    lager:info("Received commit operation"),
+    %lager:info("Received commit operation"),
     Result = commit(TxId, TxCommitTime, Updates, CommittedTx, State),
     case Result of
         {ok, {committed,NewCommittedTx}} ->
@@ -518,7 +518,7 @@ prepare(TxId, TxWriteSet, CommittedTx, PrepareTime, Tables, Sender, IfCertify)->
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, Sender, PrepareTime),
 		    {ok, PrepareTime};
         specula_prepared ->
-            %lager:info("Certification check returns specula_prepared"),
+            %%lager:info("Certification check returns specula_prepared"),
             {PreparedTxs, _, _, _} = Tables,
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, Sender, PrepareTime),
 		    {specula_prepared, PrepareTime};
@@ -635,7 +635,7 @@ check_prepared(TxId, Key, Tables, Sender) ->
         [{Key, {PreparedTxId, PrepareTime, Type, Op, PreparedSender}}] ->
             case PrepareTime > SnapshotTime of
                 true ->
-                    %lager:info("Has to abort for Key ~w", [Key]),
+                    %%lager:info("Has to abort for Key ~w", [Key]),
                     false;
                 false ->
                     %% TODO: this part should be tested..
@@ -662,7 +662,7 @@ update_and_clean([], _TxId, _TxCommitTime, _, _, _, _) ->
     ok;
 update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemoryStore, 
                 SpeculaStore, PreparedTxs, SpeculaDep) ->
-    lager:info("Storing key ~w for ~w",[Key, TxId]),
+    %lager:info("Storing key ~w for ~w",[Key, TxId]),
     case specula_utilities:make_specula_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore,
                 PreparedTxs, SpeculaDep) of
         true -> %% The prepared value was made speculative and it is true

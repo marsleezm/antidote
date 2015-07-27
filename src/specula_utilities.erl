@@ -1,4 +1,4 @@
-%% -------------------------------------------------------------------
+% -------------------------------------------------------------------
 %
 %% Copyright (c) 2014 SyncFree Consortium.  All Rights Reserved.
 %%
@@ -27,7 +27,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -define(SEND_MSG(PID, MSG), PID ! MSG).
 -else.
--define(SEND_MSG(PID, MSG), lager:info("Sending msg to ~w",[PID]), gen_fsm:send_event(PID, MSG)).
+-define(SEND_MSG(PID, MSG),  gen_fsm:send_event(PID, MSG)).
 -endif.
 
 -export([should_specula/2, make_prepared_specula/6, speculate_and_read/5, find_specula_version/6,
@@ -52,10 +52,10 @@ coord_should_specula(_TxnMetadata) ->
 %% TODO: This function should checks all keys of a transaction. Current one is incorrect 
 make_specula_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore, PreparedStore, SpeculaDep) ->
     %% Firstly, make this specula version finally committed.
-    lager:info("In making specula final for tx ~w",[TxId]),
+    %lager:info("In making specula final for tx ~w",[TxId]),
     case ets:lookup(SpeculaStore, Key) of
         [{Key, [{TxId, _, SpeculaValue}|T]}] ->    
-            lager:info("Found ~w in speculstore",[Key]),
+            %lager:info("Found ~w in speculstore",[Key]),
             case ets:lookup(InMemoryStore, Key) of
                   [] ->
                       true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, SpeculaValue}]});
@@ -73,10 +73,10 @@ make_specula_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore, Prepare
             %% Check if any txn depends on this version
             case ets:lookup(SpeculaDep, TxId) of
                 [] -> %% No dependency, do nothing!
-                    lager:info("No dependency for tx ~w",[TxId]),
+                    %lager:info("No dependency for tx ~w",[TxId]),
                     ok;
                 [{TxId, DepList}] -> %% Do something for each of the dependency...
-                    lager:info("Found dependency ~w for key ~w",[DepList, TxId]),
+                    %lager:info("Found dependency ~w for key ~w",[DepList, TxId]),
                     handle_dependency(DepList, TxCommitTime, PreparedStore, SpeculaStore, Key),
                     true = ets:delete(SpeculaDep, TxId)
             end,
@@ -138,8 +138,7 @@ make_prepared_specula(Key, PreparedRecord, PreparedStore, InMemoryStore,
                             case ets:lookup(InMemoryStore, Key) of
                                 [] ->
                                     NewSpeculaValue = generate_snapshot([], Type, Param, Actor),
-                                    lager:info("Appending the first specula value of Key ~w, Value ~w",
-                                            [Key, NewSpeculaValue]),
+                                    %lager:info("Appending the first specula value of Key ~w, Value ~w",[Key, NewSpeculaValue]),
                                     true = ets:insert(SpeculaStore, {Key, [{TxId, PrepareTime, NewSpeculaValue}]}),
                                     NewSpeculaValue;
                                 [{Key, CommittedVersions}] ->
@@ -153,7 +152,7 @@ make_prepared_specula(Key, PreparedRecord, PreparedStore, InMemoryStore,
                             NewSpeculaValue = generate_snapshot(Snapshot, Type, Param, Actor),
                             true = ets:insert(SpeculaStore, {Key, 
                                     [{TxId, PrepareTime, NewSpeculaValue}|SpeculaVersions]}),
-                            lager:info("Make prepared specula..adding dep ~w",[Sender]),
+                            %lager:info("Make prepared specula..adding dep ~w",[Sender]),
                             add_specula_meta(SpeculaDep, SpeculaTxId, TxId, TxId#tx_id.snapshot_time, update, Sender),
                             NewSpeculaValue
                     end,
@@ -169,7 +168,7 @@ find_specula_version(TxId, Key, SnapshotTime, SpeculaStore, SpeculaDep, SenderPI
                 false -> %% No corresponding specula version TODO: will this ever happen?
                     false;
                 {DependingTxId, Value} -> 
-                    lager:info("Find specula version..adding dep ~w",[SenderPId]),
+                    %lager:info("Find specula version..adding dep ~w",[SenderPId]),
                     add_specula_meta(SpeculaDep, DependingTxId, TxId, SnapshotTime, read, SenderPId),
                     Value
             end
@@ -201,7 +200,7 @@ generate_snapshot(Snapshot, Type, Param, Actor) ->
 
 %%TODO: to optimize: no need to store the snapshottime of txn.. TxId already includs it.
 add_specula_meta(SpeculaDep, DependingTxId, TxId, SnapshotTime, OpType, CoordPId) ->
-    lager:info("Adding specula meta: deping tx ~w, depent tx ~w from ~w",[DependingTxId, TxId, CoordPId]),    
+    %lager:info("Adding specula meta: deping tx ~w, depent tx ~w from ~w",[DependingTxId, TxId, CoordPId]),    
     case ets:lookup(SpeculaDep, DependingTxId) of
         [] ->
             true = ets:insert(SpeculaDep, {DependingTxId, [{TxId, OpType, CoordPId, SnapshotTime}]});
@@ -219,8 +218,7 @@ handle_dependency([{DepTxId, OpType, CoordPId, DepSnapshotTime}|T], TxCommitTime
                 %% Has to abort...
             %% Notify coordinator
             %% TODO: not totally correct
-            lager:info("DepsnapshotTime ~w, CommitTime is ~w, 
-                    Sending abort to coordinator ~w of tx ~w",[DepSnapshotTime, TxCommitTime, CoordPId, DepTxId]),
+            %lager:info("DepsnapshotTime ~w, CommitTime is ~w, Sending abort to coordinator ~w of tx ~w",[DepSnapshotTime, TxCommitTime, CoordPId, DepTxId]),
             ?SEND_MSG(CoordPId, {abort, DepTxId}),
             case OpType of
                 update ->
@@ -246,10 +244,10 @@ handle_dependency([{DepTxId, OpType, CoordPId, DepSnapshotTime}|T], TxCommitTime
             case OpType of
                 update ->
                     %% TODO: not totally correct
-                    lager:info("Sending prepare to coordinator ~w of tx ~w",[CoordPId, DepTxId]),
+                    %lager:info("Sending prepare to coordinator ~w of tx ~w",[CoordPId, DepTxId]),
                     ?SEND_MSG(CoordPId, {prepare, DepTxId});
                 read ->
-                    lager:info("Sending read_valid to coordinator ~w of tx ~w, key ~w",[CoordPId, DepTxId, Key]),
+                    %lager:info("Sending read_valid to coordinator ~w of tx ~w, key ~w",[CoordPId, DepTxId, Key]),
                     ?SEND_MSG(CoordPId, {read_valid, DepTxId, Key})
             end
     end,
@@ -263,10 +261,10 @@ handle_abort_dependency([{DepTxId, OpType, CoordPId, _DepSnapshotTime}|T]) ->
         update ->
             %%TODO: it's not correct here. Should wait until all updates on the same partition to
             %% decide if should send prepare or abort
-            lager:info("Sending prepare of Deptx ~w",[DepTxId]),
+            %lager:info("Sending prepare of Deptx ~w",[DepTxId]),
             ?SEND_MSG(CoordPId, {prepare, DepTxId});
         read ->  
-            lager:info("Sending read of Deptx ~w",[DepTxId]),
+            %lager:info("Sending read of Deptx ~w",[DepTxId]),
             ?SEND_MSG(CoordPId, {abort, DepTxId})
     end,
     handle_abort_dependency(T).

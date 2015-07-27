@@ -42,7 +42,7 @@ check_clock(Key,TxId, Tables, From) ->
         true ->
 	    %% dont sleep in case there is another read waiting
             %% timer:sleep((T_TS - Time) div 1000 +1 );
-        %lager:info("Clock not ready"),
+        %%lager:info("Clock not ready"),
 	        not_ready;
         false ->
 	        check_prepared(Key,TxId, Tables, From)
@@ -59,7 +59,7 @@ check_prepared(Key, MyTxId, Tables, From) ->
                 true ->
                     case specula_utilities:should_specula(Time, SnapshotTime) of
                         true ->
-                            lager:info("Specula and read, sender is ~w",[Sender]), 
+                            %lager:info("Specula and read, sender is ~w",[Sender]), 
                             specula_utilities:speculate_and_read(Key, MyTxId, {TxId, Time, Type, Op, Sender}, Tables, 
                                 From);
                         false ->
@@ -73,7 +73,7 @@ check_prepared(Key, MyTxId, Tables, From) ->
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
 return(Coordinator, Key, Type,TxId, Tables) ->
-    %lager:info("Returning for key ~w",[Key]),
+    %%lager:info("Returning for key ~w",[Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     {_PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep} = Tables,
     case specula_utilities:find_specula_version(
