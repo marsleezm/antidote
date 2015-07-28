@@ -43,6 +43,7 @@ coord_should_specula(_TxnMetadata) ->
     true.
 
 
+
 %% If this txn corresponds to any specula-committed version,
 %% 1. Make the specula_committed version final committed
 %% 2. Check txns that depend on this txn

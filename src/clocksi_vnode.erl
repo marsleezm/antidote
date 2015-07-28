@@ -130,7 +130,6 @@ commit(ListofNodes, TxId, CommitTime) ->
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
 abort(ListofNodes, TxId) ->
-    lager:info("Trying to abort!"),
     dict:fold(fun(Node,WriteSet,_Acc) ->
 			riak_core_vnode_master:command(Node,
 						       {abort, TxId, WriteSet},
@@ -570,7 +569,9 @@ clean_prepared(PreparedTxs, Key, TxId) ->
         [{Key, {TxId, _Time, _Type, _Op}}] ->
             ets:delete(PreparedTxs, Key);
         [] ->
-            ok
+            ok;
+        _ ->
+            lager:info("Something went wrong.")
     end.
 
 
@@ -659,6 +660,7 @@ update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemor
     case specula_utilities:make_specula_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore,
                 PreparedTxs, SpeculaDep) of
         true -> %% The prepared value was made speculative and it is true
+            update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, SpeculaStore, PreparedTxs, SpeculaDep),
             ok;
         false -> %% There is no speculative version
             case ets:lookup(InMemoryStore, Key) of
