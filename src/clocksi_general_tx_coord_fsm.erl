@@ -210,11 +210,9 @@ receive_reply({Type, TxId, Param2},
                            current_txn_meta=CurrentTxnMeta}) ->
     case TxId of
         CurrentTxId ->
-            %lager:info("Got ~w of current tx ~w", [Type, CurrentTxId]),
             CurrentTxnMeta1 = update_txn_meta(CurrentTxnMeta, Type, Param2),
             case can_commit(CurrentTxnMeta1, SpeculaMeta, TxIdList) of
                 true ->
-                    %lager:info("Can commit ~w",[TxId]),
                     CurrentTxnMeta2 = commit_tx(CurrentTxId, CurrentTxnMeta1),
                     proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta2});
                 false ->
@@ -237,7 +235,13 @@ receive_reply({Type, TxId, Param2},
                         true -> 
                             %lager:info("Can commit ~w", [TxId]),
                             SpeculaMeta2 = cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta1, TxIdList),
-                            {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta2}}; 
+                            case can_commit(CurrentTxnMeta, SpeculaMeta2, TxIdList) of
+                                true ->
+                                    CurrentTxnMeta1 = commit_tx(CurrentTxId, CurrentTxnMeta),
+                                    proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta1});
+                                false ->
+                                    {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta2}} 
+                            end;
                         false ->
                             %lager:info("Can not commit ~w", [TxId]),
                             {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta1}} 
@@ -448,8 +452,6 @@ try_commit_successors([TxId|Rest], SpeculaMetadata) ->
 
 can_commit(TxnMeta, SpeculaMeta, TxnList) ->
     NumberUpdated = TxnMeta#txn_metadata.num_updated,
-    %lager:info("Readdep is ~w, numupdated is ~w, Numprepared is ~w",[TxnMeta#txn_metadata.read_dep, NumberUpdated,
-    %            TxnMeta#txn_metadata.num_prepared]),
     case TxnMeta#txn_metadata.read_dep of
         [] -> %%No read dependency
             case TxnMeta#txn_metadata.num_prepared of
@@ -620,49 +622,5 @@ generate_random_op(NumRead, NumWrite, Acc) ->
                     [{update, Key, riak_dt_gcounter, {increment, random:uniform(100)}}|Acc])
     end.
 
-%all_tests_test_() ->
-%    {inorder, {
-%        foreach,
-%        local,
-%        fun setup/0,
-%        fun cleanup/1,
-%        [
-%            fun read_only_test/1
-%        ]}
-%    }.
-
-%setup() ->
-%    ok.
-
-%cleanup(_) ->
-%    ok.
-
-%real_cleanup(Pid) ->
-%    case process_info(Pid) of 
-%        undefined -> io:format("Already cleaned");
-%        _ -> clocksi_interactive_tx_coord_fsm:stop(Pid) 
-%    end.
-
-%empty_txn_test() ->
-%    {ok,Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ingore, [[]]),
-%    io:format(user, "Test pid is ~w~n", [self()]),
-%    receive 
-%        Msg -> io:format(user, "Tester got msg ~w~n", [Msg]),
-%                  ?assertMatch({ok, {_, [], _}}, Msg)
-%    end,
-%    real_cleanup(Pid).
-
-%read_only_test(_) ->
-%    Key1 = {counter, 1},
-%    Key2 = {counter, 2},
-%    Type = riak_dt_gcounter,
-%    io:format(user, "Test pid is ~w~n", [self()]),
-%    {ok,Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore,
-%            [[{read, Key1, Type}, {read, Key2, Type}], [{read, Key1, Type}]]),
-%    receive 
-%        Msg -> io:format(user, "Tester ~w got msg ~w~n", [self(),Msg]),
-%                  ?assertMatch({ok, {_, [2,2,2], _}}, Msg)
-%    end,
-%    real_cleanup(Pid).
 
 -endif.

@@ -59,7 +59,7 @@ check_prepared(Key, MyTxId, Tables) ->
                 true ->
                     case specula_utilities:should_specula(Time, SnapshotTime) of
                         true ->
-                            %lager:info("Specula and read, sender is ~w",[Sender]), 
+                            %lager:info("Specula and read, sender is ~w, TxId ~w, Key ~w",[MyTxId#tx_id.server_pid, TxId, Key]), 
                             specula_utilities:speculate_and_read(Key, MyTxId, {TxId, Time, Type, Op}, Tables);
                         false ->
                             not_ready 

@@ -411,7 +411,6 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                       if_replicate=IfReplicate
                       } = State) ->
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
-    %lager:info("Received commit operation"),
     Result = commit(TxId, TxCommitTime, Updates, CommittedTx, State),
     case Result of
         {ok, {committed,NewCommittedTx}} ->
@@ -660,8 +659,7 @@ update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemor
     case specula_utilities:make_specula_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore,
                 PreparedTxs, SpeculaDep) of
         true -> %% The prepared value was made speculative and it is true
-            update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, SpeculaStore, PreparedTxs, SpeculaDep),
-            ok;
+            update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, SpeculaStore, PreparedTxs, SpeculaDep);
         false -> %% There is no speculative version
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
