@@ -67,10 +67,10 @@ start_link(Partition) ->
 replicate(Partition, PendingLog) ->
     gen_server:cast({global, get_replfsm_name(Partition)}, {replicate, PendingLog}).
 
-replicate_log(Partitions, MyPartition, Log) ->
-    lists:foreach(fun(Partition) -> 
-                    gen_server:cast({global, Partition}, 
-                    {replicate_log, MyPartition, Log}) end, Partitions).
+replicate_log(PartitionNames, MyPartition, Log) ->
+    lists:foreach(fun(PartitionName) -> 
+                    gen_server:cast({global, PartitionName}, 
+                    {replicate_log, MyPartition, Log}) end, PartitionNames).
 
 repl_ack(Partition, Reply) ->
     gen_server:cast({global, get_replfsm_name(Partition)}, {repl_ack, Reply}).
@@ -149,6 +149,7 @@ handle_cast({repl_ack, {Type, TxId}}, SD0=#state{replicated_log=ReplicatedLog,
                             {fsm, undefined, FSMSender} = Sender,
                             gen_fsm:send_event(FSMSender, MsgToReply);
                         _ -> %%Wait for more replies
+                            %lager:info("Still need ~w replies..",[AckNeeded-1]),
                             ets:insert(ReplicatedLog, {TxId, {RecordType, AckNeeded-1,
                                     Sender, MsgToReply, Record}})
                     end;

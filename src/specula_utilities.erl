@@ -103,13 +103,12 @@ abort_specula_committed(TxId, Key, SpeculaStore, SpeculaDep) ->
                     ets:delete(SpeculaDep, TxId)
             end,
             true;
-        [{Key, []}] -> %% Just prepared
-            false;    
-        [] -> %% Just prepared
-            false;    
-        Record ->
-            lager:warning("Something is wrong!!!! ~w", [Record]),
-            error
+        _ -> %% Just prepared
+            false   
+        %[] -> %% Just prepared
+        %    false;    
+        %Record ->
+        %    error
     end.
 
 
@@ -365,7 +364,7 @@ clean_specula_committed_test() ->
 
     ets:insert(SpeculaStore, {Key, [{TxId1, Tx1PrepareTime, value1}]}), 
     Result2 = abort_specula_committed(TxId2, Key, SpeculaStore, SpeculaDep),
-    ?assertEqual(Result2, error),
+    ?assertEqual(Result2, false),
 
     Result3 = abort_specula_committed(TxId1, Key, SpeculaStore, SpeculaDep),
     ?assertEqual(Result3, true),

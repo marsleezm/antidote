@@ -54,16 +54,16 @@ check_prepared(Key, MyTxId, Tables) ->
     case ets:lookup(PreparedTx, Key) of
         [] ->
             ready;
-        [{Key, {TxId, Time, Type, Op}}] ->
+        [{Key, {_TxId, Time, _Type, _Op}}] ->
             case Time =< SnapshotTime of
                 true ->
-                    case specula_utilities:should_specula(Time, SnapshotTime) of
-                        true ->
-                            %lager:info("Specula and read, sender is ~w, TxId ~w, Key ~w",[MyTxId#tx_id.server_pid, TxId, Key]), 
-                            specula_utilities:speculate_and_read(Key, MyTxId, {TxId, Time, Type, Op}, Tables);
-                        false ->
-                            not_ready 
-                    end;
+                    %case specula_utilities:should_specula(Time, SnapshotTime) of
+                    %    true ->
+                    %        lager:info("Specula and read, sender is ~w, TxId ~w, Key ~w",[MyTxId#tx_id.server_pid, TxId, Key]), 
+                    %        specula_utilities:speculate_and_read(Key, MyTxId, {TxId, Time, Type, Op}, Tables);
+                    %    false ->
+                            not_ready;
+                    %end;
                 false ->
                     ready
             end
@@ -74,18 +74,18 @@ check_prepared(Key, MyTxId, Tables) ->
 return(Key, Type,TxId, Tables) ->
     %%lager:info("Returning for key ~w",[Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
-    {_PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep} = Tables,
-    case specula_utilities:find_specula_version(
-            TxId, Key, SpeculaStore, SpeculaDep) of
-        false ->
+    {_PreparedTxs, InMemoryStore, _SpeculaStore, _SpeculaDep} = Tables,
+    %case specula_utilities:find_specula_version(
+    %        TxId, Key, SpeculaStore, SpeculaDep) of
+    %    false ->
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
                     {ok, {Type,Type:new()}};
                 [{Key, ValueList}] ->
                     {ok, find_version(ValueList, SnapshotTime, Type)}
-            end;
-        Value ->
-            {specula, {Type, Value}}
+    %        end;
+    %    Value ->
+    %        {specula, {Type, Value}}
     end.
 
 %%%%%%%%%Intenal%%%%%%%%%%%%%%%%%%

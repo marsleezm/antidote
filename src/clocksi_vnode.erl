@@ -325,6 +325,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     Result = prepare(TxId, WriteSet, CommittedTx, PrepareTime, Tables, IfCertify),
+    %lager:info("Tx ~w: for key ~w prep res is ~w",[TxId, WriteSet, Result]),
     case Result of
         {ok, NewPrepare} ->
             case IfReplicate of
@@ -347,7 +348,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                         WriteSet, OriginalSender}, {Partition, node()}]),
             {noreply, State};
         {error, write_conflict} ->
-            riak_core_vnode:reply(OriginalSender, abort),
+            riak_core_vnode:reply(OriginalSender, {abort, TxId}),
             %gen_fsm:send_event(OriginalSender, abort),
             {noreply, State}
     end;
@@ -411,6 +412,7 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                       if_replicate=IfReplicate
                       } = State) ->
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
+    %lager:info("Received commit of Tx ~w",[TxId]),
     Result = commit(TxId, TxCommitTime, Updates, CommittedTx, State),
     case Result of
         {ok, {committed,NewCommittedTx}} ->
@@ -437,6 +439,7 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
 
 handle_command({abort, TxId, Updates}, _Sender,
                #state{prepared_txs=PreparedTxs, specula_store=SpeculaStore, specula_dep=SpeculaDep} = State) ->
+    %lager:info("Tx ~w: got abort",[TxId]),
     case Updates of
         [_Something] -> 
             abort_clean(PreparedTxs, SpeculaStore, SpeculaDep, TxId, Updates),
@@ -559,7 +562,7 @@ abort_clean(PreparedTxs, SpeculaStore, SpeculaDep, TxId, [{Key, _, _}|Rest]) ->
         true ->
             abort_clean(PreparedTxs, SpeculaStore, SpeculaDep, TxId, Rest);
         false ->
-            clean_prepared(PreparedTxs, Key, TxId),
+            clean_abort_prepared(PreparedTxs, Key, TxId),
             abort_clean(PreparedTxs, SpeculaStore, SpeculaDep, TxId, Rest)
     end. 
 
@@ -567,12 +570,21 @@ clean_prepared(PreparedTxs, Key, TxId) ->
     case ets:lookup(PreparedTxs, Key) of
         [{Key, {TxId, _Time, _Type, _Op}}] ->
             ets:delete(PreparedTxs, Key);
+        _ ->
+            ok
+        %_ ->
+            %lager:info("Something went wrong.")
+    end.
+
+clean_abort_prepared(PreparedTxs, Key, TxId) ->
+    case ets:lookup(PreparedTxs, Key) of
+        [{Key, {TxId, _Time, _Type, _Op}}] ->
+            ets:delete(PreparedTxs, Key);
         [] ->
             ok;
         _ ->
-            lager:info("Something went wrong.")
+            ok
     end.
-
 
 %% @doc converts a tuple {MegaSecs,Secs,MicroSecs} into microseconds
 now_microsec({MegaSecs, Secs, MicroSecs}) ->
