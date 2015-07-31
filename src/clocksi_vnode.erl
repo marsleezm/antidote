@@ -441,12 +441,13 @@ handle_command({abort, TxId, Updates}, _Sender,
                #state{prepared_txs=PreparedTxs, specula_store=SpeculaStore, specula_dep=SpeculaDep} = State) ->
     %lager:info("Tx ~w: got abort",[TxId]),
     case Updates of
-        [_Something] -> 
-            abort_clean(PreparedTxs, SpeculaStore, SpeculaDep, TxId, Updates),
-            {noreply, State};
-            %%{reply, ack_abort, State};
         [] ->
-            {reply, {error, no_tx_record}, State}
+            {reply, {error, no_tx_record}, State};
+        _ -> 
+            abort_clean(PreparedTxs, SpeculaStore, SpeculaDep, TxId, Updates),
+            specula_utilities:finalize_dependency(TxId, ignore, SpeculaDep, abort),
+            {noreply, State}
+            %%{reply, ack_abort, State};
     end;
 
 %% @doc Return active transactions in prepare state with their preparetime
@@ -539,6 +540,7 @@ commit(TxId, TxCommitTime, Updates, CommittedTx, #state{specula_store=SpeculaSto
         [{Key, _Type, _Value} | _Rest] -> 
             update_and_clean(Updates, TxId, TxCommitTime, InMemoryStore, 
                 SpeculaStore, PreparedTxs, SpeculaDep),
+            specula_utilities:finalize_dependency(TxId, TxCommitTime, SpeculaDep, commit),
             NewDict = dict:store(Key, TxCommitTime, CommittedTx),
             {ok, {committed, NewDict}};
         _ -> 
@@ -558,7 +560,7 @@ commit(TxId, TxCommitTime, Updates, CommittedTx, #state{specula_store=SpeculaSto
 abort_clean(_PreparedTxs, _SpeculaStore, _SpeculaDep, _TxId, []) ->
     ok;
 abort_clean(PreparedTxs, SpeculaStore, SpeculaDep, TxId, [{Key, _, _}|Rest]) ->
-    case specula_utilities:abort_specula_committed(TxId, Key, SpeculaStore, SpeculaDep) of
+    case specula_utilities:abort_specula_committed(TxId, Key, SpeculaStore) of
         true ->
             abort_clean(PreparedTxs, SpeculaStore, SpeculaDep, TxId, Rest);
         false ->
@@ -668,8 +670,7 @@ update_and_clean([], _TxId, _TxCommitTime, _, _, _, _) ->
 update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemoryStore, 
                 SpeculaStore, PreparedTxs, SpeculaDep) ->
     %lager:info("Storing key ~w for ~w",[Key, TxId]),
-    case specula_utilities:make_specula_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore,
-                PreparedTxs, SpeculaDep) of
+    case specula_utilities:make_specula_version_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore) of
         true -> %% The prepared value was made speculative and it is true
             update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, SpeculaStore, PreparedTxs, SpeculaDep);
         false -> %% There is no speculative version
@@ -687,6 +688,7 @@ update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemor
             clean_prepared(PreparedTxs, Key, TxId),
             update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, SpeculaStore, PreparedTxs, SpeculaDep)
     end.
+    %% Check if any txn depends on this version
 
 %write_set_to_logrecord(TxId, WriteSet) ->
 %    lists:foldl(fun({Key,Type,Op}, Acc) ->
