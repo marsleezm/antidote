@@ -32,7 +32,7 @@
 
 -export([should_specula/2, make_prepared_specula/6, speculate_and_read/4, find_specula_version/4,
             abort_specula_committed/3, coord_should_specula/1, make_specula_version_final/5,
-            finalize_dependency/4]).
+            finalize_dependency/5]).
 
 coord_should_specula(_TxnMetadata) ->
     %case TxnMetadata#txn_metadata.final_committed of
@@ -116,6 +116,7 @@ speculate_and_read(Key, MyTxId, PreparedRecord, Tables) ->
 make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore,
                              SpeculaStore, SpeculaDep) ->
     {TxId, PrepareTime, Type, {Param, Actor}} = PreparedRecord,
+    lager:info("Trying to make prepared specula ~w for ~w",[Key, TxId]),
     SpeculaValue =  case ets:lookup(SpeculaStore, Key) of 
                         [] ->
                             %% Fetch from committed store
@@ -194,34 +195,35 @@ add_specula_meta(SpeculaDep, DependingTxId, TxId, OpType, Key) ->
     end.
 
 
-finalize_dependency(TxId, TxCommitTime, SpeculaDep, Type) ->
+finalize_dependency(NumToCount, TxId, TxCommitTime, SpeculaDep, Type) ->
     %% Check if any txn depends on this version
     case ets:lookup(SpeculaDep, TxId) of
         [] -> %% No dependency, do nothing!
-            %lager:info("No dependency for tx ~w",[TxId]),
-            ok;
+            NumToCount;
         [{TxId, DepList}] -> %% Do something for each of the dependency...
-            %lager:info("Found dependency ~w for key ~w",[DepList, TxId]),
+            lager:info("Found dependency ~w for key ~w",[DepList, TxId]),
+            true = ets:delete(SpeculaDep, TxId),
             case Type of
                 commit ->
-                    handle_dependency(DepList, TxCommitTime);
+                    handle_dependency(NumToCount, DepList, TxCommitTime);
                 abort ->
-                    handle_abort_dependency(DepList)
-            end,
-            true = ets:delete(SpeculaDep, TxId)
+                    handle_abort_dependency(NumToCount, DepList)
+            end
     end.
     
-handle_dependency([], _TxCommitTime) ->
-    ok;
-handle_dependency([{DepTxId=#tx_id{snapshot_time=DepSnapshotTime, server_pid=CoordPid}, OpType, Key}|T], 
-                TxCommitTime) ->
+handle_dependency(NumInvalidRead, [], _TxCommitTime) ->
+    NumInvalidRead;
+handle_dependency(NumInvalidRead, [{DepTxId=#tx_id{snapshot_time=DepSnapshotTime, 
+                    server_pid=CoordPid}, OpType, Key}|T], TxCommitTime) ->
     case DepSnapshotTime < TxCommitTime of
         true -> %% The transaction committed with larger timestamp which will invalide depending txns..
                 %% Has to abort...
             %% Notify coordinator
             %% TODO: not totally correct
             %lager:info("DepsnapshotTime ~w, CommitTime is ~w, Sending abort to coordinator ~w of tx ~w",[DepSnapshotTime, TxCommitTime, CoordPid, DepTxId]),
-            ?SEND_MSG(CoordPid, {abort, DepTxId});
+            ?SEND_MSG(CoordPid, {abort, DepTxId}),
+            %%TODO: treat differently when there is read
+            handle_dependency(NumInvalidRead+1, T, TxCommitTime);
             %case OpType of
             %    update ->
             %        case ets:lookup(PreparedTxs, Key) of                
@@ -247,30 +249,32 @@ handle_dependency([{DepTxId=#tx_id{snapshot_time=DepSnapshotTime, server_pid=Coo
                 update ->
                     %% TODO: not totally correct; any way to get a smaller timestamp?
                     %lager:info("Sending prepare to coordinator ~w of tx ~w",[CoordPid, DepTxId]),
-                    ?SEND_MSG(CoordPid, {prepared, DepTxId, clocksi_vnode:now_microsec(now())});
+                    ?SEND_MSG(CoordPid, {prepared, DepTxId, clocksi_vnode:now_microsec(now())}),
+                    handle_dependency(NumInvalidRead, T, TxCommitTime);
                 read ->
                     %lager:info("Sending read_valid to coordinator ~w of tx ~w, key ~w",[CoordPid, DepTxId, Key]),
-                    ?SEND_MSG(CoordPid, {read_valid, DepTxId, Key})
+                    ?SEND_MSG(CoordPid, {read_valid, DepTxId, Key}),
+                    handle_dependency(NumInvalidRead, T, TxCommitTime)
             end
-    end,
-    handle_dependency(T, TxCommitTime).
+    end.
 
 
-handle_abort_dependency([]) ->
-    ok;
-handle_abort_dependency([{DepTxId, OpType, _Key}|T]) ->
+handle_abort_dependency(NumAbortRead, []) ->
+    NumAbortRead;
+handle_abort_dependency(NumAbortRead, [{DepTxId, OpType, _Key}|T]) ->
     CoordPid = DepTxId#tx_id.server_pid,
     case OpType of
         update ->
             %%TODO: it's not correct here. Should wait until all updates on the same partition to
             %% decide if should send prepare or abort
             %lager:info("Sending prepare of Deptx ~w",[DepTxId]),
-            ?SEND_MSG(CoordPid, {prepared, DepTxId, clocksi_vnode:now_microsec(now())});
+            ?SEND_MSG(CoordPid, {prepared, DepTxId, clocksi_vnode:now_microsec(now())}),
+            handle_abort_dependency(NumAbortRead, T);
         read ->  
             %lager:info("Sending read of Deptx ~w",[DepTxId]),
-            ?SEND_MSG(CoordPid, {abort, DepTxId})
-    end,
-    handle_abort_dependency(T).
+            ?SEND_MSG(CoordPid, {abort, DepTxId}),
+            handle_abort_dependency(NumAbortRead, T)
+    end.
 
 -ifdef(TEST).
 generate_snapshot_test() ->
@@ -300,7 +304,7 @@ make_specula_version_final_test() ->
 
     %% Will succeed
     Result1 = make_specula_version_final(TxId1, Key, Tx1CommitTime, SpeculaStore, InMemoryStore),
-    finalize_dependency(TxId1, Tx1CommitTime, SpeculaDep, commit),
+    finalize_dependency(0 ,TxId1, Tx1CommitTime, SpeculaDep, commit),
     ?assertEqual(Result1, true),
     ?assertEqual([], ets:lookup(SpeculaStore, Key)),
     ?assertEqual([{Key, [{Tx1CommitTime, whatever}]}], ets:lookup(InMemoryStore, Key)),
@@ -315,7 +319,7 @@ make_specula_version_final_test() ->
 
     %% Multiple values in inmemory_store will not lost.
     Result4 = make_specula_version_final(TxId2, Key, Tx2CommitTime, SpeculaStore, InMemoryStore),
-    finalize_dependency(TxId2, Tx2CommitTime, SpeculaDep, commit),
+    finalize_dependency(0, TxId2, Tx2CommitTime, SpeculaDep, commit),
     ?assertEqual(Result4, true),
     ?assertEqual([], ets:lookup(SpeculaStore, Key)),
     ?assertEqual([{Key, [{Tx2CommitTime, whereever}, {Tx1CommitTime, whatever}]}], 
@@ -329,7 +333,7 @@ make_specula_version_final_test() ->
     ets:insert(SpeculaDep, {TxId3, Dependency}),
     Result5 = make_specula_version_final(TxId3, Key, Tx3CommitTime, 
                 SpeculaStore, InMemoryStore),
-    finalize_dependency(TxId3, Tx3CommitTime, SpeculaDep, commit),
+    finalize_dependency(0, TxId3, Tx3CommitTime, SpeculaDep, commit),
     receive Msg1 ->
         ?assertEqual({abort, TxId2}, Msg1)
     end,
@@ -375,7 +379,7 @@ clean_specula_committed_test() ->
     ets:insert(SpeculaStore, {Key, [{TxId1, Tx1PrepareTime, value1}]}), 
     ets:insert(SpeculaDep, {TxId1, [{TxId2, update, Key}, {TxId2, read, Key}]}), 
     Result5 = abort_specula_committed(TxId1, Key, SpeculaStore),
-    finalize_dependency(TxId1, ignore, SpeculaDep, abort),
+    finalize_dependency(0, TxId1, ignore, SpeculaDep, abort),
     receive Msg1 ->
         ?assertMatch({prepared, TxId2, _}, Msg1)
     end,

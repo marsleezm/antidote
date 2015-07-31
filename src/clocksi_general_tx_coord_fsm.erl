@@ -88,7 +88,11 @@
       %% Metadata for a single txn
 	  tx_id :: txid(),
       current_txn_meta :: txn_metadata(),
-      causal_clock :: non_neg_integer()}).
+      causal_clock :: non_neg_integer(),
+      %%Stat
+      num_committed,
+      num_cert_final,
+      num_read_invalid}).
 
 %%%===================================================================
 %%% API
