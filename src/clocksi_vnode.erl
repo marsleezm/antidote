@@ -52,6 +52,10 @@
          handoff_finished/2,
          handle_handoff_data/2,
          encode_handoff_item/2,
+
+         check_prepared/3,
+         certification_check/5,
+
          handle_coverage/4,
          handle_exit/3]).
 
@@ -77,6 +81,8 @@
                 specula_store :: cache_id(),
                 specula_dep :: cache_id(),
                 inmemory_store :: cache_id(),
+                total_time :: non_neg_integer(),
+                prepare_count :: non_neg_integer(),
                 num_committed :: non_neg_integer(),
                 num_aborted :: non_neg_integer(),
                 num_read_abort :: non_neg_integer(),
@@ -178,6 +184,7 @@ init([Partition]) ->
                 specula_store=SpeculaStore,
                 specula_dep=SpeculaDep,
                 inmemory_store=InMemoryStore,
+                total_time=0, prepare_count=0,
                 num_committed=0, num_cert_fail=0, num_aborted=0, num_read_invalid=0, num_read_abort=0}}.
 
 
@@ -204,17 +211,17 @@ check_table_ready([{Partition,Node}|Rest]) ->
 print_stat() ->
     {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
     PartitionList = chashbin:to_list(CHBin),
-    print_stat(PartitionList, {0,0,0,0,0}).
+    print_stat(PartitionList, {0,0,0,0,0,0,0}).
 
-print_stat([], {Acc1, Acc2, Acc3, Acc4, Acc5}) ->
-    lager:info("In total: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w",
-                [Acc1, Acc2, Acc3, Acc4, Acc5]);
-print_stat([{Partition,Node}|Rest], {Acc1, Acc2, Acc3, Acc4, Acc5}) ->
-    {Add1, Add2, Add3, Add4, Add5} = riak_core_vnode_master:sync_command({Partition,Node},
+print_stat([], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc6, Acc7}) ->
+    lager:info("In total: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, prepare time ~w",
+                [Acc1, Acc2, Acc3, Acc4, Acc5, Acc6 div Acc7]);
+print_stat([{Partition,Node}|Rest], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc6, Acc7}) ->
+    {Add1, Add2, Add3, Add4, Add5, Add6, Add7} = riak_core_vnode_master:sync_command({Partition,Node},
 						            {print_stat},
 						            ?CLOCKSI_MASTER,
 						            infinity),
-    print_stat(Rest, {Acc1+Add1, Acc2+Add2, Acc3+Add3, Acc4+Add4, Acc5+Add5}).
+    print_stat(Rest, {Acc1+Add1, Acc2+Add2, Acc3+Add3, Acc4+Add4, Acc5+Add5, Acc6+Add6, Acc7+Add7}).
 
 check_tables() ->
     {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
@@ -267,10 +274,10 @@ handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, specula_s
     {reply, ok, SD0};
 
 handle_command({print_stat},_Sender,SD0=#state{num_committed=A1, num_aborted=A2, num_cert_fail=A3, 
-                    num_read_invalid=A4, num_read_abort=A5, partition=Partition}) ->
-    lager:info("~w: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w",
-                [Partition, A1, A2, A3, A4, A5]),
-    {reply, {A1, A2, A3, A4, A5}, SD0};
+                    num_read_invalid=A4, num_read_abort=A5, total_time=A6, prepare_count=A7, partition=Partition}) ->
+    lager:info("~w: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, ~w, ~w",
+                [Partition, A1, A2, A3, A4, A5, A6, A7]),
+    {reply, {A1, A2, A3, A4, A5, A6, A7}, SD0};
 
 handle_command({check_tables_ready},_Sender,SD0=#state{partition=Partition}) ->
     Result = case ets:info(get_cache_name(Partition,prepared)) of
@@ -343,16 +350,19 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                               committed_tx=CommittedTx,
                               if_certify=IfCertify,
                               quorum=Quorum,
-                              inmemory_store=InMemoryStore,
-                              specula_store=SpeculaStore,
-                              specula_dep=SpeculaDep,
+                              %inmemory_store=InMemoryStore,
+                              %specula_store=SpeculaStore,
+                              %specula_dep=SpeculaDep,
+                              total_time=TotalTime,
+                              prepare_count=PrepareCount,
                               prepared_txs=PreparedTxs,
                               num_cert_fail=NumCertFail
                               }) ->
     PrepareTime = now_microsec(erlang:now()),
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
-    Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
+    Tables = PreparedTxs, %{PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     Result = prepare(TxId, WriteSet, CommittedTx, PrepareTime, Tables, IfCertify),
+    UsedTime = now_microsec(erlang:now()) - PrepareTime,
     %lager:info("Tx ~w: for key ~w prep res is ~w",[TxId, WriteSet, Result]),
     case Result of
         {ok, NewPrepare} ->
@@ -365,7 +375,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                 false ->
                     %lager:info("Returning prepare of ~w ~w",[TxId, NewPrepare]),
                     riak_core_vnode:reply(OriginalSender, {prepared, TxId, NewPrepare}),
-                    {noreply, State}
+                    {noreply, State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}}
             end;
         {specula_prepared, _NewPrepare} ->
             %% TODO: do nothing here... maybe should reply? I don't know...
@@ -378,7 +388,8 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
         {error, write_conflict} ->
             riak_core_vnode:reply(OriginalSender, {abort, TxId}),
             %gen_fsm:send_event(OriginalSender, abort),
-            {noreply, State#state{num_cert_fail=NumCertFail+1}}
+            {noreply, State#state{num_cert_fail=NumCertFail+1,
+                total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}}
     end;
 
 handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
@@ -387,8 +398,8 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                               if_certify=IfCertify,
                               quorum=Quorum,
                               committed_tx=CommittedTx,
-                              inmemory_store=InMemoryStore,
-                              specula_store=SpeculaStore,
+                              %inmemory_store=InMemoryStore,
+                              %specula_store=SpeculaStore,
                               specula_dep=SpeculaDep,
                               num_cert_fail=NumCertFail,
                               num_committed=NumCommitted,
@@ -396,7 +407,7 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                               num_read_invalid=NumInvalid
                               }) ->
     PrepareTime = now_microsec(erlang:now()),
-    Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
+    Tables = PreparedTxs, %{PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     Result = prepare(TxId, WriteSet, CommittedTx, PrepareTime, Tables, IfCertify), 
     case Result of
@@ -551,15 +562,15 @@ async_send_msg(Msg, To) ->
     timer:sleep(SleepTime),
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
-prepare(TxId, TxWriteSet, CommittedTx, PrepareTime, Tables, IfCertify)->
-    case certification_check(TxId, TxWriteSet, CommittedTx, Tables, IfCertify) of
+prepare(TxId, TxWriteSet, CommittedTx, PrepareTime, PreparedTxs, IfCertify)->
+    case certification_check(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify) of
         true ->
-            {PreparedTxs, _, _, _} = Tables,
+            %{PreparedTxs, _, _, _} = Tables,
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {ok, PrepareTime};
         specula_prepared ->
             %%lager:info("Certification check returns specula_prepared"),
-            {PreparedTxs, _, _, _} = Tables,
+            %{PreparedTxs, _, _, _} = Tables,
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {specula_prepared, PrepareTime};
 	    false ->
@@ -614,17 +625,15 @@ clean_prepared(PreparedTxs, Key, TxId) ->
         [{Key, {TxId, _Time, _Type, _Op}}] ->
             ets:delete(PreparedTxs, Key);
         _ ->
+            %lager:warning("My prepared record disappeard!"),
             ok
         %_ ->
-            %lager:info("Something went wrong.")
     end.
 
 clean_abort_prepared(PreparedTxs, Key, TxId) ->
     case ets:lookup(PreparedTxs, Key) of
         [{Key, {TxId, _Time, _Type, _Op}}] ->
             ets:delete(PreparedTxs, Key);
-        [] ->
-            ok;
         _ ->
             ok
     end.
@@ -635,13 +644,11 @@ now_microsec({MegaSecs, Secs, MicroSecs}) ->
 
 %% @doc Performs a certification check when a transaction wants to move
 %%      to the prepared state.
-%certification_check(_TxId, _H, _CommittedTx, _PreparedTxs) ->
-%    true.
 certification_check(_, _, _, _, false) ->
     true;
 certification_check(_, [], _, _, true) ->
     true;
-certification_check(TxId, [H|T], CommittedTx, Tables, true) ->
+certification_check(TxId, [H|T], CommittedTx, PreparedTxs, true) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     {Key, _Type, _} = H,
     case dict:find(Key, CommittedTx) of
@@ -650,9 +657,9 @@ certification_check(TxId, [H|T], CommittedTx, Tables, true) ->
                 true ->
                     false;
                 false ->
-                    case check_prepared(TxId, Key, Tables) of
+                    case check_prepared(TxId, Key, PreparedTxs) of
                         true ->
-                            certification_check(TxId, T, CommittedTx, Tables, true);
+                            certification_check(TxId, T, CommittedTx, PreparedTxs, true);
                         false ->
                             false;
                         %specula_prepared ->
@@ -663,9 +670,9 @@ certification_check(TxId, [H|T], CommittedTx, Tables, true) ->
                     end
             end;
         error ->
-            case check_prepared(TxId, Key, Tables) of
+            case check_prepared(TxId, Key, PreparedTxs) of
                 true ->
-                    certification_check(TxId, T, CommittedTx, Tables, true); 
+                    certification_check(TxId, T, CommittedTx, PreparedTxs, true); 
                 false ->
                     false;
                 specula_prepared ->
@@ -675,9 +682,8 @@ certification_check(TxId, [H|T], CommittedTx, Tables, true) ->
             end
     end.
 
-check_prepared(TxId, Key, Tables) ->
+check_prepared(TxId, Key, PreparedTxs) -> 
     SnapshotTime = TxId#tx_id.snapshot_time,
-    {PreparedTxs, _InMemoryStore, _SpeculaStore, _SpeculaDep} = Tables,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             true;

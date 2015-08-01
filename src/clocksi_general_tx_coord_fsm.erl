@@ -85,6 +85,7 @@
       specula_meta :: dict(),
       num_txns :: non_neg_integer(),
       current_txn_index :: non_neg_integer(),
+      num_committed_txn :: non_neg_integer(),
       %% Metadata for a single txn
 	  tx_id :: txid(),
       current_txn_meta :: txn_metadata(),
@@ -123,6 +124,7 @@ init([From, ClientClock, Txns]) ->
             specula_meta = dict:new(),
             txn_id_list = [],
             causal_clock = ClientClock,
+            num_committed_txn = 0,
             from = From
            },
     %io:format(user, "Sending msg to myself ~w, from is ~w~n", [Self, From]),
@@ -163,12 +165,11 @@ process_txs(SD=#state{causal_clock=CausalClock,
         %    ?CLOCKSI_VNODE:single_commit(UpdatedPart, TxId),
         %    TxnMetadata1 = TxnMetadata#txn_metadata{num_updated=1},
         %    {next_state, single_committing, SD#state{state=normal, current_txn_meta=TxnMetadata1, tx_id=TxId}};
-        N->
+        _ ->
             %lager:info("Coord sending prepare ~w", [TxId]),
             ?CLOCKSI_VNODE:prepare(WriteSet, TxId),
-            TxnMetadata1 = TxnMetadata#txn_metadata{num_updated=N},
             {next_state, receive_reply, SD#state{tx_id=TxId,
-                     current_txn_meta=TxnMetadata1}, ?SPECULA_TIMEOUT}
+                     current_txn_meta=TxnMetadata}, ?SPECULA_TIMEOUT}
     end.
 
 %% @doc in this state, the fsm waits for prepare_time from each updated
@@ -304,8 +305,8 @@ update_txn_meta(TxnMeta, Type, Param) ->
             TxnMeta#txn_metadata{read_dep=ReadDep1}
     end.
 
-%% @doc when the transaction has committed or aborted,
-%%       a reply is sent to the client that started the tx_id.
+%% @doc proceed_txn is called when timeout has expired, a transaction is aborted or 
+%%      the current transaction is committed.
 proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_index=CurrentTxnIndex,
             current_txn_meta=CurrentTxnMeta, specula_meta=SpeculaMeta, num_txns=NumTxns}) ->
     CommitTime = CurrentTxnMeta#txn_metadata.prepare_time,
@@ -314,10 +315,10 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
             case CurrentTxnMeta#txn_metadata.final_committed of 
                 true -> %%All transactions must have finished
                     %%lager:info("Finishing txn"),
-                    ReverseReadSet = get_readset(TxIdList, SpeculaMeta, []),
-                    RevReadSet1 = [CurrentTxnMeta#txn_metadata.read_set|ReverseReadSet],
+                    AllReadSet = get_readset(TxIdList, SpeculaMeta, []),
+                    AllReadSet1 = [CurrentTxnMeta#txn_metadata.read_set|AllReadSet],
                     %lager:info("Transaction finished, read set is ~w",[RevReadSet1]),
-                    From ! {ok, {TxId, lists:flatten(lists:reverse(RevReadSet1)), 
+                    From ! {ok, {TxId, lists:flatten(lists:reverse(AllReadSet1)), 
                         CommitTime}},
                     {stop, normal, S0};
                 false -> %%This is the last transaction, but not finally committed..
@@ -451,32 +452,23 @@ try_commit_successors([TxId|Rest], SpeculaMetadata) ->
 
 can_commit(_TxId, TxnMeta, SpeculaMeta, TxnList) ->
     NumberUpdated = TxnMeta#txn_metadata.num_updated,
-    case TxnMeta#txn_metadata.read_dep of
-        [] -> %%No read dependency
-            case TxnMeta#txn_metadata.num_prepared of
-                NumberUpdated ->
+    case TxnMeta#txn_metadata.num_prepared of
+        NumberUpdated ->
+            case TxnMeta#txn_metadata.read_dep of
+                [] -> %%No read dependency
                     Index = TxnMeta#txn_metadata.index,
                     case Index of 
                         1 ->
-                            %lager:info("~w, No predecessors", [TxId]),
                             true; 
                         _ ->
                             DependentTx = dict:fetch(lists:nth(Index-1, TxnList), SpeculaMeta),
-                            case DependentTx#txn_metadata.final_committed of
-                                false ->
-                                    %lager:info("~w: Can not commit due to predecessor",[TxId]),
-                                    false;
-                                true ->
-                                    %lager:info("~w: Can fully commit", [TxId]),
-                                    true
-                            end
+                            DependentTx#txn_metadata.final_committed
                     end;
                 _ ->
                     %lager:info("~w: Can not commit due to unprepared", [TxId]),
                     false
             end;
         _ ->
-            %lager:info("~w: Can not commit due to read dep", [TxId]),
             false
     end.
 
