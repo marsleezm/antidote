@@ -345,7 +345,8 @@ handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
 
 
 handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
-               State = #state{partition=Partition,
+                              State=#state{
+                               partition=Partition,
                               if_replicate=IfReplicate,
                               committed_tx=CommittedTx,
                               if_certify=IfCertify,
