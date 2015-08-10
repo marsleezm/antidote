@@ -127,7 +127,7 @@ init([From, ClientClock, Txns]) ->
             num_committed_txn = 0,
             from = From
            },
-    %io:format(user, "Sending msg to myself ~w, from is ~w~n", [Self, From]),
+    %%io:format(user, "Sending msg to myself ~w, from is ~w~n", [Self, From]),
     {ok, start_processing, SD, 0}.
 
 %% @doc Contact the leader computed in the prepare state for it to execute the
@@ -137,18 +137,24 @@ start_processing(timeout, SD) ->
     process_txs(SD).
 
 process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
-        all_txn_ops=AllTxnOps, current_txn_index=CurrentTxnIndex}) ->
+        all_txn_ops=AllTxnOps, current_txn_index=CurrentTxnIndex, num_txns=NumTxns}) ->
     TxId = tx_utilities:create_transaction_record(CausalClock),
-    MyOperations = lists:nth(CurrentTxnIndex, AllTxnOps),
-    {CanCommit, TxnMeta} = process_operations(TxId, MyOperations,
-                {dict:new(), [], dict:new(), [], true}, CurrentTxnIndex),
-    case CanCommit of
-        true -> %%TODO: has to find some way to deal with read-only transaction
-            proceed_txn(SD#state{current_txn_meta=TxnMeta, 
-                    num_committed_txn=CommittedTxn+1, tx_id=TxId});
-        false ->
-            {next_state, receive_reply, SD#state{
-                     tx_id=TxId, current_txn_meta=TxnMeta}, ?SPECULA_TIMEOUT}
+    case NumTxns of
+        0 ->
+            proceed_txn(SD#state{current_txn_meta=#txn_metadata{
+                prepare_time=clocksi_vnode:now_microsec(now())}});
+        _ -> 
+            MyOperations = lists:nth(CurrentTxnIndex, AllTxnOps),
+            {CanCommit, TxnMeta} = process_operations(TxId, MyOperations,
+                        {dict:new(), [], dict:new(), [], true}, CurrentTxnIndex),
+            case CanCommit of
+                true -> %%TODO: has to find some way to deal with read-only transaction
+                    proceed_txn(SD#state{current_txn_meta=TxnMeta, 
+                            num_committed_txn=CommittedTxn+1, tx_id=TxId});
+                false ->
+                    {next_state, receive_reply, SD#state{
+                             tx_id=TxId, current_txn_meta=TxnMeta}, ?SPECULA_TIMEOUT}
+            end
     end.
 
             %%lager:info("Write set is empty.. ~w", [TxId]),
@@ -199,6 +205,7 @@ receive_reply({Type, CurrentTxId, Param2},
                            num_committed_txn = NumCommittedTxn,
                            current_txn_meta=CurrentTxnMeta}) ->
     CurrentTxnMeta1 = update_txn_meta(CurrentTxnMeta, Type, Param2),
+    %io:format(user, "Got something ~w for ~w, is current!~n", [Type, CurrentTxId]),
     case can_commit(CurrentTxId, CurrentTxnMeta1, NumCommittedTxn) of
         true ->
            %lager:info("~w:C can commit!",[CurrentTxId]),
@@ -206,6 +213,7 @@ receive_reply({Type, CurrentTxId, Param2},
                         CurrentTxnMeta1#txn_metadata.prepare_time),
             proceed_txn(S0#state{num_committed_txn=NumCommittedTxn+1});
         false ->
+           %io:format(user, "Can not commit ~w, is curren!~n", [CurrentTxId]),
            %lager:info("~w:C can not commit!",[CurrentTxId]),
             case specula_utilities:coord_should_specula(CurrentTxnMeta1) of
                 true ->
@@ -224,12 +232,14 @@ receive_reply({Type, TxId, Param2},
     case dict:find(TxId, SpeculaMeta) of
         {ok, TxnMeta} ->
             %lager:info("Got ~w of previous tx ~w", [Type, TxId]),
+            %io:format(user, "Got something ~w for ~w, num_committed txn is ~w, not current!~n", [Type, TxId, NumCommittedTxn]),
             TxnMeta1 = update_txn_meta(TxnMeta, Type, Param2),
             SpeculaMeta1 = dict:store(TxId, TxnMeta1, SpeculaMeta),
             case can_commit(TxId, TxnMeta1, NumCommittedTxn) of
                 true -> 
                     NewNumCommitted = 
                             cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta1, TxIdList),
+                    %io:format(user, "Trying to cascading commit! ~w ~n", [TxId]),
                    %lager:info("~w: can commit! Old num is ~w, New num is ~w",[TxId, NumCommittedTxn, NewNumCommitted]),
                     case can_commit(TxId, CurrentTxnMeta, NewNumCommitted) of
                         true ->
@@ -244,7 +254,7 @@ receive_reply({Type, TxId, Param2},
                     end;
                 false ->
                    %lager:info("~w: can not commit! Old num is ~w",[TxId, NumCommittedTxn]),
-                    %lager:info("Can not commit ~w", [TxId]),
+                    %io:format(user, "Can not commit ~w, not current!~n", [TxId]),
                     {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta1}} 
             end;
         error ->
@@ -268,7 +278,7 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
                     timer:sleep(random:uniform(?DUMB_TIMEOUT)),
                     process_txs(S1);
                 error ->
-                    %lager:warning("Can't find txn wants to abort!!! ~w",[TxId]),
+                    %%lager:warning("Can't find txn wants to abort!!! ~w",[TxId]),
                     {next_state, receive_reply, S0}
             end
     end.
@@ -297,6 +307,7 @@ update_txn_meta(TxnMeta, Type, Param) ->
         read_valid ->
             ReadDep = TxnMeta#txn_metadata.read_dep,
             ReadDep1 = lists:delete(Param, ReadDep),
+            %io:format(user,"New readdep is ~w~n",[ReadDep1]),
             TxnMeta#txn_metadata{read_dep=ReadDep1}
     end.
 
@@ -309,7 +320,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
     case NumTxns of
         %% The last txn has already committed
         NumCommittedTxn ->
-           %lager:info("Finishing txn"),
+            %io:format(user, "Finishing txn ~w ~n", [NumTxns]),
             AllReadSet = get_readset(TxIdList, SpeculaMeta, []),
             AllReadSet1 = [CurrentTxnMeta#txn_metadata.read_set|AllReadSet],
             %lager:info("Transaction finished, read set is ~w",[RevReadSet1]),
@@ -319,9 +330,11 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
         %% In the last txn but has not committed
         CurrentTxnIndex ->
            %lager:info("Has to wait again!, NumCommitted",[NumCommittedTxn]),
+            %io:format(user, "Has to wait again ~w ~n", [NumCommittedTxn]),
             {next_state, receive_reply, S0};
         %% Proceed
         _ -> 
+            %io:format(user, "Proceeding txn ~w ~n", [NumCommittedTxn]),
             SpeculaMeta1 = dict:store(TxId, CurrentTxnMeta, SpeculaMeta),
             TxIdList1 = TxIdList ++ [TxId],
             process_txs(S0#state{specula_meta=SpeculaMeta1, current_txn_index=CurrentTxnIndex+1, 
@@ -375,7 +388,7 @@ process_operations(TxId, [{read, Key, Type}|Rest], {UpdatedParts, RSet, Buffer, 
                                     _ ->
                                         {ReadDep, CanCommit}
                                end,
-    %io:format(user, "~nType is ~w, Key is ~w~n",[Type, Key]),
+    %%io:format(user, "~nType is ~w, Key is ~w~n",[Type, Key]),
     {_, {Type, KeySnapshot}} = Reply,
     Buffer1 = dict:store(Key, KeySnapshot, Buffer),
     process_operations(TxId, Rest, {UpdatedParts, 
@@ -452,14 +465,14 @@ can_commit(_TxId, TxnMeta, NumCommittedTxn) ->
         0 ->
             case TxnMeta#txn_metadata.read_dep of
                 [] -> %%No read dependency
-                   %lager:info("~w: Committed is ~w, index is ~w", [TxId, NumCommittedTxn, TxnMeta#txn_metadata.index]),
+                    %io:format(user, "Committed is ~w, index is ~w~n", [NumCommittedTxn, TxnMeta#txn_metadata.index]),
                     NumCommittedTxn == TxnMeta#txn_metadata.index - 1;
                 _ ->
-                   %lager:info("~w: Can not commit due to unprepared", [TxId]),
+                    %io:format(user, "Can not commit due to unprepared ~w~n", [W]),
                     false
             end;
         _N ->
-           %lager:info("~w: failed due to not prepared ~w",[TxId, N]),
+            %io:format(user, "failed due to not prepared ~w~n",[N]),
             false
     end.
 
@@ -601,6 +614,164 @@ generate_random_op(NumRead, NumWrite, Acc) ->
         1 ->
             generate_random_op(NumRead, NumWrite-1,
                     [{update, Key, riak_dt_gcounter, {increment, random:uniform(100)}}|Acc])
+    end.
+
+main_test_() ->
+    {foreach,
+     fun setup/0,
+     [
+      fun empty_test/1,
+      fun single_txn_single_read_test/1,
+      fun single_txn_multi_read_test/1,
+      fun single_txn_mixed_test/1,
+
+      fun multi_txn_single_read_test/1,
+      fun multi_txn_multi_read_test/1,
+
+      fun multi_txn_read_dep_test/1,
+      fun multi_txn_multi_read_dep_test/1,
+      fun multi_txn_wait_test/1,
+      fun multi_txn_multi_wait_test/1
+%      fun update_single_success_test/1,
+%      fun update_multi_abort_test1/1,
+%      fun update_multi_abort_test2/1,
+%      fun update_multi_success_test/1,
+
+%      fun read_single_fail_test/1,
+%      fun read_success_test/1
+
+     ]}.
+
+% Setup and Cleanup
+setup()      -> ignore. 
+
+empty_test(_) ->
+    fun() ->
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, []), 
+            receive Msg ->
+                ?assertMatch({ok, {_, [], _}}, Msg)
+            end
+    end.
+
+single_txn_single_read_test(_) ->
+    fun() ->
+            Key = counter,
+            Type = riak_dt_gcounter,
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, [[{read, Key, Type}]]), 
+            receive Msg ->
+                ?assertMatch({ok, {_, [2], _}}, Msg)
+            end
+    end.
+
+single_txn_multi_read_test(_) ->
+    fun() ->
+            Key1 = {counter,1},
+            Key2 = {counter,2},
+            Type = riak_dt_gcounter,
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, 
+                    [[{read, Key1, Type}, {read, Key2, Type}]]), 
+            receive Msg ->
+                ?assertMatch({ok, {_, [2,2], _}}, Msg)
+            end
+    end.
+
+single_txn_mixed_test(_) ->
+    fun() ->
+            Key1 = {counter,1},
+            Type = riak_dt_gcounter,
+            Param = {increment, noone},
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, 
+                    [[{read, Key1, Type}, {update, Key1, Type, Param}, {read, Key1, Type}]]), 
+            receive Msg ->
+                ?assertMatch({ok, {_, [2,3], _}}, Msg)
+            end
+    end.
+
+multi_txn_single_read_test(_) ->
+    fun() ->
+            Key = counter,
+            Type = riak_dt_gcounter,
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, [[{read, Key, Type}],
+                    [{read, Key, Type}]]), 
+            receive Msg ->
+                ?assertMatch({ok, {_, [2,2], _}}, Msg)
+            end
+    end.
+
+multi_txn_multi_read_test(_) ->
+    fun() ->
+            Key1 = {counter,1},
+            Key2 = {counter,2},
+            Type = riak_dt_gcounter,
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, 
+                    [[{read, Key1, Type}, {read, Key2, Type}], [{read, Key1, Type}, {read, Key2, Type}]]), 
+            receive Msg ->
+                ?assertMatch({ok, {_, [2,2,2,2], _}}, Msg)
+            end
+    end.
+
+multi_txn_read_dep_test(_) ->
+    fun() ->
+            Key1 = {counter,1},
+            Key2 = {counter,2},
+            SpeculaKey1 = {specula, 100, 100},
+            Type = riak_dt_gcounter,
+            Param = {increment, noone},
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, 
+                    [[{read, SpeculaKey1, Type}, {read, Key1, Type}], [{update, Key2, Type, Param}]]), 
+            receive Msg ->
+                ?assertMatch({ok, {_, [2,2], _}}, Msg)
+            end
+    end.
+
+multi_txn_multi_read_dep_test(_) ->
+    fun() ->
+            SpeculaKey1 = {specula, 100, 500},
+            SpeculaKey2 = {specula, 100, 300},
+            SpeculaKey3 = {specula, 100, 100},
+            Type = riak_dt_gcounter,
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, 
+                    [[{read, SpeculaKey1, Type}], 
+                    [{read, SpeculaKey2, Type}], 
+                    [{read, SpeculaKey3, Type}]]), 
+            receive Msg ->
+                ?assertMatch({ok, {_, [2,2,2], _}}, Msg)
+            end
+    end.
+
+multi_txn_wait_test(_) ->
+    fun() ->
+            Key1 = {counter,1},
+            Key2 = {counter,2},
+            WaitKey = {wait, 100},
+            SpeculaKey1 = {specula, 100, 100},
+            Type = riak_dt_gcounter,
+            Param = {increment, noone},
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, [ 
+                    [{read, SpeculaKey1, Type}, {read, Key1, Type}], 
+                    [{update, WaitKey, Type, Param}],
+                    [{read, Key2, Type}, {update, Key2, Type, Param}]
+                    ]), 
+            receive Msg ->
+                ?assertMatch({ok, {_, [2,2,2], _}}, Msg)
+            end
+    end.
+
+multi_txn_multi_wait_test(_) ->
+    fun() ->
+            WaitKey1 = {wait, 500},
+            WaitKey2 = {wait, 300},
+            WaitKey3 = {wait, 100},
+            Type = riak_dt_gcounter,
+            Param = {increment, noone},
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, [ 
+                    [{update, WaitKey1, Type, Param}], 
+                    [{update, WaitKey2, Type, Param}], 
+                    [{update, WaitKey3, Type, Param}]
+                    ]), 
+            receive Msg ->
+                ?assertMatch({ok, {_, [], _}}, Msg)
+            end
     end.
 
 

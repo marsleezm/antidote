@@ -115,7 +115,8 @@ read_data_item(_IndexNode, Key, _Type, TxId) ->
             {ok, Counter1} = riak_dt_gcounter:update(increment, haha, Counter),
             {ok, Counter2} = riak_dt_gcounter:update(increment, nono, Counter1),
             Sender = self(),
-            spawn(fun() -> timer:sleep(Delay), Sender ! {read_valid, TxId, Key} end),
+            spawn(fun() -> timer:sleep(Delay), 
+                    gen_fsm:send_event(Sender, {read_valid, TxId, Key}) end),
             {specula, {riak_dt_gcounter,Counter2}};
         set ->
             Set = riak_dt_gset:new(),
@@ -176,17 +177,16 @@ execute_op({async_read_data_item, Key, From}, State) ->
     {next_state, execute_op, State#state{key=Key}};
 
 execute_op({prepare, TxId, From, [{Key, _, _}]}, State) ->
+    Now = clocksi_vnode:now_microsec(now()),
     case Key of 
-        success -> gen_fsm:send_event(From, {prepared, TxId, 10});
         timeout -> gen_fsm:send_event(From, timeout);
-        {wait, Delay} -> timer:sleep(Delay), gen_fsm:send(From, {prepared, TxId, 10});
-        {abort, wait, Delay} -> timer:sleep(Delay), gen_fsm:send(From, {abort, TxId});
-        _ -> gen_fsm:send_event(From, abort) 
+        {wait, Delay} -> timer:sleep(Delay), gen_fsm:send_event(From, {prepared, TxId, Now});
+        {abort, Delay} -> timer:sleep(Delay), gen_fsm:send_event(From, {abort, TxId});
+        _ -> gen_fsm:send_event(From, {prepared, TxId, Now})
     end,
     {next_state, execute_op, State#state{key=Key}};
 
-execute_op({commit,From}, State) ->
-    gen_fsm:send_event(From, committed),
+execute_op({commit, _From}, State) ->
     {stop, normal, State};
 
 execute_op({single_commit, {From, _TxId, WriteSet}}, State) ->
