@@ -125,7 +125,6 @@ init([From, ClientClock, Operations]) ->
 execute_batch_ops(timeout, SD=#state{
                                      tx_id = TxId,
                                      operations = Operations}) ->
-    [Tx1|OtherTxs] = Operations,
     ProcessOp = fun(Operation, {UpdatedPartitions, NumToRead}) ->
                     case Operation of
                         {read, Key, Type} ->
@@ -142,19 +141,19 @@ execute_batch_ops(timeout, SD=#state{
                             {UpdatedPartitions1, NumToRead}
                     end
                 end,
-    {WriteSet, NumOfReads} = lists:foldl(ProcessOp, {dict:new(),0}, Tx1),
+    {WriteSet, NumOfReads} = lists:foldl(ProcessOp, {dict:new(),0}, Operations),
     %lager:info("Operations are ~w, WriteSet is ~w, NumOfReads ~w",[Operations, WriteSet, NumOfReads]),
     case dict:size(WriteSet) of
         0->
             case NumOfReads of
                 0 ->
                     reply_to_client(SD#state{state=committed, 
-                            commit_time=clocksi_vnode:now_microsec(erlang:now()), operations=OtherTxs});
+                            commit_time=clocksi_vnode:now_microsec(erlang:now())});
                 _ ->
                     %%lager:info("Waiting for ~w reads to reply", [NumOfReads]),
                     Snapshot_time=TxId#tx_id.snapshot_time,
                     {next_state, single_committing, SD#state{state=committing, num_to_ack=0, 
-                        commit_time=Snapshot_time, num_to_read=NumOfReads, operations=OtherTxs}}
+                        commit_time=Snapshot_time, num_to_read=NumOfReads}}
             end;
         1->
             UpdatedPart = dict:to_list(WriteSet),
@@ -163,18 +162,18 @@ execute_batch_ops(timeout, SD=#state{
             %            end, [], UpdatedPart),
             ?CLOCKSI_VNODE:single_commit(UpdatedPart, TxId),
             {next_state, single_committing,
-            SD#state{state=committing, num_to_ack=1, num_to_read=NumOfReads, operations=OtherTxs}};
+            SD#state{state=committing, num_to_ack=1, num_to_read=NumOfReads}};
         N->
             ?CLOCKSI_VNODE:prepare(WriteSet, TxId),
             {next_state, receive_prepared, SD#state{num_to_ack=N, state=prepared, 
-                num_to_read=NumOfReads, updated_partitions=WriteSet, operations=OtherTxs}}
+                num_to_read=NumOfReads, updated_partitions=WriteSet}}
     end.
     %{next_state, prepare, SD#state{read_set=ReadSet, updated_partitions=UpdatedPartitions}, 0}
 
 %% @doc in this state, the fsm waits for prepare_time from each updated
 %%      partitions in order to compute the final tx timestamp (the maximum
 %%      of the received prepare_time).
-receive_prepared({prepared, ReceivedPrepareTime},
+receive_prepared({prepared, _, ReceivedPrepareTime},
                  S0=#state{num_to_ack=NumToAck,
                            num_to_read=NumToRead,
                            prepare_time=PrepareTime}) ->
@@ -213,7 +212,7 @@ receive_prepared({ok, {Type,Snapshot}},
              S0#state{read_set=ReadSet1, num_to_read = NumToRead-1}}
     end;
 
-receive_prepared(abort, S0) ->
+receive_prepared({abort, _}, S0) ->
     {next_state, abort, S0, 0};
 
 receive_prepared(timeout, S0) ->
