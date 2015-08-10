@@ -54,7 +54,6 @@
          encode_handoff_item/2,
 
          check_prepared/3,
-         certification_check/5,
 
          handle_coverage/4,
          handle_exit/3]).
@@ -78,7 +77,7 @@
                 if_certify :: boolean(),
                 if_replicate :: boolean(),
                 quorum :: non_neg_integer(),
-                specula_store :: cache_id(),
+
                 specula_dep :: cache_id(),
                 inmemory_store :: cache_id(),
                 total_time :: non_neg_integer(),
@@ -161,7 +160,6 @@ init([Partition]) ->
     CommittedTx = dict:new(),
     %%true = ets:insert(PreparedTxs, {committed_tx, dict:new()}),
     InMemoryStore = open_table(Partition, inmemory_store),
-    SpeculaStore = open_table(Partition, specula_store),
     SpeculaDep = open_table(Partition, specula_dep),
     
     IfCertify = antidote_config:get(do_cert),
@@ -181,7 +179,6 @@ init([Partition]) ->
                 quorum = Quorum,
                 if_certify = IfCertify,
                 if_replicate = IfReplicate,
-                specula_store=SpeculaStore,
                 specula_dep=SpeculaDep,
                 inmemory_store=InMemoryStore,
                 total_time=0, prepare_count=0,
@@ -268,7 +265,7 @@ check_prepared_empty([{Partition,Node}|Rest]) ->
     end,
 	check_prepared_empty(Rest).
 
-handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, specula_store=S2, prepared_txs=S3,
+handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, inmemory_store=S2, prepared_txs=S3,
             partition=Partition}) ->
     lager:warning("Partition ~w: Dep is ~w, Store is ~w, Prepared is ~w", [Partition, ets:tab2list(S1), ets:tab2list(S2), ets:tab2list(S3)]),
     {reply, ok, SD0};
@@ -303,8 +300,8 @@ handle_command({check_servers_ready},_Sender,SD0) ->
 
 handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, 
-            specula_store=SpeculaStore, specula_dep=SpeculaDep, partition=Partition}) ->
-    Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
+            specula_dep=SpeculaDep, partition=Partition}) ->
+    Tables = {PreparedTxs, InMemoryStore, SpeculaDep},
     case clocksi_readitem:check_clock(Key, TxId, Tables) of
         not_ready ->
             spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
@@ -321,9 +318,9 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
 
 handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, 
-            specula_store=SpeculaStore, specula_dep=SpeculaDep, partition=Partition}) ->
+            specula_dep=SpeculaDep, partition=Partition}) ->
     %lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
-    Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
+    Tables = {PreparedTxs, InMemoryStore, SpeculaDep},
     case clocksi_readitem:check_clock(Key, TxId, Tables) of
         not_ready ->
             spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
@@ -352,7 +349,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                               if_certify=IfCertify,
                               quorum=Quorum,
                               %inmemory_store=InMemoryStore,
-                              %specula_store=SpeculaStore,
+                              specula_store=SpeculaStore,
                               %specula_dep=SpeculaDep,
                               total_time=TotalTime,
                               prepare_count=PrepareCount,
@@ -362,7 +359,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
     PrepareTime = now_microsec(erlang:now()),
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     Tables = PreparedTxs, %{PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
-    Result = prepare(TxId, WriteSet, CommittedTx, PrepareTime, Tables, IfCertify),
+    Result = prepare(TxId, WriteSet, CommittedTx, PrepareTime, Tables, SpeculaStore, IfCertify),
     UsedTime = now_microsec(erlang:now()) - PrepareTime,
     %lager:info("Tx ~w: for key ~w prep res is ~w",[TxId, WriteSet, Result]),
     case Result of
@@ -400,7 +397,7 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                               quorum=Quorum,
                               committed_tx=CommittedTx,
                               %inmemory_store=InMemoryStore,
-                              %specula_store=SpeculaStore,
+                              specula_store=SpeculaStore,
                               specula_dep=SpeculaDep,
                               num_cert_fail=NumCertFail,
                               num_committed=NumCommitted,
@@ -410,7 +407,8 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
     PrepareTime = now_microsec(erlang:now()),
     Tables = PreparedTxs, %{PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
-    Result = prepare(TxId, WriteSet, CommittedTx, PrepareTime, Tables, IfCertify), 
+    Result = prepare(TxId, WriteSet, CommittedTx, 
+                PrepareTime, Tables, SpeculaStore, IfCertify), 
     case Result of
         {ok, NewPrepare} ->
             ResultCommit = commit(TxId, NewPrepare, WriteSet, CommittedTx, State),
@@ -563,8 +561,8 @@ async_send_msg(Msg, To) ->
     timer:sleep(SleepTime),
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
-prepare(TxId, TxWriteSet, CommittedTx, PrepareTime, PreparedTxs, IfCertify)->
-    case certification_check(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify) of
+prepare(TxId, TxWriteSet, CommittedTx, PrepareTime, PreparedTxs, SpeculaStore, IfCertify)->
+    case certification_check(TxId, TxWriteSet, CommittedTx, PreparedTxs, SpeculaStore, IfCertify) of
         true ->
             %{PreparedTxs, _, _, _} = Tables,
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
@@ -645,42 +643,42 @@ now_microsec({MegaSecs, Secs, MicroSecs}) ->
 
 %% @doc Performs a certification check when a transaction wants to move
 %%      to the prepared state.
-certification_check(_, _, _, _, false) ->
+certification_check(_, _, _, _, _, false) ->
     true;
-certification_check(_, [], _, _, true) ->
+certification_check(_, [], _, _, _, true) ->
     true;
-certification_check(TxId, [H|T], CommittedTx, PreparedTxs, true) ->
+certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     {Key, _Type, _} = H,
-    case dict:find(Key, CommittedTx) of
-        {ok, CommitTime} ->
-            case CommitTime > SnapshotTime of
-                true ->
-                    false;
-                false ->
+    case ets:lookup(SpeculaStore, Key) of
+        [] ->
+            case dict:find(Key, CommittedTx) of
+                {ok, CommitTime} ->
+                    case CommitTime > SnapshotTime of
+                        true ->
+                            false;
+                        false ->
+                            case check_prepared(TxId, Key, PreparedTxs) of
+                                true ->
+                                    certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true);
+                                false ->
+                                    false
+                            end
+                    end;
+                error ->
                     case check_prepared(TxId, Key, PreparedTxs) of
                         true ->
-                            certification_check(TxId, T, CommittedTx, PreparedTxs, true);
+                            certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true); 
                         false ->
                             false;
-                        %specula_prepared ->
-                        %    certification_check(TxId, T, CommittedTx, Tables, true),
-                        %    specula_prepared;
+                        specula_prepared ->
+                            specula_prepared;
                         wait ->
                             wait
                     end
             end;
-        error ->
-            case check_prepared(TxId, Key, PreparedTxs) of
-                true ->
-                    certification_check(TxId, T, CommittedTx, PreparedTxs, true); 
-                false ->
-                    false;
-                specula_prepared ->
-                    specula_prepared;
-                wait ->
-                    wait
-            end
+        _ ->
+            false
     end.
 
 check_prepared(TxId, Key, PreparedTxs) -> 
@@ -738,38 +736,3 @@ update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemor
     end.
     %% Check if any txn depends on this version
 
-%write_set_to_logrecord(TxId, WriteSet) ->
-%    lists:foldl(fun({Key,Type,Op}, Acc) ->
-%			Acc ++ [#log_record{tx_id=TxId, op_type=update,
-%					    op_payload={Key, Type, Op}}]
-%		end,[],WriteSet).
-
-%% Internal functions
-filter_updates_per_key(Updates, Key) ->
-    FilterMapFun = fun ({KeyPrime, _Type, Op}) ->
-        case KeyPrime == Key of
-            true  -> {true, Op};
-            false -> false
-        end
-    end,
-    lists:filtermap(FilterMapFun, Updates).
-
-
--ifdef(TEST).
-
-%% @doc Testing filter_updates_per_key.
-filter_updates_per_key_test()->
-    Op1 = {update, {{increment,1}, actor1}},
-    Op2 = {update, {{increment,2}, actor1}},
-    Op3 = {update, {{increment,3}, actor1}},
-    Op4 = {update, {{increment,4}, actor1}},
-
-    ClockSIOp1 = {a, crdt_pncounter, Op1},
-    ClockSIOp2 = {b, crdt_pncounter, Op2},
-    ClockSIOp3 = {c, crdt_pncounter, Op3},
-    ClockSIOp4 = {a, crdt_pncounter, Op4},
-
-    ?assertEqual([Op1, Op4], 
-        filter_updates_per_key([ClockSIOp1, ClockSIOp2, ClockSIOp3, ClockSIOp4], a)).
-
--endif.
