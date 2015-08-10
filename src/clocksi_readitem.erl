@@ -74,18 +74,18 @@ check_prepared(Key, MyTxId, Tables) ->
 return(Key, Type,TxId, Tables) ->
     %%lager:info("Returning for key ~w",[Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
-    {_PreparedTxs, InMemoryStore, _SpeculaStore, _SpeculaDep} = Tables,
-    %case specula_utilities:find_specula_version(
-    %        TxId, Key, SpeculaStore, SpeculaDep) of
-    %    false ->
+    {_PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep} = Tables,
+    case specula_utilities:find_specula_version(
+            TxId, Key, SpeculaStore, SpeculaDep) of
+        false ->
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
                     {ok, {Type,Type:new()}};
                 [{Key, ValueList}] ->
                     {ok, find_version(ValueList, SnapshotTime, Type)}
-    %        end;
-    %    Value ->
-    %        {specula, {Type, Value}}
+            end;
+        Value ->
+            {specula, {Type, Value}}
     end.
 
 %%%%%%%%%Intenal%%%%%%%%%%%%%%%%%%
