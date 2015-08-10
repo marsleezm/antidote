@@ -129,8 +129,8 @@ find_specula_version(TxId=#tx_id{snapshot_time=SnapshotTime}, Key, SpeculaStore,
     case ets:lookup(SpeculaStore, Key) of
         [] -> %% No specula version
             false;
-        [{Key, Value}] ->
-            case find_version(ValueList, SnapshotTime) of
+        [{Key, SpeculaValue}] ->
+            case find_version(SpeculaValue, SnapshotTime) of
                 false -> %% No corresponding specula version TODO: will this ever happen?
                     false;
                 {DependingTxId, Value} -> 
@@ -141,14 +141,12 @@ find_specula_version(TxId=#tx_id{snapshot_time=SnapshotTime}, Key, SpeculaStore,
     end.
             
 
-find_version([], _SnapshotTime) ->
-    false;
-find_version([{TxId, TS, Value}|Rest], SnapshotTime) ->
+find_version({TxId, TS, Value}, SnapshotTime) ->
     case SnapshotTime >= TS of
         true ->
             {TxId,Value};
         false ->
-            find_version(Rest, SnapshotTime)
+            false
     end.
 
 

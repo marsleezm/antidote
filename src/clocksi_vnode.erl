@@ -79,7 +79,9 @@
                 quorum :: non_neg_integer(),
 
                 specula_dep :: cache_id(),
+                specula_store :: cache_id(),
                 inmemory_store :: cache_id(),
+
                 total_time :: non_neg_integer(),
                 prepare_count :: non_neg_integer(),
                 num_committed :: non_neg_integer(),
@@ -160,6 +162,7 @@ init([Partition]) ->
     CommittedTx = dict:new(),
     %%true = ets:insert(PreparedTxs, {committed_tx, dict:new()}),
     InMemoryStore = open_table(Partition, inmemory_store),
+    SpeculaStore = open_table(Partition, specula_store),
     SpeculaDep = open_table(Partition, specula_dep),
     
     IfCertify = antidote_config:get(do_cert),
@@ -179,6 +182,7 @@ init([Partition]) ->
                 quorum = Quorum,
                 if_certify = IfCertify,
                 if_replicate = IfReplicate,
+                specula_store=SpeculaStore,
                 specula_dep=SpeculaDep,
                 inmemory_store=InMemoryStore,
                 total_time=0, prepare_count=0,
@@ -265,7 +269,7 @@ check_prepared_empty([{Partition,Node}|Rest]) ->
     end,
 	check_prepared_empty(Rest).
 
-handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, inmemory_store=S2, prepared_txs=S3,
+handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, specula_store=S2, prepared_txs=S3,
             partition=Partition}) ->
     lager:warning("Partition ~w: Dep is ~w, Store is ~w, Prepared is ~w", [Partition, ets:tab2list(S1), ets:tab2list(S2), ets:tab2list(S3)]),
     {reply, ok, SD0};
@@ -299,9 +303,9 @@ handle_command({check_servers_ready},_Sender,SD0) ->
     {reply, true, SD0};
 
 handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, 
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_store=SpeculaStore,
             specula_dep=SpeculaDep, partition=Partition}) ->
-    Tables = {PreparedTxs, InMemoryStore, SpeculaDep},
+    Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     case clocksi_readitem:check_clock(Key, TxId, Tables) of
         not_ready ->
             spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
@@ -317,10 +321,10 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
     end;
 
 handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, 
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_store=SpeculaStore, 
             specula_dep=SpeculaDep, partition=Partition}) ->
     %lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
-    Tables = {PreparedTxs, InMemoryStore, SpeculaDep},
+    Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     case clocksi_readitem:check_clock(Key, TxId, Tables) of
         not_ready ->
             spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
