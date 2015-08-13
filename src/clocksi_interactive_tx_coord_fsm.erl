@@ -103,7 +103,7 @@ start_link(From, Clientclock) ->
     gen_fsm:start_link(?MODULE, [From, Clientclock], []).
 
 start_link(From) ->
-    gen_fsm:start_link(?MODULE, [From, ignore], []).
+    gen_fsm:start_link(?MODULE, [From, 0], []).
 
 finish_op(From, Key,Result) ->
     gen_fsm:send_event(From, {Key, Result}).
@@ -128,7 +128,7 @@ init([From, ClientClock]) ->
 
 -spec perform_singleitem_read(key(),type()) -> {ok,val()} | {error,reason()}.
 perform_singleitem_read(Key,Type) ->
-    TxId = tx_utilities:create_transaction_record(ignore),
+    TxId = tx_utilities:create_transaction_record(0),
     Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
     IndexNode = hd(Preflist),
     case ?CLOCKSI_VNODE:read_data_item(IndexNode, Key, Type, TxId) of
@@ -406,7 +406,7 @@ main_test_() ->
      ]}.
 
 % Setup and Cleanup
-setup()      -> {ok,Pid} = clocksi_interactive_tx_coord_fsm:start_link(self(), ignore), Pid. 
+setup()      -> {ok,Pid} = clocksi_interactive_tx_coord_fsm:start_link(self(), 0), Pid. 
 cleanup(Pid) -> case process_info(Pid) of undefined -> io:format("Already cleaned");
                                            _ -> clocksi_interactive_tx_coord_fsm:stop(Pid) end.
 

@@ -95,7 +95,7 @@ start_link(From, Clientclock, Operations) ->
     gen_fsm:start_link(?MODULE, [From, Clientclock, Operations], []).
 
 start_link(From, Operations) ->
-    gen_fsm:start_link(?MODULE, [From, ignore, Operations], []).
+    gen_fsm:start_link(?MODULE, [From, 0, Operations], []).
 
 stop(Pid) -> gen_fsm:sync_send_all_state_event(Pid,stop).
 

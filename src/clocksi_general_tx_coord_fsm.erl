@@ -103,7 +103,7 @@ start_link(From, Clientclock, Operations) ->
     gen_fsm:start_link(?MODULE, [From, Clientclock, Operations], []).
 
 start_link(From, Operations) ->
-    gen_fsm:start_link(?MODULE, [From, ignore, Operations], []).
+    gen_fsm:start_link(?MODULE, [From, 0, Operations], []).
 
 finish_op(From, Key,Result) ->
     gen_fsm:send_event(From, {Key, Result}).
@@ -647,7 +647,7 @@ setup()      -> ignore.
 
 empty_test(_) ->
     fun() ->
-            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, []), 
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), 0, []), 
             receive Msg ->
                 ?assertMatch({ok, {_, [], _}}, Msg)
             end
@@ -657,7 +657,7 @@ single_txn_single_read_test(_) ->
     fun() ->
             Key = counter,
             Type = riak_dt_gcounter,
-            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, [[{read, Key, Type}]]), 
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), 0, [[{read, Key, Type}]]), 
             receive Msg ->
                 ?assertMatch({ok, {_, [2], _}}, Msg)
             end
@@ -668,7 +668,7 @@ single_txn_multi_read_test(_) ->
             Key1 = {counter,1},
             Key2 = {counter,2},
             Type = riak_dt_gcounter,
-            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, 
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), 0, 
                     [[{read, Key1, Type}, {read, Key2, Type}]]), 
             receive Msg ->
                 ?assertMatch({ok, {_, [2,2], _}}, Msg)
@@ -680,7 +680,7 @@ single_txn_mixed_test(_) ->
             Key1 = {counter,1},
             Type = riak_dt_gcounter,
             Param = {increment, noone},
-            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, 
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), 0, 
                     [[{read, Key1, Type}, {update, Key1, Type, Param}, {read, Key1, Type}]]), 
             receive Msg ->
                 ?assertMatch({ok, {_, [2,3], _}}, Msg)
@@ -691,7 +691,7 @@ multi_txn_single_read_test(_) ->
     fun() ->
             Key = counter,
             Type = riak_dt_gcounter,
-            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, [[{read, Key, Type}],
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), 0, [[{read, Key, Type}],
                     [{read, Key, Type}]]), 
             receive Msg ->
                 ?assertMatch({ok, {_, [2,2], _}}, Msg)
@@ -703,7 +703,7 @@ multi_txn_multi_read_test(_) ->
             Key1 = {counter,1},
             Key2 = {counter,2},
             Type = riak_dt_gcounter,
-            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, 
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), 0, 
                     [[{read, Key1, Type}, {read, Key2, Type}], [{read, Key1, Type}, {read, Key2, Type}]]), 
             receive Msg ->
                 ?assertMatch({ok, {_, [2,2,2,2], _}}, Msg)
@@ -717,7 +717,7 @@ multi_txn_read_dep_test(_) ->
             SpeculaKey1 = {specula, 100, 100},
             Type = riak_dt_gcounter,
             Param = {increment, noone},
-            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, 
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), 0, 
                     [[{read, SpeculaKey1, Type}, {read, Key1, Type}], [{update, Key2, Type, Param}]]), 
             receive Msg ->
                 ?assertMatch({ok, {_, [2,2], _}}, Msg)
@@ -730,7 +730,7 @@ multi_txn_multi_read_dep_test(_) ->
             SpeculaKey2 = {specula, 100, 300},
             SpeculaKey3 = {specula, 100, 100},
             Type = riak_dt_gcounter,
-            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, 
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), 0, 
                     [[{read, SpeculaKey1, Type}], 
                     [{read, SpeculaKey2, Type}], 
                     [{read, SpeculaKey3, Type}]]), 
@@ -747,7 +747,7 @@ multi_txn_wait_test(_) ->
             SpeculaKey1 = {specula, 100, 100},
             Type = riak_dt_gcounter,
             Param = {increment, noone},
-            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, [ 
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), 0, [ 
                     [{read, SpeculaKey1, Type}, {read, Key1, Type}], 
                     [{update, WaitKey, Type, Param}],
                     [{read, Key2, Type}, {update, Key2, Type, Param}]
@@ -764,7 +764,7 @@ multi_txn_multi_wait_test(_) ->
             WaitKey3 = {wait, 100},
             Type = riak_dt_gcounter,
             Param = {increment, noone},
-            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), ignore, [ 
+            {ok, _Pid} = clocksi_general_tx_coord_fsm:start_link(self(), 0, [ 
                     [{update, WaitKey1, Type, Param}], 
                     [{update, WaitKey2, Type, Param}], 
                     [{update, WaitKey3, Type, Param}]
