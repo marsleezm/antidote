@@ -306,7 +306,8 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_store=SpeculaStore,
             specula_dep=SpeculaDep, partition=Partition}) ->
     Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
-    case clocksi_readitem:check_clock(Key, TxId, Tables) of
+    tx_utilities:update_ts(TxId#tx_id.snapshot_time),
+    case clocksi_readitem:check_prepared(Key, TxId, Tables) of
         not_ready ->
             spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
                          Sender}, {Partition, node()}]),
@@ -324,8 +325,9 @@ handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_store=SpeculaStore, 
             specula_dep=SpeculaDep, partition=Partition}) ->
     %lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
+    tx_utilities:update_ts(TxId#tx_id.snapshot_time),
     Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
-    case clocksi_readitem:check_clock(Key, TxId, Tables) of
+    case clocksi_readitem:check_prepared(Key, TxId, Tables) of
         not_ready ->
             spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
                          OrgSender}, {Partition, node()}]),
@@ -334,12 +336,9 @@ handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
         {specula, Value} ->
             %lager:info("Async: repling specula value for key ~w of tx ~w to ~w",[Key, TxId, OrgSender]),
             riak_core_vnode:reply(OrgSender, {specula, Value}),
-            %%OrgSender ! {specula, Value},
-            %gen_fsm:reply(OrgSender, {specula, Value}),
             {noreply, SD0};
         ready ->
             Result = clocksi_readitem:return(Key, Type, TxId, Tables),
-            %lager:info("Ready!! ~w ~w, Result is ~w",[Key, TxId, Result]),
             riak_core_vnode:reply(OrgSender, Result),
             {noreply, SD0}
     end;
@@ -360,28 +359,27 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                               prepared_txs=PreparedTxs,
                               num_cert_fail=NumCertFail
                               }) ->
-    PrepareTime = now_microsec(erlang:now()),
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     Tables = PreparedTxs, %{PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
-    Result = prepare(TxId, WriteSet, CommittedTx, PrepareTime, Tables, SpeculaStore, IfCertify),
-    UsedTime = now_microsec(erlang:now()) - PrepareTime,
+    Result = prepare(TxId, WriteSet, CommittedTx, Tables, SpeculaStore, IfCertify),
     %lager:info("Tx ~w: for key ~w prep res is ~w",[TxId, WriteSet, Result]),
     case Result of
-        {ok, NewPrepare} ->
+        {ok, PrepareTime} ->
+            UsedTime = now_microsec(erlang:now()) - PrepareTime,
             case IfReplicate of
                 true ->
                     PendingRecord = {prepare, Quorum-1, OriginalSender, 
-                            {prepared, TxId, NewPrepare}, {TxId, WriteSet}},
+                            {prepared, TxId, PrepareTime}, {TxId, WriteSet}},
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                     {noreply, State};
                 false ->
-                    %lager:info("Returning prepare of ~w ~w",[TxId, NewPrepare]),
-                    riak_core_vnode:reply(OriginalSender, {prepared, TxId, NewPrepare}),
+                    %lager:info("Returning prepare of ~w ~w",[TxId, PrepareTime]),
+                    riak_core_vnode:reply(OriginalSender, {prepared, TxId, PrepareTime}),
                     {noreply, State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}}
             end;
-        {specula_prepared, _NewPrepare} ->
+        {specula_prepared, _PrepareTime} ->
             %% TODO: do nothing here... maybe should reply? I don't know...
-            %%riak_core_vnode:reply(OriginalSender, {specula_prepared, TxId, NewPrepare}),
+            %%riak_core_vnode:reply(OriginalSender, {specula_prepared, TxId, PrepareTime}),
             {noreply, State};
         {error, wait_more} ->
             spawn(clocksi_vnode, async_send_msg, [{prepare, TxId, 
@@ -391,7 +389,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
             riak_core_vnode:reply(OriginalSender, {abort, TxId}),
             %gen_fsm:send_event(OriginalSender, abort),
             {noreply, State#state{num_cert_fail=NumCertFail+1,
-                total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}}
+                prepare_count=PrepareCount+1}}
     end;
 
 handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
@@ -408,22 +406,20 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                               prepared_txs=PreparedTxs,
                               num_read_invalid=NumInvalid
                               }) ->
-    PrepareTime = now_microsec(erlang:now()),
     Tables = PreparedTxs, %{PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
-    Result = prepare(TxId, WriteSet, CommittedTx, 
-                PrepareTime, Tables, SpeculaStore, IfCertify), 
+    Result = prepare(TxId, WriteSet, CommittedTx, Tables, SpeculaStore, IfCertify), 
     case Result of
-        {ok, NewPrepare} ->
-            ResultCommit = commit(TxId, NewPrepare, WriteSet, CommittedTx, State),
+        {ok, PrepareTime} ->
+            ResultCommit = commit(TxId, PrepareTime, WriteSet, CommittedTx, State),
             case ResultCommit of
                 {ok, {committed, NewCommittedTx}} ->
                     NewInvalid = specula_utilities:finalize_dependency(NumInvalid, TxId, 
-                            NewPrepare, SpeculaDep, commit),
+                            PrepareTime, SpeculaDep, commit),
                     case IfReplicate of
                         true ->
                             PendingRecord = {commit, Quorum-1, OriginalSender, 
-                                {committed, NewPrepare}, {TxId, WriteSet}},
+                                {committed, PrepareTime}, {TxId, WriteSet}},
                             %ets:insert(PreparedTxs, {committed_tx, NewCommittedTx}),
                             repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                             %{noreply, State};
@@ -431,7 +427,7 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                                     num_committed=NumCommitted+1, num_read_invalid=NewInvalid}};
                         false ->
                             %ets:insert(PreparedTxs, {committed_tx, NewCommittedTx}),
-                            riak_core_vnode:reply(OriginalSender, {committed, NewPrepare}),
+                            riak_core_vnode:reply(OriginalSender, {committed, PrepareTime}),
                             %{noreply, State}
                             {noreply, State#state{committed_tx=NewCommittedTx,
                                     num_committed=NumCommitted+1, num_read_invalid=NewInvalid}}
@@ -561,15 +557,17 @@ async_send_msg(Msg, To) ->
     timer:sleep(SleepTime),
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
-prepare(TxId, TxWriteSet, CommittedTx, PrepareTime, PreparedTxs, SpeculaStore, IfCertify)->
+prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, SpeculaStore, IfCertify)->
     case certification_check(TxId, TxWriteSet, CommittedTx, PreparedTxs, SpeculaStore, IfCertify) of
         true ->
+            PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
             %{PreparedTxs, _, _, _} = Tables,
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {ok, PrepareTime};
         specula_prepared ->
             %%lager:info("Certification check returns specula_prepared"),
             %{PreparedTxs, _, _, _} = Tables,
+            PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {specula_prepared, PrepareTime};
 	    false ->
@@ -578,13 +576,11 @@ prepare(TxId, TxWriteSet, CommittedTx, PrepareTime, PreparedTxs, SpeculaStore, I
             {error,  wait_more}
     end.
 
-
 set_prepared(_PreparedTxs, [], _TxId, _Time) ->
     ok;
 set_prepared(PreparedTxs,[{Key, Type, Op}|Rest], TxId, Time) ->
     true = ets:insert(PreparedTxs, {Key, {TxId, Time, Type, Op}}),
     set_prepared(PreparedTxs,Rest,TxId, Time).
-
 
 commit(TxId, TxCommitTime, Updates, CommittedTx, #state{specula_store=SpeculaStore, 
                 inmemory_store=InMemoryStore, prepared_txs=PreparedTxs, specula_dep=SpeculaDep})->

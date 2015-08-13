@@ -109,6 +109,7 @@ init(_Args) ->
     %		      [inter_dc_communication_sender_fsm_sup]},
 
     antidote_config:load("antidote.config"),
+    application:set_env(antidote, max_ts, 0),
 
 
     %InterDcManager = {inter_dc_manager,

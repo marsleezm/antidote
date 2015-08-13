@@ -28,8 +28,8 @@
 
 
 %% States
--export([return/4,
-        check_clock/3]).
+-export([return/4, check_clock/3,
+        check_prepared/3]).
 
 
 %% @doc check_clock: Compares its local clock with the tx timestamp.
@@ -54,16 +54,16 @@ check_prepared(Key, MyTxId, Tables) ->
     case ets:lookup(PreparedTx, Key) of
         [] ->
             ready;
-        [{Key, {_TxId, Time, _Type, _Op}}] ->
+        [{Key, {TxId, Time, Type, Op}}] ->
             case Time =< SnapshotTime of
                 true ->
-                    %case specula_utilities:should_specula(Time, SnapshotTime) of
-                    %    true ->
+                    case specula_utilities:should_specula(Time, SnapshotTime) of
+                        true ->
                     %        lager:info("Specula and read, sender is ~w, TxId ~w, Key ~w",[MyTxId#tx_id.server_pid, TxId, Key]), 
-                    %        specula_utilities:speculate_and_read(Key, MyTxId, {TxId, Time, Type, Op}, Tables);
-                    %    false ->
-                            not_ready;
-                    %end;
+                            specula_utilities:speculate_and_read(Key, MyTxId, {TxId, Time, Type, Op}, Tables);
+                        false ->
+                            not_ready
+                    end;
                 false ->
                     ready
             end

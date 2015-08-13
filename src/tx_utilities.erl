@@ -21,48 +21,42 @@
 
 -include("antidote.hrl").
 
--export([create_transaction_record/1]).
+-ifdef(TEST).
+-define(GET_MAX_TS(APP, KEY), {ok, clocksi_vnode:now_microsec(now())}).
+-else.
+-define(GET_MAX_TS(APP, KEY), application:get_env(APP, KEY)).
+-endif.
+
+-export([create_transaction_record/1, get_ts/0, update_ts/1, increment_ts/1]).
 
 -spec create_transaction_record(snapshot_time() | ignore) -> txid().
 create_transaction_record(ClientClock) ->
     %% Seed the random because you pick a random read server, this is stored in the process state
     {A1,A2,A3} = now(),
     _ = random:seed(A1, A2, A3),
-    {ok, SnapshotTime} = case ClientClock of
-        ignore ->
-            get_snapshot_time();
-        _ ->
-            get_snapshot_time(ClientClock)
-    end,
-    TransactionId = #tx_id{snapshot_time=SnapshotTime, server_pid=self()},
+    TransactionId = #tx_id{snapshot_time=update_ts(ClientClock), server_pid=self()},
     TransactionId.
 
-%%@doc Set the transaction Snapshot Time to the maximum value of:
-%%     1.ClientClock, which is the last clock of the system the client
-%%       starting this transaction has seen, and
-%%     2.machine's local time, as returned by erlang:now().
--spec get_snapshot_time(snapshot_time())
-                         -> {ok, snapshot_time()}.
-get_snapshot_time(ClientClock) ->
-      wait_for_clock(ClientClock).
-  
--spec get_snapshot_time() -> {ok, snapshot_time()}.
-get_snapshot_time() ->
-      Now = clocksi_vnode:now_microsec(erlang:now()) - ?OLD_SS_MICROSEC,
-      {ok, Now}.
-  
--spec wait_for_clock(snapshot_time()) ->
-                             {ok, snapshot_time()}.
-wait_for_clock(Clock) ->
-     case get_snapshot_time() of
-         {ok, SnapshotTime} ->
-             case SnapshotTime > Clock of
-                 true ->
-                     %% No need to wait
-                     {ok, SnapshotTime};
-                 false ->
-                     %% wait for snapshot time to catch up with Client Clock
-                     timer:sleep(10),
-                     wait_for_clock(Clock)
-             end
+-spec get_ts() -> non_neg_integer().
+get_ts() ->
+    {ok, TS} = ?GET_MAX_TS(antidote, max_tx),
+    max(clocksi_vnode:now_microsec(now()), TS).
+
+-spec update_ts(non_neg_integer()) -> non_neg_integer().
+update_ts(SnapshotTS) ->
+    {ok, TS} = ?GET_MAX_TS(antidote, max_tx),
+    case TS > SnapshotTS of
+        true ->
+            TS;
+        _ ->
+            application:set_env(antidote, max_tx, SnapshotTS),
+            SnapshotTS
     end.
+
+-spec increment_ts(non_neg_integer()) -> non_neg_integer().
+increment_ts(SnapshotTS) ->
+    {ok, TS} = ?GET_MAX_TS(antidote, max_tx),
+    MaxTS = max(SnapshotTS, TS),
+    application:set_env(antidote, max_tx, MaxTS+1),
+    MaxTS+1.
+
