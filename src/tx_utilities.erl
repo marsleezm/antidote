@@ -39,24 +39,24 @@ create_transaction_record(ClientClock) ->
 
 -spec get_ts() -> non_neg_integer().
 get_ts() ->
-    {ok, TS} = ?GET_MAX_TS(antidote, max_tx),
+    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
     max(clocksi_vnode:now_microsec(now()), TS).
 
 -spec update_ts(non_neg_integer()) -> non_neg_integer().
 update_ts(SnapshotTS) ->
-    {ok, TS} = ?GET_MAX_TS(antidote, max_tx),
+    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
     case TS > SnapshotTS of
         true ->
             TS;
         _ ->
-            application:set_env(antidote, max_tx, SnapshotTS),
+            application:set_env(antidote, max_ts, SnapshotTS),
             SnapshotTS
     end.
 
 -spec increment_ts(non_neg_integer()) -> non_neg_integer().
 increment_ts(SnapshotTS) ->
-    {ok, TS} = ?GET_MAX_TS(antidote, max_tx),
+    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
     MaxTS = max(SnapshotTS, TS),
-    application:set_env(antidote, max_tx, MaxTS+1),
+    application:set_env(antidote, max_ts, MaxTS+1),
     MaxTS+1.
 
