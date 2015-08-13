@@ -44,9 +44,9 @@ confirm() ->
     lager:info("Vnodes are started up"),
 
     pass = start_stop_test(),
-    pass = get_empty_crdt_test(<<"key0">>),
-    pass = update_counter_crdt_test(<<"key1">>, 10),
-    pass = update_counter_crdt_and_read_test(<<"key2">>, 15),
+    pass = get_empty_crdt_test(key0),
+    pass = update_counter_crdt_test(key1, 10),
+    pass = update_counter_crdt_and_read_test(key2, 15),
     pass = atomic_update_txn_test(),
     pass = snapshot_read_test(),
     pass = transaction_orset_test(),
@@ -93,8 +93,8 @@ get_crdt_check_value(Key, Type, Expected) ->
 atomic_update_txn_test() ->
     lager:info("Testing Atomic Updates"),
     {ok, Pid} = antidotec_pb_socket:start(?ADDRESS, ?PORT),
-    {ok, C1} = antidotec_pb_socket:get_crdt(<<"counter1">>, riak_dt_pncounter, Pid),
-    {ok, C2} = antidotec_pb_socket:get_crdt(<<"counter2">>, riak_dt_pncounter, Pid),
+    {ok, C1} = antidotec_pb_socket:get_crdt(counter1, riak_dt_pncounter, Pid),
+    {ok, C2} = antidotec_pb_socket:get_crdt(counter2, riak_dt_pncounter, Pid),
     C11 = antidotec_counter:increment(1, C1),
     C21 = antidotec_counter:increment(2, C2),
     lager:info("Testing.. "),
@@ -105,14 +105,14 @@ atomic_update_txn_test() ->
     ?assertMatch({ok,_},Response),
 
     %Read your writes
-    pass = get_crdt_check_value(<<"counter1">>, riak_dt_pncounter, 1),
-    pass = get_crdt_check_value(<<"counter2">>, riak_dt_pncounter, 2),
+    pass = get_crdt_check_value(counter1, riak_dt_pncounter, 1),
+    pass = get_crdt_check_value(counter2, riak_dt_pncounter, 2),
     pass.
 
 snapshot_read_test() ->
     lager:info("Testing Snapshot Reads"),
-    Key1 = <<"read1">>,
-    Key2 = <<"read2">>,
+    Key1 = read1,
+    Key2 = read2,
     {ok, Pid} = antidotec_pb_socket:start(?ADDRESS, ?PORT),
     {ok, C1} = antidotec_pb_socket:get_crdt(Key1, riak_dt_pncounter, Pid),
     {ok, C2} = antidotec_pb_socket:get_crdt(Key2, riak_dt_pncounter, Pid),
@@ -132,8 +132,8 @@ snapshot_read_test() ->
 
 transaction_orset_test() ->
     lager:info("Testing transaction using orset"),
-    Key1 = <<"set1">>,
-    Key2 = <<"count1">>,
+    Key1 = set1,
+    Key2 = count1,
     {ok, Pid} = antidotec_pb_socket:start(?ADDRESS, ?PORT),
     {ok, C1} = antidotec_pb_socket:get_crdt(Key1, riak_dt_orset, Pid),
     {ok, C2} = antidotec_pb_socket:get_crdt(Key2, riak_dt_pncounter, Pid),
