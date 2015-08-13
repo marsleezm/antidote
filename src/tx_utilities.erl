@@ -27,20 +27,27 @@
 -define(GET_MAX_TS(APP, KEY), application:get_env(APP, KEY)).
 -endif.
 
--export([create_transaction_record/1, get_ts/0, update_ts/1, increment_ts/1]).
+-export([create_transaction_record/1, update_ts/1, increment_ts/1]).
 
 -spec create_transaction_record(snapshot_time() | ignore) -> txid().
 create_transaction_record(ClientClock) ->
     %% Seed the random because you pick a random read server, this is stored in the process state
     {A1,A2,A3} = now(),
     _ = random:seed(A1, A2, A3),
-    TransactionId = #tx_id{snapshot_time=update_ts(ClientClock), server_pid=self()},
+    TransactionId = #tx_id{snapshot_time=get_and_update_ts(ClientClock), server_pid=self()},
     TransactionId.
 
--spec get_ts() -> non_neg_integer().
-get_ts() ->
+-spec get_and_update_ts(non_neg_integer()) -> non_neg_integer().
+get_and_update_ts(CausalTS) ->
     {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
-    max(clocksi_vnode:now_microsec(now()), TS).
+    Max = max(clocksi_vnode:now_microsec(now()), TS),
+    case CausalTS > Max of
+        true ->
+            application:set_env(antidote, max_ts, CausalTS),
+            CausalTS;
+        false ->
+            Max  
+    end.
 
 -spec update_ts(non_neg_integer()) -> non_neg_integer().
 update_ts(SnapshotTS) ->

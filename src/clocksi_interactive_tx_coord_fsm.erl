@@ -66,7 +66,6 @@
          single_committing/2,
          committing_2pc/3,
          committing/2,
-         receive_committed/2,
          abort/2,
 	     perform_singleitem_read/2,
          reply_to_client/1]).
@@ -154,7 +153,6 @@ execute_op({Op_type, Args}, Sender,
         prepare ->
             case Args of
             two_phase ->
-                %lager:info("Received prepare.. Two-phase prepare"),
                 {next_state, prepare_2pc, SD0#state{from=Sender, commit_protocol=Args}, 0};
             _ ->
                 %lager:info("Received prepare.. Normal prepare"),
@@ -226,8 +224,7 @@ prepare(timeout, SD0=#state{
             %                            Acc++[{Part, [Key || {Key, _Type, _Op} <- Keys]} ]
             %            end, [], UpdatedPart),
             ?CLOCKSI_VNODE:single_commit(UpdatedPart, TxId),
-            {next_state, single_committing,
-            SD0#state{state=committing, num_to_ack=1}};
+            {next_state, single_committing, SD0#state{state=prepared}};
         N->
             ?CLOCKSI_VNODE:prepare(UpdatedPartitions, TxId),
             {next_state, receive_prepared,
@@ -257,7 +254,6 @@ receive_prepared({prepared, _, ReceivedPrepareTime},
                  S0=#state{num_to_ack=NumToAck,
                            commit_protocol=CommitProtocol,
                            from=From, prepare_time=PrepareTime}) ->
-    io:format("Received prepared"),
     MaxPrepareTime = max(PrepareTime, ReceivedPrepareTime),
     case NumToAck of 1 ->
             case CommitProtocol of
@@ -282,7 +278,7 @@ receive_prepared(timeout, S0) ->
 
 single_committing({committed, CommitTime}, S0=#state{from=_From}) ->
     reply_to_client(S0#state{prepare_time=CommitTime, commit_time=CommitTime, state=committed});
-    
+
 single_committing({abort, _}, S0=#state{from=_From}) ->
     reply_to_client(S0#state{state=aborted}).
 
@@ -296,10 +292,9 @@ committing_2pc(commit, Sender, SD0=#state{tx_id = TxId,
     case dict:size(UpdatedPartitions) of
         0 ->
             reply_to_client(SD0#state{state=committed, from=Sender});
-        N ->
+        _N ->
             ?CLOCKSI_VNODE:commit(UpdatedPartitions, TxId, Commit_time),
-            {next_state, receive_committed,
-             SD0#state{num_to_ack=N, from=Sender, state=committing}}
+            reply_to_client(SD0#state{state=committed, from=Sender})
     end.
 
 %% @doc after receiving all prepare_times, send the commit message to all
@@ -312,10 +307,9 @@ committing(timeout, SD0=#state{tx_id = TxId,
     case dict:size(UpdatedPartitions) of
         0 ->
             reply_to_client(SD0#state{state=committed});
-        N ->
+        _ ->
             ?CLOCKSI_VNODE:commit(UpdatedPartitions, TxId, Commit_time),
-            {next_state, receive_committed,
-             SD0#state{num_to_ack=N, state=committing}}
+            reply_to_client(SD0#state{state=committed})
     end.
 
 
@@ -324,13 +318,6 @@ committing(timeout, SD0=#state{tx_id = TxId,
 %%      Should we retry sending the committed message if we don't receive a
 %%      reply from every partition?
 %%      What delivery guarantees does sending messages provide?
-receive_committed(committed, S0=#state{num_to_ack= NumToAck}) ->
-    case NumToAck of
-        1 ->
-            reply_to_client(S0#state{state=committed});
-        _ ->
-           {next_state, receive_committed, S0#state{num_to_ack= NumToAck-1}}
-    end.
 
 %% @doc when an error occurs or an updated partition 
 %% does not pass the certification check, the transaction aborts.
