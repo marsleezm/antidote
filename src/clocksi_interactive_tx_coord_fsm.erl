@@ -274,7 +274,7 @@ receive_prepared({prepared, _, ReceivedPrepareTime},
              S0#state{num_to_ack= NumToAck-1, prepare_time=MaxPrepareTime}}
     end;
 
-receive_prepared(abort, S0) ->
+receive_prepared({abort, _}, S0) ->
     {next_state, abort, S0, 0};
 
 receive_prepared(timeout, S0) ->
@@ -283,7 +283,7 @@ receive_prepared(timeout, S0) ->
 single_committing({committed, CommitTime}, S0=#state{from=_From}) ->
     reply_to_client(S0#state{prepare_time=CommitTime, commit_time=CommitTime, state=committed});
     
-single_committing(abort, S0=#state{from=_From}) ->
+single_committing({abort, _}, S0=#state{from=_From}) ->
     reply_to_client(S0#state{state=aborted}).
 
 %% @doc after receiving all prepare_times, send the commit message to all
