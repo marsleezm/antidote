@@ -253,7 +253,7 @@ prepare_2pc(timeout, SD0=#state{
 %% @doc in this state, the fsm waits for prepare_time from each updated
 %%      partitions in order to compute the final tx timestamp (the maximum
 %%      of the received prepare_time).
-receive_prepared({prepared, ReceivedPrepareTime},
+receive_prepared({prepared, _, ReceivedPrepareTime},
                  S0=#state{num_to_ack=NumToAck,
                            commit_protocol=CommitProtocol,
                            from=From, prepare_time=PrepareTime}) ->

@@ -174,7 +174,7 @@ execute_batch_ops(timeout, SD=#state{
 %% @doc in this state, the fsm waits for prepare_time from each updated
 %%      partitions in order to compute the final tx timestamp (the maximum
 %%      of the received prepare_time).
-receive_prepared({prepared, ReceivedPrepareTime},
+receive_prepared({prepared, _, ReceivedPrepareTime},
                  S0=#state{num_to_ack=NumToAck,
                            num_to_read=NumToRead,
                            prepare_time=PrepareTime}) ->
@@ -213,7 +213,7 @@ receive_prepared({ok, {Type,Snapshot}},
              S0#state{read_set=ReadSet1, num_to_read = NumToRead-1}}
     end;
 
-receive_prepared(abort, S0) ->
+receive_prepared({abort, _}, S0) ->
     {next_state, abort, S0, 0};
 
 receive_prepared(timeout, S0) ->
@@ -275,12 +275,12 @@ abort(timeout, SD0=#state{tx_id = TxId,
     ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted});
 
-abort(abort, SD0=#state{tx_id = TxId,
+abort({abort, _}, SD0=#state{tx_id = TxId,
                         updated_partitions=UpdatedPartitions}) ->
     ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted});
 
-abort({prepared, _}, SD0=#state{tx_id=TxId,
+abort({prepared, _, _}, SD0=#state{tx_id=TxId,
                         updated_partitions=UpdatedPartitions}) ->
     ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted});
