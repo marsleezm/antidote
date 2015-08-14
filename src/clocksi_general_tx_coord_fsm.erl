@@ -206,7 +206,7 @@ receive_reply({Type, CurrentTxId, Param2},
                            current_txn_meta=CurrentTxnMeta}) ->
     CurrentTxnMeta1 = update_txn_meta(CurrentTxnMeta, Type, Param2),
     %io:format(user, "Got something ~w for ~w, is current!~n", [Type, CurrentTxId]),
-    case can_commit(CurrentTxId, CurrentTxnMeta1, NumCommittedTxn) of
+    case can_commit(CurrentTxnMeta1, NumCommittedTxn) of
         true ->
            %lager:info("~w:C can commit!",[CurrentTxId]),
             ?CLOCKSI_VNODE:commit(CurrentTxnMeta1#txn_metadata.updated_parts, CurrentTxId, 
@@ -234,14 +234,13 @@ receive_reply({Type, TxId, Param2},
             %lager:info("Got ~w of previous tx ~w", [Type, TxId]),
             %io:format(user, "Got something ~w for ~w, num_committed txn is ~w, not current!~n", [Type, TxId, NumCommittedTxn]),
             TxnMeta1 = update_txn_meta(TxnMeta, Type, Param2),
-            SpeculaMeta1 = dict:store(TxId, TxnMeta1, SpeculaMeta),
-            case can_commit(TxId, TxnMeta1, NumCommittedTxn) of
+            case can_commit(TxnMeta1, NumCommittedTxn) of
                 true -> 
                     NewNumCommitted = 
-                            cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta1, TxIdList),
+                            cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta, TxIdList),
                     %io:format(user, "Trying to cascading commit! ~w ~n", [TxId]),
                    %lager:info("~w: can commit! Old num is ~w, New num is ~w",[TxId, NumCommittedTxn, NewNumCommitted]),
-                    case can_commit(TxId, CurrentTxnMeta, NewNumCommitted) of
+                    case can_commit(CurrentTxnMeta, NewNumCommitted) of
                         true ->
                            %lager:info("~w: Current ~w can commit!",[TxId, CurrentTxnId]),
                             ?CLOCKSI_VNODE:commit(CurrentTxnMeta#txn_metadata.updated_parts, CurrentTxnId, 
@@ -255,6 +254,7 @@ receive_reply({Type, TxId, Param2},
                 false ->
                    %lager:info("~w: can not commit! Old num is ~w",[TxId, NumCommittedTxn]),
                     %io:format(user, "Can not commit ~w, not current!~n", [TxId]),
+                    SpeculaMeta1 = dict:store(TxId, TxnMeta1, SpeculaMeta),
                     {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta1}} 
             end;
         error ->
@@ -460,7 +460,7 @@ try_commit_successors([TxId|Rest], SpeculaMetadata, Index) ->
             Index
     end.
 
-can_commit(_TxId, TxnMeta, NumCommittedTxn) ->
+can_commit(TxnMeta, NumCommittedTxn) ->
     case TxnMeta#txn_metadata.num_to_prepare of
         0 ->
             case TxnMeta#txn_metadata.read_dep of
