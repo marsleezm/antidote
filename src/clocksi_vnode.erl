@@ -265,7 +265,7 @@ check_prepared_empty([{Partition,Node}|Rest]) ->
 	    true ->
             ok;
 	    false ->
-            lager:wanring("Prepared not empty!")
+            lager:warning("Prepared not empty!")
     end,
 	check_prepared_empty(Rest).
 
