@@ -651,14 +651,14 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
                 {ok, CommitTime} ->
                     case CommitTime > SnapshotTime of
                         true ->
-                            lager:info("~w: Something committed! CommitTime ~w, SnapshotTime ~w", [TxId, CommitTime, SnapshotTime]),
+                            lager:info("~w, key ~w: Something committed! CommitTime ~w, SnapshotTime ~w", [TxId, Key, CommitTime, SnapshotTime]),
                             false;
                         false ->
                             case check_prepared(TxId, Key, PreparedTxs) of
                                 true ->
                                     certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true);
                                 false ->
-                                    lager:info("~w: Preare failed!", [TxId]),
+                                    lager:info("~w, key ~w: Preare failed!", [TxId, Key]),
                                     false
                             end
                     end;

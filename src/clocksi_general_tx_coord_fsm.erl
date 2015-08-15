@@ -267,6 +267,7 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
     %lager:info("Receive aborted for Tx ~w, current tx is ~w", [TxId, CurrentTxId]),
     case TxId of
         CurrentTxId ->
+            lager:info("Aborting current tx~w", [CurrentTxId]),
             ?CLOCKSI_VNODE:abort(CurrentTxnMeta#txn_metadata.updated_parts, CurrentTxId),
             timer:sleep(random:uniform(?DUMB_TIMEOUT)),
             %% Restart from current transaction.
@@ -274,6 +275,7 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
         _ ->
             case dict:find(TxId, SpeculaMeta) of
                 {ok, AbortTxnMeta} ->
+                    lager:info("Aborting other tx ~w", [TxId]),
                     S1 = cascading_abort(AbortTxnMeta, S0),
                     timer:sleep(random:uniform(?DUMB_TIMEOUT)),
                     process_txs(S1);
