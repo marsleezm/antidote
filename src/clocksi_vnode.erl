@@ -490,7 +490,7 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
 
 handle_command({abort, TxId, Updates}, _Sender, State=#state{prepared_txs=PreparedTxs, num_read_abort=NumRAbort,
                     num_aborted=NumAborted, specula_store=SpeculaStore, specula_dep=SpeculaDep}) ->
-    %lager:info("Tx ~w: got abort",[TxId]),
+    lager:info("Tx ~w: got abort for updates ~w",[TxId, Updates]),
     case Updates of
         [] ->
             {reply, {error, no_tx_record}, State};
