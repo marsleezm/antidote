@@ -490,7 +490,6 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
 
 handle_command({abort, TxId, Updates}, _Sender, State=#state{prepared_txs=PreparedTxs, num_read_abort=NumRAbort,
                     num_aborted=NumAborted, specula_store=SpeculaStore, specula_dep=SpeculaDep}) ->
-    lager:info("Tx ~w: got abort for updates ~w",[TxId, Updates]),
     case Updates of
         [] ->
             {reply, {error, no_tx_record}, State};
@@ -564,12 +563,13 @@ prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, SpeculaStore, IfCertify)->
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {ok, PrepareTime};
         specula_prepared ->
-            %%lager:info("Certification check returns specula_prepared"),
+            lager:info("~w: Certification check returns specula_prepared", [TxId]),
             %{PreparedTxs, _, _, _} = Tables,
             PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {specula_prepared, PrepareTime};
 	    false ->
+            lager:info("~w: write conflcit", [TxId]),
 	        {error, write_conflict};
         wait ->
             {error,  wait_more}
@@ -649,6 +649,7 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
         [] ->
             case dict:find(Key, CommittedTx) of
                 {ok, CommitTime} ->
+                    lager:info("~w: Something committed! CommitTime ~w, SnapshotTime ~w", [TxId, CommitTime, SnapshotTime]),
                     case CommitTime > SnapshotTime of
                         true ->
                             false;
@@ -661,6 +662,7 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
                             end
                     end;
                 error ->
+                    lager:info("~w: No committed, checking preared!", [TxId]),
                     case check_prepared(TxId, Key, PreparedTxs) of
                         true ->
                             certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true); 
