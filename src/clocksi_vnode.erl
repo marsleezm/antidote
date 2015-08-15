@@ -649,24 +649,25 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
         [] ->
             case dict:find(Key, CommittedTx) of
                 {ok, CommitTime} ->
-                    lager:info("~w: Something committed! CommitTime ~w, SnapshotTime ~w", [TxId, CommitTime, SnapshotTime]),
                     case CommitTime > SnapshotTime of
                         true ->
+                            lager:info("~w: Something committed! CommitTime ~w, SnapshotTime ~w", [TxId, CommitTime, SnapshotTime]),
                             false;
                         false ->
                             case check_prepared(TxId, Key, PreparedTxs) of
                                 true ->
                                     certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true);
                                 false ->
+                                    lager:info("~w: Preare failed!", [TxId]),
                                     false
                             end
                     end;
                 error ->
-                    lager:info("~w: No committed, checking preared!", [TxId]),
                     case check_prepared(TxId, Key, PreparedTxs) of
                         true ->
                             certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true); 
                         false ->
+                            lager:info("~w: Prepare failed!", [TxId]),
                             false;
                         specula_prepared ->
                             specula_prepared;
