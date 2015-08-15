@@ -138,8 +138,8 @@ start_processing(timeout, SD) ->
 
 process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
         all_txn_ops=AllTxnOps, current_txn_index=CurrentTxnIndex, num_txns=NumTxns}) ->
-    TxId = tx_utilities:create_transaction_record(CausalClock),
-    lager:info("My TxId is ~w", [TxId]),
+    TxId = tx_utilities:create_transaction_record(CausalClock+1),
+    %lager:info("My TxId is ~w", [TxId]),
     case NumTxns of
         0 ->
             proceed_txn(SD#state{current_txn_meta=#txn_metadata{
@@ -158,7 +158,7 @@ process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
             end
     end.
 
-            %%%%lager:info("Write set is empty.. ~w", [TxId]),
+            %%%%%lager:info("Write set is empty.. ~w", [TxId]),
         %1->
         %    UpdatedPart = dict:to_list(WriteSet),
         %    ?CLOCKSI_VNODE:single_commit(UpdatedPart, TxId),
@@ -172,10 +172,10 @@ receive_reply(timeout,
                  S0=#state{current_txn_meta=CurrentTxnMeta, tx_id=_TxId}) ->
     case specula_utilities:coord_should_specula(CurrentTxnMeta) of
         true ->
-            %%%lager:info("Timeouted, coordinator proceed.. ~w", [TxId]),
+            %%%%lager:info("Timeouted, coordinator proceed.. ~w", [TxId]),
             proceed_txn(S0);
         false ->
-            %%%lager:info("Timeouted, coordinator still not proceeding.. ~w", [TxId]),
+            %%%%lager:info("Timeouted, coordinator still not proceeding.. ~w", [TxId]),
             {next_state, receive_reply, S0}
     end;
 
@@ -183,7 +183,7 @@ receive_reply({specula_prepared, TxId, ReceivedPrepareTime},
                  S0=#state{current_txn_meta=CurrentTxnMeta,
                             tx_id=CurrentTxId
                             }) ->
-    %%%lager:info("Got specula prepared.. ~w, current tx is ~w", [TxId, CurrentTxId]),
+    %%%%lager:info("Got specula prepared.. ~w, current tx is ~w", [TxId, CurrentTxId]),
     case TxId of
         CurrentTxId -> %% Got reply to current Tx
             MaxPrepareTime = max(CurrentTxnMeta#txn_metadata.prepare_time, ReceivedPrepareTime),
@@ -209,13 +209,13 @@ receive_reply({Type, CurrentTxId, Param2},
     %io:format(user, "Got something ~w for ~w, is current!~n", [Type, CurrentTxId]),
     case can_commit(CurrentTxnMeta1, NumCommittedTxn) of
         true ->
-            lager:info("Current ~w committed with ~w", [CurrentTxId, CurrentTxnMeta1#txn_metadata.prepare_time]),
+            %lager:info("Current ~w committed with ~w", [CurrentTxId, CurrentTxnMeta1#txn_metadata.prepare_time]),
             ?CLOCKSI_VNODE:commit(CurrentTxnMeta1#txn_metadata.updated_parts, CurrentTxId, 
                         CurrentTxnMeta1#txn_metadata.prepare_time),
             proceed_txn(S0#state{num_committed_txn=NumCommittedTxn+1, current_txn_meta=CurrentTxnMeta1});
         false ->
            %io:format(user, "Can not commit ~w, is curren!~n", [CurrentTxId]),
-           %%%lager:info("~w:C can not commit!",[CurrentTxId]),
+           %%%%lager:info("~w:C can not commit!",[CurrentTxId]),
             case specula_utilities:coord_should_specula(CurrentTxnMeta1) of
                 true ->
                     proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta1});
@@ -232,7 +232,7 @@ receive_reply({Type, TxId, Param2},
                            current_txn_meta=CurrentTxnMeta}) ->
     case dict:find(TxId, SpeculaMeta) of
         {ok, TxnMeta} ->
-            %%%lager:info("Got ~w of previous tx ~w", [Type, TxId]),
+            %%%%lager:info("Got ~w of previous tx ~w", [Type, TxId]),
             %io:format(user, "Got something ~w for ~w, num_committed txn is ~w, not current!~n", [Type, TxId, NumCommittedTxn]),
             TxnMeta1 = update_txn_meta(TxnMeta, Type, Param2),
             case can_commit(TxnMeta1, NumCommittedTxn) of
@@ -240,21 +240,21 @@ receive_reply({Type, TxId, Param2},
                     NewNumCommitted = 
                             cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta, TxIdList),
                     %io:format(user, "Trying to cascading commit! ~w ~n", [TxId]),
-                   %%%lager:info("~w: can commit! Old num is ~w, New num is ~w",[TxId, NumCommittedTxn, NewNumCommitted]),
+                   %%%%lager:info("~w: can commit! Old num is ~w, New num is ~w",[TxId, NumCommittedTxn, NewNumCommitted]),
                     case can_commit(CurrentTxnMeta, NewNumCommitted) of
                         true ->
-                           %%%lager:info("~w: Current ~w can commit!",[TxId, CurrentTxnId]),
-                            lager:info("~w committed with ~w", [CurrentTxnId, CurrentTxnMeta#txn_metadata.prepare_time]),
+                           %%%%lager:info("~w: Current ~w can commit!",[TxId, CurrentTxnId]),
+                            %lager:info("~w committed with ~w", [CurrentTxnId, CurrentTxnMeta#txn_metadata.prepare_time]),
                             ?CLOCKSI_VNODE:commit(CurrentTxnMeta#txn_metadata.updated_parts, CurrentTxnId, 
                                     CurrentTxnMeta#txn_metadata.prepare_time),
                             proceed_txn(S0#state{num_committed_txn=NewNumCommitted+1});
                         false ->
-                           %%%lager:info("~w: Current ~w can not commit!",[TxId, CurrentTxnId]),
+                           %%%%lager:info("~w: Current ~w can not commit!",[TxId, CurrentTxnId]),
                             {next_state, receive_reply, 
                                 S0#state{num_committed_txn=NewNumCommitted}} 
                     end;
                 false ->
-                   %%%lager:info("~w: can not commit! Old num is ~w",[TxId, NumCommittedTxn]),
+                   %%%%lager:info("~w: can not commit! Old num is ~w",[TxId, NumCommittedTxn]),
                     %io:format(user, "Can not commit ~w, not current!~n", [TxId]),
                     SpeculaMeta1 = dict:store(TxId, TxnMeta1, SpeculaMeta),
                     {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta1}} 
@@ -266,10 +266,10 @@ receive_reply({Type, TxId, Param2},
 %% Abort due to invalid read or invalid prepare
 receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMeta,
                  current_txn_meta=CurrentTxnMeta}) ->
-    %%%lager:info("Receive aborted for Tx ~w, current tx is ~w", [TxId, CurrentTxId]),
+    %%%%lager:info("Receive aborted for Tx ~w, current tx is ~w", [TxId, CurrentTxId]),
     case TxId of
         CurrentTxId ->
-            %%lager:info("Aborting current tx~w", [CurrentTxId]),
+            %%%lager:info("Aborting current tx~w", [CurrentTxId]),
             ?CLOCKSI_VNODE:abort(CurrentTxnMeta#txn_metadata.updated_parts, CurrentTxId),
             timer:sleep(random:uniform(?DUMB_TIMEOUT)),
             %% Restart from current transaction.
@@ -277,7 +277,7 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
         _ ->
             case dict:find(TxId, SpeculaMeta) of
                 {ok, AbortTxnMeta} ->
-                    %%lager:info("Aborting other tx ~w", [TxId]),
+                    %%%lager:info("Aborting other tx ~w", [TxId]),
                     S1 = cascading_abort(AbortTxnMeta, S0),
                     timer:sleep(random:uniform(?DUMB_TIMEOUT)),
                     process_txs(S1);
@@ -289,7 +289,7 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
 
 %% Abort because prepare failed (concurrent txs has committed or prepared).
 %receive_reply(abort, S0=#state{tx_id=CurrentTxId, current_txn_meta=CurrentTxnMeta}) ->
-%    %%%lager:info("Receive aborted for current tx is ~w", [CurrentTxId]),
+%    %%%%lager:info("Receive aborted for current tx is ~w", [CurrentTxId]),
 %    ?CLOCKSI_VNODE:abort(CurrentTxnMeta#txn2_metadata.updated_parts, CurrentTxId),
 %    proceed_txn(S0#state{state=aborted}).
 
@@ -327,13 +327,13 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
             %io:format(user, "Finishing txn ~w ~n", [NumTxns]),
             AllReadSet = get_readset(TxIdList, SpeculaMeta, []),
             AllReadSet1 = [CurrentTxnMeta#txn_metadata.read_set|AllReadSet],
-            %%lager:info("Transaction finished, commit time ~w",[CommitTime]),
+            %%%lager:info("Transaction finished, commit time ~w",[CommitTime]),
             From ! {ok, {TxId, lists:reverse(lists:flatten(AllReadSet1)), 
                 CommitTime}},
             {stop, normal, S0};
         %% In the last txn but has not committed
         CurrentTxnIndex ->
-           %%%lager:info("Has to wait again!, NumCommitted",[NumCommittedTxn]),
+           %%%%lager:info("Has to wait again!, NumCommitted",[NumCommittedTxn]),
             %io:format(user, "Has to wait again ~w ~n", [NumCommittedTxn]),
             {next_state, receive_reply, S0};
         %% Proceed
@@ -354,7 +354,7 @@ handle_event(_Event, _StateName, StateData) ->
     {stop,badmsg,StateData}.
 
 handle_sync_event(stop,_From,_StateName, StateData) ->
-    lager:info("~w: stopped", [self()]),
+    %lager:info("~w: stopped", [self()]),
     {stop,normal,ok, StateData};
 
 handle_sync_event(_Event, _From, _StateName, StateData) ->
@@ -386,7 +386,7 @@ process_operations(TxId, [{read, Key, Type}|Rest], {UpdatedParts, RSet, Buffer, 
                     {ok, SnapshotState} ->
                         {ok, {Type,SnapshotState}}
             end,
-    %%%lager:info("Read got reply ~w",[Reply]),
+    %%%%lager:info("Read got reply ~w",[Reply]),
     {NewReadDep, CanCommit1} = case Reply of
                                     {specula, {_Type, _Snapshot}} ->
                                         {[Key|ReadDep], false};
@@ -433,15 +433,15 @@ cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, current_txn_meta=Current
     
     %Abort current transaction
     CurrentUpdatedParts = CurrentTxnMeta#txn_metadata.updated_parts, 
-    %%%lager:info("Aborting current txn in cascading"),
+    %%%%lager:info("Aborting current txn in cascading"),
     ?CLOCKSI_VNODE:abort(CurrentUpdatedParts, CurrentTxId),
 
     S0#state{txn_id_list=lists:sublist(TxIdList, AbortIndex-1),
                 current_txn_index=AbortIndex, specula_meta=SpeculaMeta1}.
 
 cascading_commit_tx(TxId, TxnMeta, SpeculaMeta, TxIdList) ->
-    %%%lager:info("Doing cascading commit ~w",[TxId]),
-    lager:info("~w committed with ~w", [TxId, TxnMeta#txn_metadata.prepare_time]),
+    %%%%lager:info("Doing cascading commit ~w",[TxId]),
+    %lager:info("~w committed with ~w", [TxId, TxnMeta#txn_metadata.prepare_time]),
     ?CLOCKSI_VNODE:commit(TxnMeta#txn_metadata.updated_parts, TxId, 
                 TxnMeta#txn_metadata.prepare_time),
     Index = TxnMeta#txn_metadata.index,
@@ -456,7 +456,7 @@ try_commit_successors([TxId|Rest], SpeculaMetadata, Index) ->
         [] ->
             case TxnMeta#txn_metadata.num_to_prepare of
                 0 ->
-                    lager:info("~w committed with ~w", [TxId, TxnMeta#txn_metadata.prepare_time]),
+                    %lager:info("~w committed with ~w", [TxId, TxnMeta#txn_metadata.prepare_time]),
                     ?CLOCKSI_VNODE:commit(TxnMeta#txn_metadata.updated_parts, 
                             TxId, TxnMeta#txn_metadata.prepare_time),
                     try_commit_successors(Rest, SpeculaMetadata, Index+1);
