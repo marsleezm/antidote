@@ -209,7 +209,7 @@ receive_reply({Type, CurrentTxId, Param2},
     %io:format(user, "Got something ~w for ~w, is current!~n", [Type, CurrentTxId]),
     case can_commit(CurrentTxnMeta1, NumCommittedTxn) of
         true ->
-            %lager:info("Current ~w committed with ~w", [CurrentTxId, CurrentTxnMeta1#txn_metadata.prepare_time]),
+            lager:info("Current ~w committed with ~w", [CurrentTxId, CurrentTxnMeta1#txn_metadata.prepare_time]),
             ?CLOCKSI_VNODE:commit(CurrentTxnMeta1#txn_metadata.updated_parts, CurrentTxId, 
                         CurrentTxnMeta1#txn_metadata.prepare_time),
             proceed_txn(S0#state{num_committed_txn=NumCommittedTxn+1, current_txn_meta=CurrentTxnMeta1});
@@ -237,7 +237,6 @@ receive_reply({Type, TxId, Param2},
             TxnMeta1 = update_txn_meta(TxnMeta, Type, Param2),
             case can_commit(TxnMeta1, NumCommittedTxn) of
                 true -> 
-                    %lager:info("~w committed with ~w", [TxId, TxnMeta1#txn_metadata.prepare_time]),
                     NewNumCommitted = 
                             cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta, TxIdList),
                     %io:format(user, "Trying to cascading commit! ~w ~n", [TxId]),
@@ -245,6 +244,7 @@ receive_reply({Type, TxId, Param2},
                     case can_commit(CurrentTxnMeta, NewNumCommitted) of
                         true ->
                            %%%lager:info("~w: Current ~w can commit!",[TxId, CurrentTxnId]),
+                            lager:info("~w committed with ~w", [CurrentTxnId, CurrentTxnMeta#txn_metadata.prepare_time]),
                             ?CLOCKSI_VNODE:commit(CurrentTxnMeta#txn_metadata.updated_parts, CurrentTxnId, 
                                     CurrentTxnMeta#txn_metadata.prepare_time),
                             proceed_txn(S0#state{num_committed_txn=NewNumCommitted+1});
@@ -441,6 +441,7 @@ cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, current_txn_meta=Current
 
 cascading_commit_tx(TxId, TxnMeta, SpeculaMeta, TxIdList) ->
     %%%lager:info("Doing cascading commit ~w",[TxId]),
+    lager:info("~w committed with ~w", [TxId, TxnMeta#txn_metadata.prepare_time]),
     ?CLOCKSI_VNODE:commit(TxnMeta#txn_metadata.updated_parts, TxId, 
                 TxnMeta#txn_metadata.prepare_time),
     Index = TxnMeta#txn_metadata.index,
@@ -455,6 +456,7 @@ try_commit_successors([TxId|Rest], SpeculaMetadata, Index) ->
         [] ->
             case TxnMeta#txn_metadata.num_to_prepare of
                 0 ->
+                    lager:info("~w committed with ~w", [TxId, TxnMeta#txn_metadata.prepare_time]),
                     ?CLOCKSI_VNODE:commit(TxnMeta#txn_metadata.updated_parts, 
                             TxId, TxnMeta#txn_metadata.prepare_time),
                     try_commit_successors(Rest, SpeculaMetadata, Index+1);
