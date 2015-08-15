@@ -331,7 +331,7 @@ abort(abort, SD0=#state{tx_id = TxId,
     ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted});
 
-abort({prepared, _}, SD0=#state{tx_id=TxId,
+abort({prepared, _, _}, SD0=#state{tx_id=TxId,
                         updated_partitions=UpdatedPartitions}) ->
     ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted}).
