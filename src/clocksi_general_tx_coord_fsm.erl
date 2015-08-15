@@ -354,6 +354,7 @@ handle_event(_Event, _StateName, StateData) ->
     {stop,badmsg,StateData}.
 
 handle_sync_event(stop,_From,_StateName, StateData) ->
+    lager:info("~w: stopped", [self()]),
     {stop,normal,ok, StateData};
 
 handle_sync_event(_Event, _From, _StateName, StateData) ->

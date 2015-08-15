@@ -459,7 +459,7 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                       num_read_invalid=NumInvalid
                       } = State) ->
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
-    %%lager:info("Received commit of Tx ~w",[TxId]),
+    lager:info("Received commit of Tx ~w for ~w",[TxId, Updates]),
     Result = commit(TxId, TxCommitTime, Updates, CommittedTx, State),
     case Result of
         {ok, {committed,NewCommittedTx}} ->
