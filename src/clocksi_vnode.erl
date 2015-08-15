@@ -311,7 +311,7 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
         not_ready ->
             spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
                          Sender}, {Partition, node()}]),
-            %lager:info("Not ready for key ~w ~w, reader is ~w",[Key, TxId, Sender]),
+            lager:info("Not ready for key ~w ~w, reader is ~w",[Key, TxId, Sender]),
             {noreply, SD0};
         {specula, Value} ->
             %lager:info("Replying specula value for key ~w of tx ~w",[Key, TxId]),
@@ -331,7 +331,7 @@ handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
         not_ready ->
             spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
                          OrgSender}, {Partition, node()}]),
-            %lager:info("Not ready for key ~w ~w",[Key, TxId]),
+            lager:info("Not ready for key ~w ~w",[Key, TxId]),
             {noreply, SD0};
         {specula, Value} ->
             %lager:info("Async: repling specula value for key ~w of tx ~w to ~w",[Key, TxId, OrgSender]),
@@ -651,7 +651,7 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
                 {ok, CommitTime} ->
                     case CommitTime > SnapshotTime of
                         true ->
-                            %lager:info("~w, key ~w: Something committed! CommitTime ~w, SnapshotTime ~w", [TxId, Key, CommitTime, SnapshotTime]),
+                            lager:info("~w, key ~w: Something committed! CommitTime ~w, SnapshotTime ~w", [TxId, Key, CommitTime, SnapshotTime]),
                             false;
                         false ->
                             case check_prepared(TxId, Key, PreparedTxs) of
@@ -685,9 +685,9 @@ check_prepared(TxId, Key, PreparedTxs) ->
         [] ->
             true;
         [{Key, {_PreparedTxId, PrepareTime, _Type, _Op}}] ->
+            lager:info("Abort for Key ~w, preparetime ~w, snapshottime ~w", [Key, PrepareTime, SnapshotTime]),
             case PrepareTime > SnapshotTime of
                 true ->
-                    %lager:info("Has to abort for Key ~w", [Key]),
                     false;
                 false ->
                     %% TODO: this part should be tested..
