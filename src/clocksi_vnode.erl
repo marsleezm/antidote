@@ -563,13 +563,13 @@ prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, SpeculaStore, IfCertify)->
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {ok, PrepareTime};
         specula_prepared ->
-            lager:info("~w: Certification check returns specula_prepared", [TxId]),
+            %lager:info("~w: Certification check returns specula_prepared", [TxId]),
             %{PreparedTxs, _, _, _} = Tables,
             PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {specula_prepared, PrepareTime};
 	    false ->
-            lager:info("~w: write conflcit", [TxId]),
+            %lager:info("~w: write conflcit", [TxId]),
 	        {error, write_conflict};
         wait ->
             {error,  wait_more}
@@ -651,14 +651,14 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
                 {ok, CommitTime} ->
                     case CommitTime > SnapshotTime of
                         true ->
-                            lager:info("~w, key ~w: Something committed! CommitTime ~w, SnapshotTime ~w", [TxId, Key, CommitTime, SnapshotTime]),
+                            %lager:info("~w, key ~w: Something committed! CommitTime ~w, SnapshotTime ~w", [TxId, Key, CommitTime, SnapshotTime]),
                             false;
                         false ->
                             case check_prepared(TxId, Key, PreparedTxs) of
                                 true ->
                                     certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true);
                                 false ->
-                                    lager:info("~w, key ~w: Preare failed!", [TxId, Key]),
+                                    %lager:info("~w, key ~w: Preare failed!", [TxId, Key]),
                                     false
                             end
                     end;
@@ -667,7 +667,7 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
                         true ->
                             certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true); 
                         false ->
-                            lager:info("~w: Prepare failed!", [TxId]),
+                            %lager:info("~w: Prepare failed!", [TxId]),
                             false;
                         specula_prepared ->
                             specula_prepared;
@@ -687,7 +687,7 @@ check_prepared(TxId, Key, PreparedTxs) ->
         [{Key, {_PreparedTxId, PrepareTime, _Type, _Op}}] ->
             case PrepareTime > SnapshotTime of
                 true ->
-                    %%lager:info("Has to abort for Key ~w", [Key]),
+                    %lager:info("Has to abort for Key ~w", [Key]),
                     false;
                 false ->
                     %% TODO: this part should be tested..
