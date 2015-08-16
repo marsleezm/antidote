@@ -88,7 +88,11 @@
       num_committed_txn :: non_neg_integer(),
       %% Metadata for a single txn
 	  tx_id :: txid(),
-      current_txn_meta :: txn_metadata(),
+      num_to_prepare = 0 :: non_neg_integer(),
+      prepare_time = 0 :: non_neg_integer(),
+      updated_parts = dict:new() :: dict(),
+      read_set = [] :: [],
+
       causal_clock :: non_neg_integer(),
       %%Stat
       num_committed,
@@ -139,22 +143,22 @@ start_processing(timeout, SD) ->
 process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
         all_txn_ops=AllTxnOps, current_txn_index=CurrentTxnIndex, num_txns=NumTxns}) ->
     TxId = tx_utilities:create_transaction_record(CausalClock+1),
-    %lager:info("My TxId is ~w", [TxId]),
+    %lager:info("My TxId is ~w", [TxId])},
+
     case NumTxns of
         0 ->
-            proceed_txn(SD#state{current_txn_meta=#txn_metadata{
-                prepare_time=clocksi_vnode:now_microsec(now())}});
+            proceed_txn(SD#state{prepare_time=TxId#tx_id.snapshot_time});
         _ -> 
             MyOperations = lists:nth(CurrentTxnIndex, AllTxnOps),
-            {CanCommit, TxnMeta} = process_operations(TxId, MyOperations,
-                        {dict:new(), [], dict:new(), [], true}, CurrentTxnIndex),
+            {CanCommit, WriteSet, ReadSet, NumToPrepare} = process_operations(TxId, MyOperations,
+                        dict:new(), [], dict:new(), 0, true),
             case CanCommit of
                 true -> %%TODO: has to find some way to deal with read-only transaction
-                    proceed_txn(SD#state{current_txn_meta=TxnMeta, 
-                            num_committed_txn=CommittedTxn+1, tx_id=TxId});
+                    proceed_txn(SD#state{num_to_prepare=NumToPrepare, read_set=ReadSet, 
+                        prepare_time=TxId#tx_id.snapshot_time, num_committed_txn=CommittedTxn+1, tx_id=TxId});
                 false ->
-                    {next_state, receive_reply, SD#state{
-                             tx_id=TxId, current_txn_meta=TxnMeta}, ?SPECULA_TIMEOUT}
+                    {next_state, receive_reply, SD#state{num_to_prepare=NumToPrepare, read_set=ReadSet,
+                        updated_parts=WriteSet, tx_id=TxId}, ?SPECULA_TIMEOUT}
             end
     end.
 
@@ -169,8 +173,8 @@ process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
 %%      partitions in order to compute the final tx timestamp (the maximum
 %%      of the received prepare_time).
 receive_reply(timeout,
-                 S0=#state{current_txn_meta=CurrentTxnMeta, tx_id=_TxId}) ->
-    case specula_utilities:coord_should_specula(CurrentTxnMeta) of
+                 S0=#state{num_to_prepare=NumToPrepare, tx_id=_TxId}) ->
+    case specula_utilities:coord_should_specula(NumToPrepare) of
         true ->
             %%%%lager:info("Timeouted, coordinator proceed.. ~w", [TxId]),
             proceed_txn(S0);
@@ -179,74 +183,61 @@ receive_reply(timeout,
             {next_state, receive_reply, S0}
     end;
 
-receive_reply({specula_prepared, TxId, ReceivedPrepareTime},
-                 S0=#state{current_txn_meta=CurrentTxnMeta,
-                            tx_id=CurrentTxId
-                            }) ->
-    %%%%lager:info("Got specula prepared.. ~w, current tx is ~w", [TxId, CurrentTxId]),
-    case TxId of
-        CurrentTxId -> %% Got reply to current Tx
-            MaxPrepareTime = max(CurrentTxnMeta#txn_metadata.prepare_time, ReceivedPrepareTime),
-            NumSpeculaPrepared = CurrentTxnMeta#txn_metadata.num_specula_prepared,
-            CurrentTxnMeta1 = CurrentTxnMeta#txn_metadata{prepare_time=MaxPrepareTime,
-                         num_specula_prepared=NumSpeculaPrepared+1},
-            case specula_utilities:coord_should_specula(CurrentTxnMeta1) of
-                true ->
-                    proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta1});
-                false ->
-                    {next_state, receive_reply,
-                     S0#state{current_txn_meta=CurrentTxnMeta1}}
-            end;
-        _ ->
-            ok
-    end;
-
-receive_reply({Type, CurrentTxId, Param2},
+receive_reply({_Type, CurrentTxId, Param},
                  S0=#state{tx_id=CurrentTxId,
                            num_committed_txn = NumCommittedTxn,
-                           current_txn_meta=CurrentTxnMeta}) ->
-    CurrentTxnMeta1 = update_txn_meta(CurrentTxnMeta, Type, Param2),
+                           num_to_prepare=NumToPrepare,
+                           current_txn_index=CurrentTxnIndex,
+                           updated_parts=UpdatedParts,
+                           prepare_time=PrepareTime}) ->
+    PrepareTime1 = max(PrepareTime, Param), 
+    NumToPrepare1 = NumToPrepare-1,
     %io:format(user, "Got something ~w for ~w, is current!~n", [Type, CurrentTxId]),
-    case can_commit(CurrentTxnMeta1, NumCommittedTxn) of
+    case can_commit(NumToPrepare1, NumCommittedTxn, CurrentTxnIndex) of
         true ->
             %lager:info("Current ~w committed with ~w", [CurrentTxId, CurrentTxnMeta1#txn_metadata.prepare_time]),
-            ?CLOCKSI_VNODE:commit(CurrentTxnMeta1#txn_metadata.updated_parts, CurrentTxId, 
-                        CurrentTxnMeta1#txn_metadata.prepare_time),
-            proceed_txn(S0#state{num_committed_txn=NumCommittedTxn+1, current_txn_meta=CurrentTxnMeta1});
+            ?CLOCKSI_VNODE:commit(UpdatedParts, CurrentTxId, 
+                        PrepareTime1),
+            proceed_txn(S0#state{num_committed_txn=NumCommittedTxn+1, prepare_time=PrepareTime1});
         false ->
            %io:format(user, "Can not commit ~w, is curren!~n", [CurrentTxId]),
            %%%%lager:info("~w:C can not commit!",[CurrentTxId]),
-            case specula_utilities:coord_should_specula(CurrentTxnMeta1) of
+            case specula_utilities:coord_should_specula(NumToPrepare1) of
                 true ->
-                    proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta1});
+                    proceed_txn(S0#state{prepare_time=PrepareTime1, num_to_prepare=NumToPrepare1});
                 false ->
                     {next_state, receive_reply,
-                     S0#state{current_txn_meta=CurrentTxnMeta1}}
+                     S0#state{prepare_time=PrepareTime1, num_to_prepare=NumToPrepare1}}
             end
     end;
-receive_reply({Type, TxId, Param2},
+receive_reply({_Type, TxId, Param},
                  S0=#state{tx_id=CurrentTxnId,
                            num_committed_txn = NumCommittedTxn,
                            txn_id_list=TxIdList,
-                           specula_meta=SpeculaMeta,
-                           current_txn_meta=CurrentTxnMeta}) ->
+                           current_txn_index=CurrentTxnIndex,
+                           num_to_prepare=CurrentNumToPrepare,
+                           prepare_time=CurrentPrepareTime,
+                           updated_parts=UpdatedParts,
+                           specula_meta=SpeculaMeta}) ->
     case dict:find(TxId, SpeculaMeta) of
         {ok, TxnMeta} ->
             %%%%lager:info("Got ~w of previous tx ~w", [Type, TxId]),
             %io:format(user, "Got something ~w for ~w, num_committed txn is ~w, not current!~n", [Type, TxId, NumCommittedTxn]),
-            TxnMeta1 = update_txn_meta(TxnMeta, Type, Param2),
-            case can_commit(TxnMeta1, NumCommittedTxn) of
+            PrepareTime1 = max(TxnMeta#txn_metadata.prepare_time, Param), 
+            NumToPrepare1 = TxnMeta#txn_metadata.num_to_prepare - 1,
+            TxnMeta1 = TxnMeta#txn_metadata{prepare_time=PrepareTime1, num_to_prepare=NumToPrepare1},
+            case can_commit(NumToPrepare1, NumCommittedTxn, TxnMeta#txn_metadata.index) of
                 true -> 
                     NewNumCommitted = 
                             cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta, TxIdList),
                     %io:format(user, "Trying to cascading commit! ~w ~n", [TxId]),
                    %%%%lager:info("~w: can commit! Old num is ~w, New num is ~w",[TxId, NumCommittedTxn, NewNumCommitted]),
-                    case can_commit(CurrentTxnMeta, NewNumCommitted) of
+                    case can_commit(CurrentNumToPrepare, NewNumCommitted, CurrentTxnIndex) of
                         true ->
                            %%%%lager:info("~w: Current ~w can commit!",[TxId, CurrentTxnId]),
                             %lager:info("~w committed with ~w", [CurrentTxnId, CurrentTxnMeta#txn_metadata.prepare_time]),
-                            ?CLOCKSI_VNODE:commit(CurrentTxnMeta#txn_metadata.updated_parts, CurrentTxnId, 
-                                    CurrentTxnMeta#txn_metadata.prepare_time),
+                            ?CLOCKSI_VNODE:commit(UpdatedParts, CurrentTxnId, 
+                                    CurrentPrepareTime),
                             proceed_txn(S0#state{num_committed_txn=NewNumCommitted+1});
                         false ->
                            %%%%lager:info("~w: Current ~w can not commit!",[TxId, CurrentTxnId]),
@@ -265,12 +256,12 @@ receive_reply({Type, TxId, Param2},
 
 %% Abort due to invalid read or invalid prepare
 receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMeta,
-                 current_txn_meta=CurrentTxnMeta}) ->
+                 updated_parts=UpdatedParts}) ->
     %%%%lager:info("Receive aborted for Tx ~w, current tx is ~w", [TxId, CurrentTxId]),
     case TxId of
         CurrentTxId ->
             %%%lager:info("Aborting current tx~w", [CurrentTxId]),
-            ?CLOCKSI_VNODE:abort(CurrentTxnMeta#txn_metadata.updated_parts, CurrentTxId),
+            ?CLOCKSI_VNODE:abort(UpdatedParts, CurrentTxId),
             timer:sleep(random:uniform(?DUMB_TIMEOUT)),
             %% Restart from current transaction.
             process_txs(S0);
@@ -295,41 +286,38 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
 
 %% TODO: need to define better this case: is specula_committed allowed, or not?
 %% Why this case brings doubt???
-single_committing({committed, CommitTime}, S0=#state{from=_From, current_txn_meta=CurrentTxnMeta}) ->
-    proceed_txn(S0#state{current_txn_meta=CurrentTxnMeta#txn_metadata{prepare_time=CommitTime}});
+single_committing({committed, CommitTime}, S0=#state{from=_From}) ->
+    proceed_txn(S0#state{prepare_time=CommitTime});
     
 single_committing(abort, S0=#state{from=_From}) ->
     proceed_txn(S0).
 
-update_txn_meta(TxnMeta, Type, Param) ->
-    case Type of
-        prepared ->
-            MaxPrepareTime = max(TxnMeta#txn_metadata.prepare_time, Param),
-            NumToPrepare = TxnMeta#txn_metadata.num_to_prepare,
-            TxnMeta#txn_metadata{prepare_time=MaxPrepareTime,
-                         num_to_prepare=NumToPrepare-1};
-        read_valid ->
-            ReadDep = TxnMeta#txn_metadata.read_dep,
-            ReadDep1 = lists:delete(Param, ReadDep),
-            %io:format(user,"New readdep is ~w~n",[ReadDep1]),
-            TxnMeta#txn_metadata{read_dep=ReadDep1}
-    end.
+%    case Type of
+%        prepared ->
+%            MaxPrepareTime = max(NumToPrepare, Param),
+%            NumToPrepare = TxnMeta#txn_metadata.num_to_prepare,
+%            TxnMeta#txn_metadata{prepare_time=MaxPrepareTime,
+%                         num_to_prepare=NumToPrepare-1};
+%        read_valid ->
+%            NumToPrepare = TxnMeta#txn_metadata.num_to_prepare,
+%            TxnMeta#txn_metadata{num_to_prepare=NumToPrepare-1}
+%    end.
 
 %% @doc proceed_txn is called when timeout has expired, a transaction is aborted or 
 %%      the current transaction is committed.
 proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_index=CurrentTxnIndex,
-            current_txn_meta=CurrentTxnMeta, num_committed_txn=NumCommittedTxn,
-            specula_meta=SpeculaMeta, num_txns=NumTxns}) ->
-    CommitTime = CurrentTxnMeta#txn_metadata.prepare_time,
+             num_committed_txn=NumCommittedTxn, prepare_time=MaxPrepTime, read_set=ReadSet,
+             num_to_prepare=NumToPrepare, updated_parts=UpdatedParts,
+                 specula_meta=SpeculaMeta, num_txns=NumTxns}) ->
     case NumTxns of
         %% The last txn has already committed
         NumCommittedTxn ->
             %io:format(user, "Finishing txn ~w ~n", [NumTxns]),
             AllReadSet = get_readset(TxIdList, SpeculaMeta, []),
-            AllReadSet1 = [CurrentTxnMeta#txn_metadata.read_set|AllReadSet],
+            AllReadSet1 = [ReadSet|AllReadSet],
             %%%lager:info("Transaction finished, commit time ~w",[CommitTime]),
             From ! {ok, {TxId, lists:reverse(lists:flatten(AllReadSet1)), 
-                CommitTime}},
+                MaxPrepTime}},
             {stop, normal, S0};
         %% In the last txn but has not committed
         CurrentTxnIndex ->
@@ -339,10 +327,12 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
         %% Proceed
         _ -> 
             %io:format(user, "Proceeding txn ~w ~n", [NumCommittedTxn]),
-            SpeculaMeta1 = dict:store(TxId, CurrentTxnMeta, SpeculaMeta),
+            SpeculaMeta1 = dict:store(TxId, #txn_metadata{read_set=ReadSet, prepare_time=MaxPrepTime, 
+                                index=CurrentTxnIndex, num_to_prepare=NumToPrepare, updated_parts=UpdatedParts}, 
+                        SpeculaMeta),
             TxIdList1 = TxIdList ++ [TxId],
             process_txs(S0#state{specula_meta=SpeculaMeta1, current_txn_index=CurrentTxnIndex+1, 
-                txn_id_list=TxIdList1, causal_clock=CommitTime})
+                txn_id_list=TxIdList1, causal_clock=MaxPrepTime})
     end.
 
 %% =============================================================================
@@ -367,17 +357,15 @@ terminate(_Reason, _SN, _SD) ->
 
 %%%%% Private function %%%%%%%%%%
 
-process_operations(TxId, [], {WriteSet, ReadSet, _, ReadDep, CanCommit}, Index) ->
+process_operations(TxId, [], WriteSet, ReadSet, _, ReadDep, CanCommit) ->
     case dict:size(WriteSet) of
         0 ->
-            {CanCommit, #txn_metadata{read_dep=ReadDep, read_set=ReadSet, index=Index,
-                     prepare_time=TxId#tx_id.snapshot_time}};
+            {CanCommit, WriteSet, ReadSet, ReadDep};
         N ->
             ?CLOCKSI_VNODE:prepare(WriteSet, TxId),
-            {CanCommit, #txn_metadata{read_dep=ReadDep, updated_parts=WriteSet, num_to_prepare=N,
-              read_set=ReadSet, index=Index}}
+            {CanCommit, WriteSet, ReadSet, N+ReadDep}
     end;
-process_operations(TxId, [{read, Key, Type}|Rest], {UpdatedParts, RSet, Buffer, ReadDep, CanCommit}, Index) ->
+process_operations(TxId, [{read, Key, Type}|Rest], UpdatedParts, RSet, Buffer, ReadDep, CanCommit) ->
     Reply = case dict:find(Key, Buffer) of
                     error ->
                         Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
@@ -389,16 +377,16 @@ process_operations(TxId, [{read, Key, Type}|Rest], {UpdatedParts, RSet, Buffer, 
     %%%%lager:info("Read got reply ~w",[Reply]),
     {NewReadDep, CanCommit1} = case Reply of
                                     {specula, {_Type, _Snapshot}} ->
-                                        {[Key|ReadDep], false};
+                                        {ReadDep+1, false};
                                     _ ->
                                         {ReadDep, CanCommit}
                                end,
     %%io:format(user, "~nType is ~w, Key is ~w~n",[Type, Key]),
     {_, {Type, KeySnapshot}} = Reply,
     Buffer1 = dict:store(Key, KeySnapshot, Buffer),
-    process_operations(TxId, Rest, {UpdatedParts, 
-            [Type:value(KeySnapshot)|RSet], Buffer1, NewReadDep, CanCommit1}, Index);
-process_operations(TxId, [{update, Key, Type, Op}|Rest], {UpdatedParts, RSet, Buffer, ReadDep, _}, Index) ->
+    process_operations(TxId, Rest, UpdatedParts, 
+            [Type:value(KeySnapshot)|RSet], Buffer1, NewReadDep, CanCommit1);
+process_operations(TxId, [{update, Key, Type, Op}|Rest], UpdatedParts, RSet, Buffer, ReadDep, _) ->
     Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
     IndexNode = hd(Preflist),
     UpdatedParts1 = case dict:is_key(IndexNode, UpdatedParts) of
@@ -418,9 +406,9 @@ process_operations(TxId, [{update, Key, Type, Op}|Rest], {UpdatedParts, RSet, Bu
                     {ok, NewSnapshot} = Type:update(Param, Actor, Snapshot),
                     dict:store(Key, NewSnapshot, Buffer)
                 end,
-    process_operations(TxId, Rest, {UpdatedParts1, RSet, Buffer1, ReadDep, false}, Index).
+    process_operations(TxId, Rest, UpdatedParts1, RSet, Buffer1, ReadDep, false).
 
-cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, current_txn_meta=CurrentTxnMeta,
+cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, updated_parts=UpdatedParts, 
                              specula_meta=SpeculaMeta,txn_id_list=TxIdList}=S0) ->
     AbortIndex = AbortTxnMeta#txn_metadata.index,
     AbortTxList = lists:nthtail(AbortIndex-1, TxIdList),
@@ -432,9 +420,8 @@ cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, current_txn_meta=Current
     SpeculaMeta1 = lists:foldl(AbortFun, SpeculaMeta, AbortTxList),
     
     %Abort current transaction
-    CurrentUpdatedParts = CurrentTxnMeta#txn_metadata.updated_parts, 
     %%%%lager:info("Aborting current txn in cascading"),
-    ?CLOCKSI_VNODE:abort(CurrentUpdatedParts, CurrentTxId),
+    ?CLOCKSI_VNODE:abort(UpdatedParts, CurrentTxId),
 
     S0#state{txn_id_list=lists:sublist(TxIdList, AbortIndex-1),
                 current_txn_index=AbortIndex, specula_meta=SpeculaMeta1}.
@@ -451,33 +438,21 @@ try_commit_successors([], _SpeculaMetadata, Index) ->
     Index;
 try_commit_successors([TxId|Rest], SpeculaMetadata, Index) ->
     TxnMeta = dict:fetch(TxId, SpeculaMetadata),
-    ReadDep = TxnMeta#txn_metadata.read_dep,
-    case ReadDep of
-        [] ->
-            case TxnMeta#txn_metadata.num_to_prepare of
-                0 ->
-                    %lager:info("~w committed with ~w", [TxId, TxnMeta#txn_metadata.prepare_time]),
-                    ?CLOCKSI_VNODE:commit(TxnMeta#txn_metadata.updated_parts, 
-                            TxId, TxnMeta#txn_metadata.prepare_time),
-                    try_commit_successors(Rest, SpeculaMetadata, Index+1);
-                _ ->
-                    Index
-            end;
+    case TxnMeta#txn_metadata.num_to_prepare of
+        0 ->
+            %lager:info("~w committed with ~w", [TxId, TxnMeta#txn_metadata.prepare_time]),
+            ?CLOCKSI_VNODE:commit(TxnMeta#txn_metadata.updated_parts, 
+                    TxId, TxnMeta#txn_metadata.prepare_time),
+            try_commit_successors(Rest, SpeculaMetadata, Index+1);
         _ ->
             Index
     end.
 
-can_commit(TxnMeta, NumCommittedTxn) ->
-    case TxnMeta#txn_metadata.num_to_prepare of
+can_commit(NumToPrepare, NumCommittedTxn, TxnIndex) ->
+    case NumToPrepare of
         0 ->
-            case TxnMeta#txn_metadata.read_dep of
-                [] -> %%No read dependency
-                    %io:format(user, "Committed is ~w, index is ~w~n", [NumCommittedTxn, TxnMeta#txn_metadata.index]),
-                    NumCommittedTxn == TxnMeta#txn_metadata.index - 1;
-                _ ->
-                    %io:format(user, "Can not commit due to unprepared ~w~n", [W]),
-                    false
-            end;
+            %io:format(user, "Committed is ~w, index is ~w~n", [NumCommittedTxn, TxnMeta#txn_metadata.index]),
+            NumCommittedTxn == TxnIndex - 1;
         _N ->
             %io:format(user, "failed due to not prepared ~w~n",[N]),
             false
@@ -500,23 +475,21 @@ process_op_test() ->
     Op1 = {increment, haha},
     Operations = [{read, Key1, Type}, {update, Key1, Type, Op1}, {read, Key1, Type}, {read, Key2, Type},
                 {read, Key2, Type}],
-    {_, TxnMeta} = process_operations(TxId, Operations,
-            {dict:new(), [], dict:new(), [], true}, 1),
+    {_, _, ReadSet, NumToPrepare} = process_operations(TxId, Operations,
+            dict:new(), [], dict:new(), 0, true),
 
-    ?assertEqual([2, 3, 2, 2], lists:reverse(TxnMeta#txn_metadata.read_set)),
-    ?assertEqual([], TxnMeta#txn_metadata.read_dep),
-    ?assertEqual(1, TxnMeta#txn_metadata.num_to_prepare),
+    ?assertEqual([2, 3, 2, 2], lists:reverse(ReadSet)),
+    ?assertEqual(1, NumToPrepare),
 
     %% Read with dependency
     Key3 = {specula, 1, 10},
     Operations1 = [{read, Key1, Type}, {update, Key1, Type, Op1}, {read, Key1, Type}, {read, Key2, Type},
                 {read, Key2, Type}, {read, Key3, Type}],
-    {_, TxnMeta2} = process_operations(TxId, Operations1,
-            {dict:new(), [], dict:new(), [], true}, 1),
+    {_, _, ReadSet2, NumToPrepare2} = process_operations(TxId, Operations1,
+            dict:new(), [], dict:new(), 0, true),
    
-    ?assertEqual([2, 3, 2, 2, 2], lists:reverse(TxnMeta2#txn_metadata.read_set)),
-    ?assertEqual([Key3], TxnMeta2#txn_metadata.read_dep),
-    ?assertEqual(1, TxnMeta2#txn_metadata.num_to_prepare).
+    ?assertEqual([2, 3, 2, 2, 2], lists:reverse(ReadSet2)),
+    ?assertEqual(2, NumToPrepare2).
 
     
 cascading_abort_test() ->
@@ -593,15 +566,16 @@ generate_specula_meta(NumTotalTxn, NumSpeculaTxn, NumCanCommit, _NumCommitted) -
 
     CurrentTxId = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
 
-    #state{all_txn_ops=AllTxnOps, txn_id_list=TxnIdList, tx_id=CurrentTxId,
-        current_txn_meta=CurrentTxn#txn_metadata{index=NumSpeculaTxn+1}, specula_meta=SpeculaMeta}.
+    #state{all_txn_ops=AllTxnOps, txn_id_list=TxnIdList, tx_id=CurrentTxId, 
+        num_to_prepare=CurrentTxn#txn_metadata.num_to_prepare, current_txn_index=NumSpeculaTxn+1, 
+            specula_meta=SpeculaMeta}.
 
 generate_txn_meta(false, false) ->
-    #txn_metadata{read_dep=[], num_to_prepare=0};
+    #txn_metadata{num_to_prepare=0};
 generate_txn_meta(PendingRead, PendingPrepare) ->
-    ReadDep = case PendingRead of true -> [1,2]; false -> [] end,
+    ReadDep = case PendingRead of true -> 2; false -> 0 end,
     NumUpdated = case PendingPrepare of true -> 1; false -> 0 end,
-    #txn_metadata{read_dep=ReadDep, num_to_prepare=NumUpdated}.
+    #txn_metadata{num_to_prepare=NumUpdated+ReadDep}.
 
 
 generate_random_op(0, 0, Acc) ->

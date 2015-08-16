@@ -199,7 +199,7 @@ handle_dependency(NumInvalidRead, [{DepTxId=#tx_id{snapshot_time=DepSnapshotTime
             handle_dependency(NumInvalidRead+1, T, TxCommitTime);
         false ->
             lager:info("Sending read valid ~w for key ~w",[DepTxId, Key]),
-            ?SEND_MSG(CoordPid, {read_valid, DepTxId, Key}),
+            ?SEND_MSG(CoordPid, {read_valid, DepTxId, 0}),
             handle_dependency(NumInvalidRead, T, TxCommitTime)
     end.
 
@@ -272,7 +272,7 @@ make_specula_version_final_test() ->
         ?assertEqual({abort, TxId2}, Msg2)
     end,
     receive Msg4 ->
-        ?assertEqual({read_valid, TxId4, Key}, Msg4)
+        ?assertEqual({read_valid, TxId4, 0}, Msg4)
     end,
     ?assertEqual(Result5, true),
     ?assertEqual(ets:lookup(SpeculaDep, TxId2), []),
