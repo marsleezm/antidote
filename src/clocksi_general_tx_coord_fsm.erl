@@ -154,7 +154,7 @@ process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
                         dict:new(), [], dict:new(), 0, true),
             case CanCommit of
                 true -> %%TODO: has to find some way to deal with read-only transaction
-                    proceed_txn(SD#state{num_to_prepare=NumToPrepare, read_set=ReadSet, 
+                    proceed_txn(SD#state{read_set=ReadSet, 
                         prepare_time=TxId#tx_id.snapshot_time, num_committed_txn=CommittedTxn+1, tx_id=TxId});
                 false ->
                     {next_state, receive_reply, SD#state{num_to_prepare=NumToPrepare, read_set=ReadSet,
