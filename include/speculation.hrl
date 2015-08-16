@@ -1,5 +1,4 @@
 -record(txn_metadata, {
-        read_dep = [] :: non_neg_integer(),
         num_to_prepare = 0 :: non_neg_integer(),
         num_specula_prepared = 0 :: non_neg_integer(),
         prepare_time = 0 :: non_neg_integer(),

@@ -160,7 +160,12 @@ handle_cast({chain_replicate, Partition, Log, MsgToReply, RepNeeded},
     case RepNeeded of
         1 ->
             {{fsm, undefined, FSMSender}, Msg} = MsgToReply,
-            gen_fsm:send_event(FSMSender, Msg);
+            case MsgToReply of
+                false ->
+                    ok;
+                _ ->
+                    gen_fsm:send_event(FSMSender, Msg)
+            end;
         _ ->
             chain_replicate(hd(Successors), Partition, Log, MsgToReply, RepNeeded-1)
     end,
