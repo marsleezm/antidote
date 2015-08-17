@@ -649,7 +649,9 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
                                 true ->
                                     certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true);
                                 false ->
-                                    false
+                                    false;
+                                wait ->
+                                    wait
                             end
                     end;
                 error ->
@@ -658,8 +660,6 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
                             certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true); 
                         false ->
                             false;
-                        specula_prepared ->
-                            specula_prepared;
                         wait ->
                             wait
                     end
