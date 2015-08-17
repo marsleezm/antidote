@@ -377,7 +377,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
             %%riak_core_vnode:reply(OriginalSender, {specula_prepared, TxId, PrepareTime}),
             {noreply, State};
         {error, wait_more} ->
-            spawn(clocksi_vnode, async_send_msg, [5, {prepare, TxId, 
+            spawn(clocksi_vnode, async_send_msg, [10, {prepare, TxId, 
                         WriteSet, OriginalSender}, {Partition, node()}]),
             {noreply, State};
         {error, write_conflict} ->
@@ -432,7 +432,7 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                     {noreply, State}
             end;
         {error, wait_more}->
-            spawn(clocksi_vnode, async_send_msg, [5, {prepare, TxId, 
+            spawn(clocksi_vnode, async_send_msg, [10, {prepare, TxId, 
                         WriteSet, OriginalSender}, {Partition, node()}]),
             {noreply, State};
         {error, write_conflict} ->
@@ -679,7 +679,7 @@ check_prepared(TxId, Key, PreparedTxs) ->
                 true ->
                     false;
                 false ->
-                    lager:info("Sending wait of ~w, preptime ~w", [TxId, PrepareTime]),
+                    lager:info("Sending wait of ~w for ~w, preptime ~w", [TxId, Key, PrepareTime]),
                     wait
             end
     end.
