@@ -260,7 +260,7 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
                  num_aborted=NumAborted, updated_parts=UpdatedParts, current_txn_index=Index}) ->
     case TxId of
         CurrentTxId ->
-            lager:info("Receive aborted for current tx is ~w, index is ~w", [TxId, CurrentTxId, Index]),
+            lager:info("Receive aborted for current tx is ~w, index is ~w", [TxId, Index]),
             %%%lager:info("Aborting current tx~w", [CurrentTxId]),
             ?CLOCKSI_VNODE:abort(UpdatedParts, CurrentTxId),
             timer:sleep(random:uniform(?DUMB_TIMEOUT)),
@@ -269,7 +269,7 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
         _ ->
             case dict:find(TxId, SpeculaMeta) of
                 {ok, AbortTxnMeta} ->
-                    lager:info("Receive aborted for Tx ~w of index ~w, current index is ", [TxId, AbortTxnMeta#txn_metadata.index, Index]),
+                    lager:info("Receive aborted for Tx ~w of index ~w, current index is ~w", [TxId, AbortTxnMeta#txn_metadata.index, Index]),
                     %%%lager:info("Aborting other tx ~w", [TxId]),
                     S1 = cascading_abort(AbortTxnMeta, S0),
                     timer:sleep(random:uniform(?DUMB_TIMEOUT)),
@@ -414,6 +414,7 @@ cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, updated_parts=UpdatedPar
                              specula_meta=SpeculaMeta,txn_id_list=TxIdList}=S0) ->
     AbortIndex = AbortTxnMeta#txn_metadata.index,
     AbortTxList = lists:nthtail(AbortIndex-1, TxIdList),
+    lager:info("Aborting cascad txn of ~w, idlist ~w : keys ~w", [AbortIndex, TxIdList, dict:fetch_keys(SpeculaMeta)]),
     AbortFun = fun(Id, Dict) -> 
                                 TMeta = dict:fetch(Id, Dict),  
                                 ?CLOCKSI_VNODE:abort(TMeta#txn_metadata.updated_parts, Id),
@@ -422,7 +423,6 @@ cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, updated_parts=UpdatedPar
     SpeculaMeta1 = lists:foldl(AbortFun, SpeculaMeta, AbortTxList),
     
     %Abort current transaction
-    %%%%lager:info("Aborting current txn in cascading"),
     ?CLOCKSI_VNODE:abort(UpdatedParts, CurrentTxId),
 
     S0#state{txn_id_list=lists:sublist(TxIdList, AbortIndex-1),
