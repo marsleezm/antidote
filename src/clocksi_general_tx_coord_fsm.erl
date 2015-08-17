@@ -333,6 +333,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
                                 index=CurrentTxnIndex, num_to_prepare=NumToPrepare, updated_parts=UpdatedParts}, 
                         SpeculaMeta),
             TxIdList1 = TxIdList ++ [TxId],
+            lager:info("Txid is ~w, list is ~w", [TxId, TxIdList]),
             process_txs(S0#state{specula_meta=SpeculaMeta1, current_txn_index=CurrentTxnIndex+1, 
                 txn_id_list=TxIdList1, causal_clock=MaxPrepTime})
     end.
