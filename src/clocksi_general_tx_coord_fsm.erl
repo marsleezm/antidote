@@ -257,7 +257,7 @@ receive_reply({_Type, TxId, Param},
 
 %% Abort due to invalid read or invalid prepare
 receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMeta,
-                 num_aborted=NumAborted, updated_parts=UpdatedParts, current_txn_index=Index}) ->
+                 num_aborted=NumAborted, updated_parts=UpdatedParts}) ->
     case TxId of
         CurrentTxId ->
             %%%lager:info("Aborting current tx~w", [CurrentTxId]),
