@@ -453,7 +453,7 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                       num_read_invalid=NumInvalid
                       } = State) ->
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
-    %lager:info("Received commit of Tx ~w for ~w",[TxId, Updates]),
+    lager:info("Received commit of Tx ~w",[TxId]),
     Result = commit(TxId, TxCommitTime, Updates, CommittedTx, State),
     case Result of
         {ok, {committed,NewCommittedTx}} ->
@@ -673,13 +673,13 @@ check_prepared(TxId, Key, PreparedTxs) ->
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             true;
-        [{Key, {_PreparedTxId, PrepareTime, _Type, _Op}}] ->
+        [{Key, {PreparedTxId, PrepareTime, _Type, _Op}}] ->
             %lager:info("Abort for Key ~w, preparetime ~w, snapshottime ~w", [Key, PrepareTime, SnapshotTime]),
             case PrepareTime > SnapshotTime of
                 true ->
                     false;
                 false ->
-                    lager:info("Sending wait of ~w for ~w, preptime ~w", [TxId, Key, PrepareTime]),
+                    lager:info("Sending wait of ~w for ~w, preptime ~w of ~w", [TxId, Key, PrepareTime, PreparedTxId]),
                     wait
             end
     end.
