@@ -220,7 +220,6 @@ receive_reply({_Type, TxId, Param},
                            prepare_time=CurrentPrepareTime,
                            updated_parts=UpdatedParts,
                            specula_meta=SpeculaMeta}) ->
-    lager:info("Shold never happen, got reply of previous!"),
     case dict:find(TxId, SpeculaMeta) of
         {ok, TxnMeta} ->
             %%%%lager:info("Got ~w of previous tx ~w", [Type, TxId]),
