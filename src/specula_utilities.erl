@@ -41,9 +41,7 @@ coord_should_specula(Aborted) ->
     %    false ->
     %        false
     %end.
-    case Aborted of 0 -> true;
-                    _ -> false
-    end.
+    Aborted<3.
 
 %% If this txn corresponds to any specula-committed version,
 %% 1. Make the specula_committed version final committed
