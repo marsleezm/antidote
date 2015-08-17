@@ -43,7 +43,7 @@ check_clock(Key,TxId, Tables) ->
 	    %% dont sleep in case there is another read waiting
             %% timer:sleep((T_TS - Time) div 1000 +1 );
         %%lager:info("Clock not ready"),
-	        not_ready;
+	        {not_ready, 2};
         false ->
 	        check_prepared(Key,TxId, Tables)
     end.
@@ -62,7 +62,7 @@ check_prepared(Key, MyTxId, Tables) ->
                     %        lager:info("Specula and read, sender is ~w, TxId ~w, Key ~w",[MyTxId#tx_id.server_pid, TxId, Key]), 
                             specula_utilities:speculate_and_read(Key, MyTxId, {TxId, Time, Type, Op}, Tables);
                         false ->
-                            not_ready
+                            {not_ready, 2}
                     end;
                 false ->
                     ready

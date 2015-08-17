@@ -30,7 +30,7 @@
         check_tables/0,
         prepare/2,
         commit/3,
-        async_send_msg/2,
+        async_send_msg/3,
         single_commit/2,
         abort/2,
 
@@ -72,11 +72,11 @@
 %%              generate.
 %%----------------------------------------------------------------------
 -record(state, {partition :: non_neg_integer(),
-                prepared_txs :: cache_id(),
                 committed_tx :: dict(),
                 if_certify :: boolean(),
                 if_replicate :: boolean(),
 
+                prepared_txs :: cache_id(),
                 specula_dep :: cache_id(),
                 specula_store :: cache_id(),
                 inmemory_store :: cache_id(),
@@ -304,8 +304,8 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
     Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     tx_utilities:update_ts(TxId#tx_id.snapshot_time),
     case clocksi_readitem:check_prepared(Key, TxId, Tables) of
-        not_ready ->
-            spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
+        {not_ready, Delay} ->
+            spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
                          Sender}, {Partition, node()}]),
             %lager:info("Not ready for key ~w ~w, reader is ~w",[Key, TxId, Sender]),
             {noreply, SD0};
@@ -324,8 +324,8 @@ handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
     tx_utilities:update_ts(TxId#tx_id.snapshot_time),
     Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     case clocksi_readitem:check_prepared(Key, TxId, Tables) of
-        not_ready ->
-            spawn(clocksi_vnode, async_send_msg, [{async_read, Key, Type, TxId,
+        {not_ready, Delay} ->
+            spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
                          OrgSender}, {Partition, node()}]),
             %lager:info("Not ready for key ~w ~w",[Key, TxId]),
             {noreply, SD0};
@@ -377,7 +377,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
             %%riak_core_vnode:reply(OriginalSender, {specula_prepared, TxId, PrepareTime}),
             {noreply, State};
         {error, wait_more} ->
-            spawn(clocksi_vnode, async_send_msg, [{prepare, TxId, 
+            spawn(clocksi_vnode, async_send_msg, [5, {prepare, TxId, 
                         WriteSet, OriginalSender}, {Partition, node()}]),
             {noreply, State};
         {error, write_conflict} ->
@@ -432,7 +432,7 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                     {noreply, State}
             end;
         {error, wait_more}->
-            spawn(clocksi_vnode, async_send_msg, [{prepare, TxId, 
+            spawn(clocksi_vnode, async_send_msg, [5, {prepare, TxId, 
                         WriteSet, OriginalSender}, {Partition, node()}]),
             {noreply, State};
         {error, write_conflict} ->
@@ -543,9 +543,8 @@ terminate(_Reason, #state{partition=Partition} = _State) ->
 %%%===================================================================
 %%% Internal Functions
 %%%===================================================================
-async_send_msg(Msg, To) ->
-    SleepTime = random:uniform(150)+50,
-    timer:sleep(SleepTime),
+async_send_msg(Delay, Msg, To) ->
+    timer:sleep(Delay),
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
 prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, SpeculaStore, IfCertify)->
@@ -644,14 +643,12 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
                 {ok, CommitTime} ->
                     case CommitTime > SnapshotTime of
                         true ->
-                            %lager:info("~w, key ~w: Something committed! CommitTime ~w, SnapshotTime ~w", [TxId, Key, CommitTime, SnapshotTime]),
                             false;
                         false ->
                             case check_prepared(TxId, Key, PreparedTxs) of
                                 true ->
                                     certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true);
                                 false ->
-                                    %%lager:info("~w, key ~w: Preare failed!", [TxId, Key]),
                                     false
                             end
                     end;
@@ -660,7 +657,6 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, SpeculaStore, true) -
                         true ->
                             certification_check(TxId, T, CommittedTx, PreparedTxs, SpeculaStore, true); 
                         false ->
-                            %%lager:info("~w: Prepare failed!", [TxId]),
                             false;
                         specula_prepared ->
                             specula_prepared;
@@ -683,18 +679,7 @@ check_prepared(TxId, Key, PreparedTxs) ->
                 true ->
                     false;
                 false ->
-                    %% TODO: this part should be tested..
-                    %% Can I prepare if some updates on this key is specula_committed, or I should always wait?
-                    %case specula_utilities:should_specula(PrepareTime, SnapshotTime) of
-                    %    true ->
-                    %        _ = specula_utilities:make_prepared_specula(Key, 
-                    %            {PreparedTxId, PrepareTime, Type, Op, PreparedSender},
-                    %                PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep),
-                    %        specula_utilities:add_specula_meta(SpeculaDep, PreparedTxId, TxId, update),
-                    %        specula_prepared;
-                    %    false ->
-                            false
-                    %end
+                    wait
             end
     end.
 
