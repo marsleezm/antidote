@@ -679,6 +679,7 @@ check_prepared(TxId, Key, PreparedTxs) ->
                 true ->
                     false;
                 false ->
+                    lager:info("Sending wait of ~w, preptime ~w", [TxId, PrepareTime]),
                     wait
             end
     end.
