@@ -95,9 +95,8 @@
 
       causal_clock :: non_neg_integer(),
       %%Stat
-      num_committed,
-      num_cert_final,
-      num_read_invalid}).
+      num_aborted :: non_neg_integer()
+      }).
 
 %%%===================================================================
 %%% API
@@ -129,6 +128,7 @@ init([From, ClientClock, Txns]) ->
             txn_id_list = [],
             causal_clock = ClientClock,
             num_committed_txn = 0,
+            num_aborted = 0,
             from = From
            },
     %%io:format(user, "Sending msg to myself ~w, from is ~w~n", [Self, From]),
@@ -173,8 +173,8 @@ process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
 %%      partitions in order to compute the final tx timestamp (the maximum
 %%      of the received prepare_time).
 receive_reply(timeout,
-                 S0=#state{num_to_prepare=NumToPrepare, tx_id=_TxId}) ->
-    case specula_utilities:coord_should_specula(NumToPrepare) of
+                 S0=#state{num_to_prepare=_NumToPrepare, num_aborted=NumAborted, tx_id=_TxId}) ->
+    case specula_utilities:coord_should_specula(NumAborted) of
         true ->
             %%%%lager:info("Timeouted, coordinator proceed.. ~w", [TxId]),
             proceed_txn(S0);
@@ -189,6 +189,7 @@ receive_reply({_Type, CurrentTxId, Param},
                            num_to_prepare=NumToPrepare,
                            current_txn_index=CurrentTxnIndex,
                            updated_parts=UpdatedParts,
+                           num_aborted=NumAborted,
                            prepare_time=PrepareTime}) ->
     PrepareTime1 = max(PrepareTime, Param), 
     NumToPrepare1 = NumToPrepare-1,
@@ -202,7 +203,7 @@ receive_reply({_Type, CurrentTxId, Param},
         false ->
            %io:format(user, "Can not commit ~w, is curren!~n", [CurrentTxId]),
            %%%%lager:info("~w:C can not commit!",[CurrentTxId]),
-            case specula_utilities:coord_should_specula(NumToPrepare1) of
+            case specula_utilities:coord_should_specula(NumAborted) of
                 true ->
                     proceed_txn(S0#state{prepare_time=PrepareTime1, num_to_prepare=NumToPrepare1});
                 false ->
@@ -256,7 +257,7 @@ receive_reply({_Type, TxId, Param},
 
 %% Abort due to invalid read or invalid prepare
 receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMeta,
-                 updated_parts=UpdatedParts}) ->
+                 num_aborted=NumAborted, updated_parts=UpdatedParts}) ->
     %%%%lager:info("Receive aborted for Tx ~w, current tx is ~w", [TxId, CurrentTxId]),
     case TxId of
         CurrentTxId ->
@@ -264,7 +265,7 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
             ?CLOCKSI_VNODE:abort(UpdatedParts, CurrentTxId),
             timer:sleep(random:uniform(?DUMB_TIMEOUT)),
             %% Restart from current transaction.
-            process_txs(S0);
+            process_txs(S0#state{num_aborted=NumAborted+1});
         _ ->
             case dict:find(TxId, SpeculaMeta) of
                 {ok, AbortTxnMeta} ->
