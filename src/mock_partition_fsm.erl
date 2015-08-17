@@ -116,7 +116,7 @@ read_data_item(_IndexNode, Key, _Type, TxId) ->
             {ok, Counter2} = riak_dt_gcounter:update(increment, nono, Counter1),
             Sender = self(),
             spawn(fun() -> timer:sleep(Delay), 
-                    gen_fsm:send_event(Sender, {read_valid, TxId, Key}) end),
+                    gen_fsm:send_event(Sender, {read_valid, TxId, 0}) end),
             {specula, {riak_dt_gcounter,Counter2}};
         set ->
             Set = riak_dt_gset:new(),
