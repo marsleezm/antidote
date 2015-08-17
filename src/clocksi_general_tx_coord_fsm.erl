@@ -258,7 +258,7 @@ receive_reply({_Type, TxId, Param},
 %% Abort due to invalid read or invalid prepare
 receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMeta,
                  num_aborted=NumAborted, updated_parts=UpdatedParts}) ->
-    %%%%lager:info("Receive aborted for Tx ~w, current tx is ~w", [TxId, CurrentTxId]),
+    lager:info("Receive aborted for Tx ~w, current tx is ~w", [TxId, CurrentTxId]),
     case TxId of
         CurrentTxId ->
             %%%lager:info("Aborting current tx~w", [CurrentTxId]),
@@ -272,7 +272,7 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
                     %%%lager:info("Aborting other tx ~w", [TxId]),
                     S1 = cascading_abort(AbortTxnMeta, S0),
                     timer:sleep(random:uniform(?DUMB_TIMEOUT)),
-                    process_txs(S1);
+                    process_txs(S1#state{num_aborted=NumAborted+1});
                 error ->
                     %%lager:warning("Can't find txn wants to abort!!! ~w",[TxId]),
                     {next_state, receive_reply, S0}
