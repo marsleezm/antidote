@@ -174,7 +174,7 @@ receive_reply(timeout,
             {next_state, receive_reply, S0}
     end;
 
-receive_reply({_Type, CurrentTxId, Param},
+receive_reply({Type, CurrentTxId, Param},
                  S0=#state{tx_id=CurrentTxId,
                            num_committed_txn = NumCommittedTxn,
                            num_to_prepare=NumToPrepare,
@@ -192,6 +192,12 @@ receive_reply({_Type, CurrentTxId, Param},
                         PrepareTime1),
             proceed_txn(S0#state{num_committed_txn=NumCommittedTxn+1, prepare_time=PrepareTime1});
         false ->
+            case Type of
+                read_valid ->
+                    lager:info("Read valid can not commit!");
+                _ ->
+                    ok
+            end,
            %io:format(user, "Can not commit ~w, is curren!~n", [CurrentTxId]),
            %%%%lager:info("~w:C can not commit!",[CurrentTxId]),
             case specula_utilities:coord_should_specula(NumAborted) of
@@ -434,8 +440,8 @@ can_commit(NumToPrepare, NumCommittedTxn, TxnIndex) ->
         0 ->
             %io:format(user, "Committed is ~w, index is ~w~n", [NumCommittedTxn, TxnMeta#txn_metadata.index]),
             NumCommittedTxn == TxnIndex - 1;
-        _N ->
-            %io:format(user, "failed due to not prepared ~w~n",[N]),
+        N ->
+            lager:info("Can not commit ~w",[N]),
             false
     end.
 
