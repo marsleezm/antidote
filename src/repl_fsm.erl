@@ -188,7 +188,7 @@ handle_cast({repl_ack, {Type, TxId}}, SD0=#state{replicated_log=ReplicatedLog,
                                         end,
                             ets:insert(ReplicatedLog, {Partition, [{TxId, Record}|DurableLog]}),
                             ets:delete(ReplicatedLog, TxId),
-                            %lager:info("#####DONE#####Sending ~p to ~p", [Sender, MsgToReply]),
+                            ager:info("#DONE#Sending ~p to ~p", [Sender, MsgToReply]),
                             {fsm, undefined, FSMSender} = Sender,
                             case MsgToReply of
                                 false ->

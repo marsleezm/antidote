@@ -444,8 +444,8 @@ try_commit_successors([TxId|Rest], SpeculaMetadata, Index) ->
             ?CLOCKSI_VNODE:commit(TxnMeta#txn_metadata.updated_parts, 
                     TxId, TxnMeta#txn_metadata.prepare_time),
             try_commit_successors(Rest, SpeculaMetadata, Index+1);
-        _ ->
-            lager:info("~w can not commit, index is ~w", [Index+1]),
+        N ->
+            lager:info("~w can not commit, index is ~w, prep is ~w", [TxId, Index+1, N]),
             Index
     end.
 
