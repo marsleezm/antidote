@@ -41,9 +41,7 @@ create_transaction_record(ClientClock) ->
 get_and_update_ts(CausalTS) ->
     {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
     Now = clocksi_vnode:now_microsec(now()),
-    Max = max(Now, TS),
-    Max2 = max(CausalTS, Max),
-    lager:info("Now ~w, TS ~w, CausalTS ~w, Max2 ~w", [Now, TS, CausalTS, Max2]),
+    Max2 = max(CausalTS, max(Now, TS)),
     application:set_env(antidote, max_ts, Max2+1),
     Max2+1.
 

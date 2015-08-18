@@ -288,7 +288,7 @@ single_committing(abort, S0=#state{from=_From}) ->
 %%      the current transaction is committed.
 proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_index=CurrentTxnIndex,
              num_committed_txn=NumCommittedTxn, prepare_time=MaxPrepTime, read_set=ReadSet,
-             num_to_prepare=NumToPrepare, updated_parts=UpdatedParts, causal_clock=CausalClock,
+             num_to_prepare=NumToPrepare, updated_parts=UpdatedParts, 
                  specula_meta=SpeculaMeta, num_txns=NumTxns}) ->
     case NumTxns of
         %% The last txn has already committed
@@ -312,7 +312,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
                         SpeculaMeta),
             TxIdList1 = TxIdList ++ [TxId],
             process_txs(S0#state{specula_meta=SpeculaMeta1, current_txn_index=CurrentTxnIndex+1, 
-                txn_id_list=TxIdList1, causal_clock=max(CausalClock, MaxPrepTime)})
+                txn_id_list=TxIdList1, causal_clock=max(TxId#tx_id.snapshot_time, MaxPrepTime)})
     end.
 
 %% =============================================================================
@@ -392,7 +392,7 @@ cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, updated_parts=UpdatedPar
                              specula_meta=SpeculaMeta,txn_id_list=TxIdList}=S0) ->
     AbortIndex = AbortTxnMeta#txn_metadata.index,
     AbortTxList = lists:nthtail(AbortIndex-1, TxIdList),
-    lager:info("Cascading abort.. TxIdList is ~w, dict key ~w", [TxIdList, dict:fetch_keys(SpeculaMeta)]),
+    %lager:info("Cascading abort.. TxIdList is ~w, dict key ~w", [TxIdList, dict:fetch_keys(SpeculaMeta)]),
     AbortFun = fun(Id, Dict) -> 
                                 TMeta = dict:fetch(Id, Dict),  
                                 ?CLOCKSI_VNODE:abort(TMeta#txn_metadata.updated_parts, Id),
