@@ -54,7 +54,7 @@ make_specula_version_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore)
     %% Firstly, make this specula version finally committed.
     %lager:info("In making specula final for tx ~w",[TxId]),
     case ets:lookup(SpeculaStore, Key) of
-        [{Key, [{TxId, _, SpeculaValue}|T]}] ->    
+        [{Key, {TxId, _, SpeculaValue}}] ->    
             %lager:info("Found ~w of TxId ~w in speculstore",[Key, TxId]),
             case ets:lookup(InMemoryStore, Key) of
                   [] ->
@@ -64,13 +64,7 @@ make_specula_version_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore)
                       true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, SpeculaValue}|RemainList]})
             end,
             %%Remove this version from specula_store
-            case T of 
-                [] ->
-                    true = ets:delete(SpeculaStore, Key);
-                _ ->
-                    true = ets:insert(SpeculaStore, {Key, T})
-            end,
-            true;
+            ets:delete(SpeculaStore, Key);
         [{Key, []}] -> %% The version should still be in prepared table. It's not made specula yet.
             false;    
         [] -> %% The version should still be in prepared table. It's not made specula yet.
@@ -82,8 +76,8 @@ make_specula_version_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore)
 
 abort_specula_committed(TxId, Key, SpeculaStore) ->
     case ets:lookup(SpeculaStore, Key) of
-        [{Key, [{TxId, _, _SpeculaValue}|T]}] ->
-            ets:insert(SpeculaStore, {Key, T}),
+        [{Key, {TxId, _, _SpeculaValue}}] ->
+            ets:delete(SpeculaStore, Key),
             true;
         _ -> %% Just prepared
             false   
@@ -234,7 +228,7 @@ make_specula_version_final_test() ->
     InMemoryStore = ets:new(inmemory_store, [set,named_table,protected]),
     PreparedTxs = ets:new(prepared_store, [set,named_table,protected]),
     SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
-    ets:insert(SpeculaStore, {Key, [{TxId1, Tx1PrepareTime, whatever}]}),
+    ets:insert(SpeculaStore, {Key, {TxId1, Tx1PrepareTime, whatever}}),
 
     %% Will succeed
     Result1 = make_specula_version_final(TxId1, Key, Tx1CommitTime, SpeculaStore, InMemoryStore),
@@ -247,7 +241,7 @@ make_specula_version_final_test() ->
     ?assertEqual(Result2, false),
     
     %% Wrong key
-    ets:insert(SpeculaStore, {Key, [{TxId2, Tx2PrepareTime, whereever}]}),
+    ets:insert(SpeculaStore, {Key, {TxId2, Tx2PrepareTime, whereever}}),
     Result3 = make_specula_version_final(TxId1, Key, Tx2CommitTime, SpeculaStore, InMemoryStore),
     ?assertEqual(Result3, error),
 
@@ -263,7 +257,7 @@ make_specula_version_final_test() ->
     %% Tx2, smaller timestamp than Tx3: both aborted
     %% Tx3, larger timestamp than Tx3: read valid, write prepared
     Dependency = [{TxId2, Key}, {TxId4, Key}],
-    ets:insert(SpeculaStore, {Key, [{TxId3, Tx3PrepareTime, lotsofdep}]}),
+    ets:insert(SpeculaStore, {Key, {TxId3, Tx3PrepareTime, lotsofdep}}),
     ets:insert(SpeculaDep, {TxId3, Dependency}),
     Result5 = make_specula_version_final(TxId3, Key, Tx3CommitTime, 
                 SpeculaStore, InMemoryStore),
@@ -294,7 +288,7 @@ clean_specula_committed_test() ->
     Result1 = abort_specula_committed(TxId1, Key, SpeculaStore),
     ?assertEqual(Result1, false),
 
-    ets:insert(SpeculaStore, {Key, [{TxId1, Tx1PrepareTime, value1}]}), 
+    ets:insert(SpeculaStore, {Key, {TxId1, Tx1PrepareTime, value1}}), 
     Result2 = abort_specula_committed(TxId2, Key, SpeculaStore),
     ?assertEqual(Result2, false),
 
@@ -304,7 +298,7 @@ clean_specula_committed_test() ->
     Result4 = abort_specula_committed(TxId1, Key, SpeculaStore),
     ?assertEqual(Result4, false),
 
-    ets:insert(SpeculaStore, {Key, [{TxId1, Tx1PrepareTime, value1}]}), 
+    ets:insert(SpeculaStore, {Key, {TxId1, Tx1PrepareTime, value1}}), 
     ets:insert(SpeculaDep, {TxId1, [{TxId2, Key}]}), 
     Result5 = abort_specula_committed(TxId1, Key, SpeculaStore),
     finalize_dependency(0, TxId1, ignore, SpeculaDep, abort),
