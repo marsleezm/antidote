@@ -40,18 +40,20 @@ create_transaction_record(ClientClock) ->
 -spec get_and_update_ts(non_neg_integer()) -> non_neg_integer().
 get_and_update_ts(CausalTS) ->
     {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
-    Max = max(clocksi_vnode:now_microsec(now()), TS),
+    Now = clocksi_vnode:now_microsec(now()),
+    Max = max(Now, TS),
     Max2 = max(CausalTS, Max),
+    lager:info("Now ~w, TS ~w, CausalTS ~w, Max2 ~w", [Now, TS, CausalTS, Max2]),
     application:set_env(antidote, max_ts, Max2+1),
     Max2+1.
 
 -spec update_ts(non_neg_integer()) -> non_neg_integer().
 update_ts(SnapshotTS) ->
     {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
-    case TS > SnapshotTS of
+    case TS >= SnapshotTS of
         true ->
             TS;
-        _ ->
+        false ->
             application:set_env(antidote, max_ts, SnapshotTS),
             SnapshotTS
     end.

@@ -143,8 +143,6 @@ start_processing(timeout, SD) ->
 process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
         all_txn_ops=AllTxnOps, current_txn_index=CurrentTxnIndex, num_txns=NumTxns}) ->
     TxId = tx_utilities:create_transaction_record(CausalClock),
-    lager:info("My time is ~w, index is ~w, CausalClock is ~w", [TxId#tx_id.snapshot_time, CurrentTxnIndex, CausalClock]),
-
     case NumTxns of
         0 ->
             proceed_txn(SD#state{prepare_time=TxId#tx_id.snapshot_time});
@@ -313,14 +311,8 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
                                 index=CurrentTxnIndex, num_to_prepare=NumToPrepare, updated_parts=UpdatedParts}, 
                         SpeculaMeta),
             TxIdList1 = TxIdList ++ [TxId],
-            case CausalClock > MaxPrepTime of 
-                true ->
-                    lager:info("Soemthing is wrong! Causalclock ~w, maxprepclcok ~w", [CausalClock, MaxPrepTime]);
-                false ->
-                    ok
-            end,
             process_txs(S0#state{specula_meta=SpeculaMeta1, current_txn_index=CurrentTxnIndex+1, 
-                txn_id_list=TxIdList1, causal_clock=MaxPrepTime})
+                txn_id_list=TxIdList1, causal_clock=max(CausalClock, MaxPrepTime)})
     end.
 
 %% =============================================================================
