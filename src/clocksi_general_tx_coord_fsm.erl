@@ -143,7 +143,7 @@ start_processing(timeout, SD) ->
 process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
         all_txn_ops=AllTxnOps, current_txn_index=CurrentTxnIndex, num_txns=NumTxns}) ->
     TxId = tx_utilities:create_transaction_record(CausalClock),
-    lager:info("My time is ~w", [TxId#tx_id.snapshot_time]),
+    lager:info("My time is ~w, index is ~w, CausalClock is ~w", [TxId#tx_id.snapshot_time, CurrentTxnIndex, CausalClock]),
 
     case NumTxns of
         0 ->
