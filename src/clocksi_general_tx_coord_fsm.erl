@@ -428,10 +428,10 @@ cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, updated_parts=UpdatedPar
 
 cascading_commit_tx(TxId, TxnMeta, SpeculaMeta, TxIdList) ->
     %%%%lager:info("Doing cascading commit ~w",[TxId]),
-    lager:info("~w committed ~w", [TxId, TxId#txn_metadata.index]),
     ?CLOCKSI_VNODE:commit(TxnMeta#txn_metadata.updated_parts, TxId, 
                 TxnMeta#txn_metadata.prepare_time),
     Index = TxnMeta#txn_metadata.index,
+    lager:info("~w committed ~w", [TxId, Index]),
     try_commit_successors(lists:nthtail(Index, TxIdList), SpeculaMeta, Index).
 
 try_commit_successors([], _SpeculaMetadata, Index) ->
