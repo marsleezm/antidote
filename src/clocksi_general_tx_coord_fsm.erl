@@ -241,12 +241,12 @@ receive_reply({_Type, TxId, Param},
                                     CurrentPrepareTime),
                             proceed_txn(S0#state{num_committed_txn=NewNumCommitted+1});
                         false ->
-                           %%%%lager:info("~w: Current ~w can not commit!",[TxId, CurrentTxnId]),
+                            lager:info("Current ~w can not commit, num of committed is ~w!",[CurrentTxnId, NewNumCommitted]),
                             {next_state, receive_reply, 
                                 S0#state{num_committed_txn=NewNumCommitted}} 
                     end;
                 false ->
-                   %%%%lager:info("~w: can not commit! Old num is ~w",[TxId, NumCommittedTxn]),
+                    lager:info("~w can not commit! Old num is ~w",[TxId, NumCommittedTxn]),
                     %io:format(user, "Can not commit ~w, not current!~n", [TxId]),
                     SpeculaMeta1 = dict:store(TxId, TxnMeta1, SpeculaMeta),
                     {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta1}} 
@@ -445,6 +445,7 @@ try_commit_successors([TxId|Rest], SpeculaMetadata, Index) ->
                     TxId, TxnMeta#txn_metadata.prepare_time),
             try_commit_successors(Rest, SpeculaMetadata, Index+1);
         _ ->
+            lager:info("~w can not commit, index is ~w", [Index+1]),
             Index
     end.
 
