@@ -673,8 +673,8 @@ check_prepared(TxId, Key, PreparedTxs) ->
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             true;
-        [{Key, {_PreparedTxId, PrepareTime, _Type, _Op}}] ->
-            %lager:info("Abort for Key ~w, preparetime ~w, snapshottime ~w", [Key, PrepareTime, SnapshotTime]),
+        [{Key, {PreparedTxId, PrepareTime, _Type, _Op}}] ->
+            lager:info("Abort for ~w Key ~w, preparetime ~w, snapshottime ~w", [PreparedTxId, Key, PrepareTime, SnapshotTime]),
             case PrepareTime > SnapshotTime of
                 true ->
                     false;

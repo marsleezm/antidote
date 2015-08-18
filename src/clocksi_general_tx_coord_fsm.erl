@@ -196,7 +196,7 @@ receive_reply({_Type, CurrentTxId, Param},
     %io:format(user, "Got something ~w for ~w, is current!~n", [Type, CurrentTxId]),
     case can_commit(NumToPrepare1, NumCommittedTxn, CurrentTxnIndex) of
         true ->
-            %lager:info("Current ~w committed with ~w", [CurrentTxId, CurrentTxnMeta1#txn_metadata.prepare_time]),
+            lager:info("Current ~w committed", [CurrentTxId]),
             ?CLOCKSI_VNODE:commit(UpdatedParts, CurrentTxId, 
                         PrepareTime1),
             proceed_txn(S0#state{num_committed_txn=NumCommittedTxn+1, prepare_time=PrepareTime1});
@@ -236,7 +236,7 @@ receive_reply({_Type, TxId, Param},
                     case can_commit(CurrentNumToPrepare, NewNumCommitted, CurrentTxnIndex) of
                         true ->
                            %%%%lager:info("~w: Current ~w can commit!",[TxId, CurrentTxnId]),
-                            %lager:info("~w committed with ~w", [CurrentTxnId, CurrentTxnMeta#txn_metadata.prepare_time]),
+                            lager:info("Not current ~w committed", [CurrentTxnId]),
                             ?CLOCKSI_VNODE:commit(UpdatedParts, CurrentTxnId, 
                                     CurrentPrepareTime),
                             proceed_txn(S0#state{num_committed_txn=NewNumCommitted+1});
@@ -412,6 +412,7 @@ cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, updated_parts=UpdatedPar
                              specula_meta=SpeculaMeta,txn_id_list=TxIdList}=S0) ->
     AbortIndex = AbortTxnMeta#txn_metadata.index,
     AbortTxList = lists:nthtail(AbortIndex-1, TxIdList),
+    lager:info("Cascading abort.. TxIdList is ~w, dict key ~w", [TxIdList, dict:fetch_keys(SpeculaMeta)]),
     AbortFun = fun(Id, Dict) -> 
                                 TMeta = dict:fetch(Id, Dict),  
                                 ?CLOCKSI_VNODE:abort(TMeta#txn_metadata.updated_parts, Id),
@@ -427,7 +428,7 @@ cascading_abort(AbortTxnMeta, #state{tx_id=CurrentTxId, updated_parts=UpdatedPar
 
 cascading_commit_tx(TxId, TxnMeta, SpeculaMeta, TxIdList) ->
     %%%%lager:info("Doing cascading commit ~w",[TxId]),
-    %lager:info("~w committed with ~w", [TxId, TxnMeta#txn_metadata.prepare_time]),
+    lager:info("~w committed", [TxId]),
     ?CLOCKSI_VNODE:commit(TxnMeta#txn_metadata.updated_parts, TxId, 
                 TxnMeta#txn_metadata.prepare_time),
     Index = TxnMeta#txn_metadata.index,
