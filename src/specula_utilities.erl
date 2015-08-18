@@ -107,7 +107,7 @@ speculate_and_read(Key, MyTxId, PreparedRecord, Tables) ->
 make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore,
                              SpeculaStore) ->
     {TxId, PrepareTime, Type, {Param, Actor}} = PreparedRecord,
-    lager:info("Trying to make prepared specula ~w for ~w",[Key, TxId]),
+    %lager:info("Trying to make prepared specula ~w for ~w",[Key, TxId]),
     SpeculaValue =  case ets:lookup(InMemoryStore, Key) of
                         [] ->
                             generate_snapshot([], Type, Param, Actor);
@@ -158,7 +158,7 @@ generate_snapshot(Snapshot, Type, Param, Actor) ->
 
 %%TODO: to optimize: no need to store the snapshottime of txn.. TxId already includs it.
 add_specula_meta(SpeculaDep, DependingTxId, TxId, Key) ->
-    lager:info("Adding specula meta: deping tx ~w, depent tx ~w",[DependingTxId, TxId]),    
+    %lager:info("Adding specula meta: deping tx ~w, depent tx ~w",[DependingTxId, TxId]),    
     case ets:lookup(SpeculaDep, DependingTxId) of
         [] ->
             true = ets:insert(SpeculaDep, {DependingTxId, [{TxId, Key}]});
@@ -172,7 +172,7 @@ finalize_dependency(NumToCount, TxId, TxCommitTime, SpeculaDep, Type) ->
         [] -> %% No dependency, do nothing!
             NumToCount;
         [{TxId, DepList}] -> %% Do something for each of the dependency...
-            lager:info("Found dependency ~w for key ~w",[DepList, TxId]),
+            %lager:info("Found dependency ~w for key ~w",[DepList, TxId]),
             true = ets:delete(SpeculaDep, TxId),
             case Type of
                 commit ->
@@ -192,7 +192,7 @@ handle_dependency(NumInvalidRead, [{DepTxId=#tx_id{snapshot_time=DepSnapshotTime
             ?SEND_MSG(CoordPid, {abort, DepTxId}),
             handle_dependency(NumInvalidRead+1, T, TxCommitTime);
         false ->
-            lager:info("Sending read valid ~w for key ~w",[DepTxId, Key]),
+            %lager:info("Sending read valid ~w for key ~w",[DepTxId, Key]),
             ?SEND_MSG(CoordPid, {read_valid, DepTxId, 0}),
             handle_dependency(NumInvalidRead, T, TxCommitTime)
     end.
