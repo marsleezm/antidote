@@ -121,7 +121,7 @@ handle_cast({replicate, PendingLog},
     {RecordType, Sender, MsgToReply, Record} = PendingRecord,
     case Mode of 
         quorum ->
-            lager:info("Replicating ~w ~w", [TxId, Record]),
+            %lager:info("Replicating ~w ~w", [TxId, Record]),
             ets:insert(ReplicatedLog, {TxId, PendingRecord, Quorum-1}),
             quorum_replicate(Successors, Partition, {RecordType, {TxId, Record}});
         chain ->
@@ -189,7 +189,7 @@ handle_cast({repl_ack, {Type, TxId}}, SD0=#state{replicated_log=ReplicatedLog,
                                         end,
                             ets:insert(ReplicatedLog, {Partition, [{TxId, Record}|DurableLog]}),
                             ets:delete(ReplicatedLog, TxId),
-                            lager:info("#DONE#Sending ~p to ~p of ~p, Record is ~p", [Sender, MsgToReply, TxId, Record]),
+                            %lager:info("#DONE#Sending ~p to ~p of ~p, Record is ~p", [Sender, MsgToReply, TxId, Record]),
                             {fsm, undefined, FSMSender} = Sender,
                             case MsgToReply of
                                 false ->
