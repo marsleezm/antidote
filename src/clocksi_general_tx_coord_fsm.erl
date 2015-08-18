@@ -247,11 +247,11 @@ receive_reply({_Type, TxId, Param},
     end;
 
 %% Abort due to invalid read or invalid prepare
-receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMeta, current_txn_index=_Index,
+receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMeta, current_txn_index=Index,
                  num_aborted=NumAborted, updated_parts=UpdatedParts}) ->
     case TxId of
         CurrentTxId ->
-            %lager:info("Aborting current tx~w of index ~w", [CurrentTxId, Index]),
+            lager:info("Aborting current tx~w of index ~w", [CurrentTxId, Index]),
             ?CLOCKSI_VNODE:abort(UpdatedParts, CurrentTxId),
             timer:sleep(random:uniform(?DUMB_TIMEOUT)),
             %% Restart from current transaction.
@@ -259,7 +259,7 @@ receive_reply({abort, TxId}, S0=#state{tx_id=CurrentTxId, specula_meta=SpeculaMe
         _ ->
             case dict:find(TxId, SpeculaMeta) of
                 {ok, AbortTxnMeta} ->
-                    %lager:info("Aborting other tx ~w of index ~w, current index ~w", [TxId, AbortTxnMeta#txn_metadata.index, Index]),
+                    lager:info("Aborting other tx ~w of index ~w, current index ~w", [TxId, AbortTxnMeta#txn_metadata.index, Index]),
                     S1 = cascading_abort(AbortTxnMeta, S0),
                     timer:sleep(random:uniform(?DUMB_TIMEOUT)),
                     process_txs(S1#state{num_aborted=NumAborted+1});
