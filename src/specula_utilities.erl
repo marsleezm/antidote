@@ -185,7 +185,7 @@ finalize_dependency(NumToCount, TxId, TxCommitTime, SpeculaDep, Type) ->
 handle_dependency(NumInvalidRead, [], _TxCommitTime) ->
     NumInvalidRead;
 handle_dependency(NumInvalidRead, [{DepTxId=#tx_id{snapshot_time=DepSnapshotTime, 
-                    server_pid=CoordPid}, Key}|T], TxCommitTime) ->
+                    server_pid=CoordPid}, _Key}|T], TxCommitTime) ->
     case DepSnapshotTime < TxCommitTime of
         true -> %% The transaction committed with larger timestamp which will invalide depending txns..
                 %% Has to abort...
