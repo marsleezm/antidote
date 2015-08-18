@@ -196,7 +196,7 @@ receive_reply({_Type, CurrentTxId, Param},
     %io:format(user, "Got something ~w for ~w, is current!~n", [Type, CurrentTxId]),
     case can_commit(NumToPrepare1, NumCommittedTxn, CurrentTxnIndex) of
         true ->
-            lager:info("Current ~w committed ~w", [CurrentTxId, CurrentTxnIndex]),
+            %lager:info("Current ~w committed ~w", [CurrentTxId, CurrentTxnIndex]),
             ?CLOCKSI_VNODE:commit(UpdatedParts, CurrentTxId, 
                         PrepareTime1),
             proceed_txn(S0#state{num_committed_txn=NumCommittedTxn+1, prepare_time=PrepareTime1});
@@ -236,7 +236,7 @@ receive_reply({_Type, TxId, Param},
                     case can_commit(CurrentNumToPrepare, NewNumCommitted, CurrentTxnIndex) of
                         true ->
                            %%%%lager:info("~w: Current ~w can commit!",[TxId, CurrentTxnId]),
-                            lager:info("Current ~w committed ~w", [CurrentTxnId, CurrentTxnIndex]),
+                            %lager:info("Current ~w committed ~w", [CurrentTxnId, CurrentTxnIndex]),
                             ?CLOCKSI_VNODE:commit(UpdatedParts, CurrentTxnId, 
                                     CurrentPrepareTime),
                             proceed_txn(S0#state{num_committed_txn=NewNumCommitted+1});
@@ -246,7 +246,7 @@ receive_reply({_Type, TxId, Param},
                                 S0#state{num_committed_txn=NewNumCommitted}} 
                     end;
                 false ->
-                    lager:info("~w can not commit! Old num is ~w",[TxId, NumCommittedTxn]),
+                    %lager:info("~w can not commit! Old num is ~w",[TxId, NumCommittedTxn]),
                     %io:format(user, "Can not commit ~w, not current!~n", [TxId]),
                     SpeculaMeta1 = dict:store(TxId, TxnMeta1, SpeculaMeta),
                     {next_state, receive_reply, S0#state{specula_meta=SpeculaMeta1}} 
@@ -315,7 +315,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
             %io:format(user, "Finishing txn ~w ~n", [NumTxns]),
             AllReadSet = get_readset(TxIdList, SpeculaMeta, []),
             AllReadSet1 = [ReadSet|AllReadSet],
-            lager:info("Transaction finished, commit time ~w, NumTxn ~w",[MaxPrepTime, NumCommittedTxn]),
+            %lager:info("Transaction finished, commit time ~w, NumTxn ~w",[MaxPrepTime, NumCommittedTxn]),
             From ! {ok, {TxId, lists:reverse(lists:flatten(AllReadSet1)), 
                 MaxPrepTime}},
             {stop, normal, S0};
@@ -431,7 +431,7 @@ cascading_commit_tx(TxId, TxnMeta, SpeculaMeta, TxIdList) ->
     ?CLOCKSI_VNODE:commit(TxnMeta#txn_metadata.updated_parts, TxId, 
                 TxnMeta#txn_metadata.prepare_time),
     Index = TxnMeta#txn_metadata.index,
-    lager:info("~w committed ~w", [TxId, Index]),
+    %lager:info("~w committed ~w", [TxId, Index]),
     try_commit_successors(lists:nthtail(Index, TxIdList), SpeculaMeta, Index).
 
 try_commit_successors([], _SpeculaMetadata, Index) ->
