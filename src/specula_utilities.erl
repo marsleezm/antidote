@@ -34,15 +34,14 @@
             abort_specula_committed/3, coord_should_specula/1, make_specula_version_final/5,
             finalize_dependency/5]).
 
-coord_should_specula(_Aborted) ->
+coord_should_specula(Aborted) ->
     %case TxnMetadata#txn_metadata.final_committed of
     %    true ->
     %        true;
     %    false ->
     %        false
     %end.
-    %Aborted<3,
-    true.
+    Aborted<3.
 
 %% If this txn corresponds to any specula-committed version,
 %% 1. Make the specula_committed version final committed
