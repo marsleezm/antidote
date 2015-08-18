@@ -313,9 +313,9 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
                                 index=CurrentTxnIndex, num_to_prepare=NumToPrepare, updated_parts=UpdatedParts}, 
                         SpeculaMeta),
             TxIdList1 = TxIdList ++ [TxId],
-            case CausalClock >= MaxPrepTime of 
+            case CausalClock > MaxPrepTime of 
                 true ->
-                    lager:info("Soemthing is wrong!");
+                    lager:info("Soemthing is wrong! Causalclock ~w, maxprepclcok ~w", [CausalClock, MaxPrepTime]);
                 false ->
                     ok
             end,
