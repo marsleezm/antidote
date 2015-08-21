@@ -382,6 +382,7 @@ process_operations(TxId, [{read, Key, Type}|Rest], UpdatedParts, RSet, Buffer, R
     %%%%lager:info("Read got reply ~w",[Reply]),
     {NewReadDep, CanCommit1} = case Reply of
                                     {specula, {_Type, _Snapshot}} ->
+                                        lager:info("~w: ~w speculative", [TxId, Key]),
                                         {ReadDep+1, false};
                                     _ ->
                                         {ReadDep, CanCommit}
