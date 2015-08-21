@@ -320,7 +320,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
             %io:format(user, "Finishing txn ~w ~n", [NumTxns]),
             AllReadSet = get_readset(TxIdList, SpeculaMeta, []),
             AllReadSet1 = [ReadSet|AllReadSet],
-            %lager:info("Transaction finished, commit time ~w, NumTxn ~w",[MaxPrepTime, NumCommittedTxn]),
+            lager:info("Transaction finished, commit time ~w",[MaxPrepTime]),
             From ! {ok, {TxId, lists:reverse(lists:flatten(AllReadSet1)), 
                 MaxPrepTime}},
             {stop, normal, S0};
