@@ -356,14 +356,9 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
                 _ ->
                     ok
             end,
-            SpeculaMeta1 = case NumToPrepare of 
-                                0 -> %% No need to store if the transaction is fully committed already
-                                    SpeculaMeta;
-                                _ ->
-                                    dict:store(TxId, #txn_metadata{read_set=ReadSet, prepare_time=MaxPrepTime, 
-                                        index=CurrentTxnIndex, num_to_prepare=NumToPrepare, updated_parts=UpdatedParts}, 
-                                            SpeculaMeta)
-                           end,
+            SpeculaMeta1= dict:store(TxId, #txn_metadata{read_set=ReadSet, prepare_time=MaxPrepTime, 
+                        index=CurrentTxnIndex, num_to_prepare=NumToPrepare, updated_parts=UpdatedParts}, 
+                            SpeculaMeta),
             TxIdList1 = TxIdList ++ [TxId],
             %lager:info("proceed with max prepe time ~w", [MaxPrepTime]),
             process_txs(S0#state{specula_meta=SpeculaMeta1, current_txn_index=CurrentTxnIndex+1, 
