@@ -323,6 +323,12 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
     case NumTxns of
         %% The last txn has already committed
         NumCommittedTxn ->
+            case dict:size(UpdatedParts) of 
+                0 ->
+                    lager:info("Finishing read-only txn chain");   
+                _ ->
+                    ok
+            end,
             %io:format(user, "Finishing txn ~w ~n", [NumTxns]),
             AllReadSet = get_readset(TxIdList, SpeculaMeta, []),
             AllReadSet1 = [ReadSet|AllReadSet],
@@ -332,14 +338,31 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
             {stop, normal, S0};
         %% In the last txn but has not committed
         CurrentTxnIndex ->
+            case dict:size(UpdatedParts) of 
+                0 ->
+                    lager:info("Continuing wait for read-only txn");   
+                _ ->
+                    ok
+            end,
            %%%%lager:info("Has to wait again!, NumCommitted",[NumCommittedTxn]),
             %io:format(user, "Has to wait again ~w ~n", [NumCommittedTxn]),
             {next_state, receive_reply, S0};
         %% Proceed
         _ -> 
-            SpeculaMeta1 = dict:store(TxId, #txn_metadata{read_set=ReadSet, prepare_time=MaxPrepTime, 
-                                index=CurrentTxnIndex, num_to_prepare=NumToPrepare, updated_parts=UpdatedParts}, 
-                        SpeculaMeta),
+            case dict:size(UpdatedParts) of 
+                0 ->
+                    lager:info("Proceeding read-only txn");   
+                _ ->
+                    ok
+            end,
+            SpeculaMeta1 = case NumToPrepare of 
+                                0 -> %% No need to store if the transaction is fully committed already
+                                    SpeculaMeta;
+                                _ ->
+                                    dict:store(TxId, #txn_metadata{read_set=ReadSet, prepare_time=MaxPrepTime, 
+                                        index=CurrentTxnIndex, num_to_prepare=NumToPrepare, updated_parts=UpdatedParts}, 
+                                            SpeculaMeta)
+                           end,
             TxIdList1 = TxIdList ++ [TxId],
             %lager:info("proceed with max prepe time ~w", [MaxPrepTime]),
             process_txs(S0#state{specula_meta=SpeculaMeta1, current_txn_index=CurrentTxnIndex+1, 
