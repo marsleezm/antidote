@@ -150,8 +150,9 @@ process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
             proceed_txn(SD#state{prepare_time=TxId#tx_id.snapshot_time});
         _ -> 
             MyOperations = lists:nth(CurrentTxnIndex, AllTxnOps),
+            PrecCommitted = (CommittedTxn == CurrentTxnIndex -1),
             {CanCommit, WriteSet, ReadSet, NumToPrepare} = process_operations(TxId, MyOperations,
-                        dict:new(), [], dict:new(), 0, true),
+                        dict:new(), [], dict:new(), 0, PrecCommitted),
             case CanCommit of
                 true -> %%TODO: has to find some way to deal with read-only transaction
                     proceed_txn(SD#state{read_set=ReadSet, 
