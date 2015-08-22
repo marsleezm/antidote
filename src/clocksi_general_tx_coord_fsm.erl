@@ -364,7 +364,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
         _ -> 
             case dict:size(UpdatedParts) of 
                 0 ->
-                    lager:info("Proceeding read-only txn, next TxId is ~w", [CurrentTxnIndex+1]);   
+                    lager:info("Proceeding read-only txn, next TxId is ~w, numpre is ~w", [CurrentTxnIndex+1, NumToPrepare]);   
                 _ ->
                     ok
             end,
