@@ -101,7 +101,7 @@ speculate_and_read(Key, MyTxId, PreparedRecord, Tables) ->
     {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep} = Tables,
     {SpeculatedTxId, Value} = make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore,
                                SpeculaStore),
-    lager:info("Specula reading ~w of ~w", [Key, MyTxId]),
+    %lager:info("Specula reading ~w of ~w", [Key, MyTxId]),
     add_specula_meta(SpeculaDep, SpeculatedTxId, MyTxId, Key),
     {specula, Value}.
 
@@ -159,7 +159,7 @@ generate_snapshot(Snapshot, Type, Param, Actor) ->
 
 %%TODO: to optimize: no need to store the snapshottime of txn.. TxId already includs it.
 add_specula_meta(SpeculaDep, DependingTxId, TxId, Key) ->
-    lager:info("Adding specula meta: deping tx ~w, depent tx ~w",[DependingTxId, TxId]),    
+    %lager:info("Adding specula meta: deping tx ~w, depent tx ~w",[DependingTxId, TxId]),    
     case ets:lookup(SpeculaDep, DependingTxId) of
         [] ->
             true = ets:insert(SpeculaDep, {DependingTxId, [{TxId, Key}]});
@@ -186,14 +186,14 @@ finalize_dependency(NumToCount, TxId, TxCommitTime, SpeculaDep, Type) ->
 handle_dependency(NumInvalidRead, [], _TxCommitTime) ->
     NumInvalidRead;
 handle_dependency(NumInvalidRead, [{DepTxId=#tx_id{snapshot_time=DepSnapshotTime, 
-                    server_pid=CoordPid}, Key}|T], TxCommitTime) ->
+                    server_pid=CoordPid}, _Key}|T], TxCommitTime) ->
     case DepSnapshotTime < TxCommitTime of
         true -> %% The transaction committed with larger timestamp which will invalide depending txns..
                 %% Has to abort...
             ?SEND_MSG(CoordPid, {abort, DepTxId}),
             handle_dependency(NumInvalidRead+1, T, TxCommitTime);
         false ->
-            lager:info("Sending read valid ~w for key ~w",[DepTxId, Key]),
+            %lager:info("Sending read valid ~w for key ~w",[DepTxId, Key]),
             ?SEND_MSG(CoordPid, {read_valid, DepTxId, 0}),
             handle_dependency(NumInvalidRead, T, TxCommitTime)
     end.
