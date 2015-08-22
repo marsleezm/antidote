@@ -101,6 +101,7 @@ speculate_and_read(Key, MyTxId, PreparedRecord, Tables) ->
     {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep} = Tables,
     {SpeculatedTxId, Value} = make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore,
                                SpeculaStore),
+    lager:info("Specula reading ~w of ~w", [Key, MyTxId]),
     add_specula_meta(SpeculaDep, SpeculatedTxId, MyTxId, Key),
     {specula, Value}.
 
