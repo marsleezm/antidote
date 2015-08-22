@@ -264,7 +264,7 @@ receive_reply({Type, TxId, Param},
                 false ->
                     case Type of
                         read_valid ->
-                            lager:info("~w can not commit! Index is ~w",[TxId, TxnMeta#txn_metadata.index]);
+                            lager:info("~w can not commit! Index is ~w, num to prepare is ~w",[TxId, TxnMeta#txn_metadata.index, TxnMeta#txn_metadata.num_to_prepare]);
                         _ ->
                             ok
                     end,
@@ -352,7 +352,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
         _ -> 
             case dict:size(UpdatedParts) of 
                 0 ->
-                    lager:info("Proceeding read-only txn");   
+                    lager:info("Proceeding read-only txn, next TxId is ~w", [CurrentTxnIndex+1]);   
                 _ ->
                     ok
             end,
