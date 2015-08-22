@@ -186,6 +186,12 @@ receive_reply({Type, CurrentTxId, Param},
                            prepare_time=PrepareTime}) ->
     PrepareTime1 = max(PrepareTime, Param), 
     NumToPrepare1 = NumToPrepare-1,
+    case Type of 
+        read_valid -> 
+            lager:info("Received read_valid for current ~w", [CurrentTxId]);
+        _ ->
+            ok
+    end,
     %io:format(user, "Got something ~w for ~w, is current!~n", [Type, CurrentTxId]),
     case can_commit(NumToPrepare1, NumCommittedTxn, CurrentTxnIndex) of
         true ->
@@ -225,6 +231,12 @@ receive_reply({Type, TxId, Param},
                            prepare_time=CurrentPrepareTime,
                            updated_parts=UpdatedParts,
                            specula_meta=SpeculaMeta}) ->
+    case Type of 
+        read_valid -> 
+            lager:info("Received read_valid for ~w", [TxId]);
+        _ ->
+            ok
+    end,
     case dict:find(TxId, SpeculaMeta) of
         {ok, TxnMeta} ->
             %%%%lager:info("Got ~w of previous tx ~w", [Type, TxId]),
@@ -232,7 +244,7 @@ receive_reply({Type, TxId, Param},
             PrepareTime1 = max(TxnMeta#txn_metadata.prepare_time, Param), 
             NumToPrepare1 = TxnMeta#txn_metadata.num_to_prepare - 1,
             TxnMeta1 = TxnMeta#txn_metadata{prepare_time=PrepareTime1, num_to_prepare=NumToPrepare1},
-            case can_commit(NumToPrepare1, NumCommittedTxn, TxnMeta#txn_metadata.index) of
+            case can_commit(NumToPrepare1, NumCommittedTxn, TxnMeta1#txn_metadata.index) of
                 true -> 
                     NewNumCommitted = 
                             cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta, TxIdList),
