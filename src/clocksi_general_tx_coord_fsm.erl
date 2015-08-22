@@ -276,7 +276,7 @@ receive_reply({Type, TxId, Param},
                 false ->
                     case Type of
                         read_valid ->
-                            lager:info("~w can not commit! Index is ~w, num to prepare is ~w",[TxId, TxnMeta#txn_metadata.index, TxnMeta#txn_metadata.num_to_prepare]);
+                            lager:info("~w can not commit! Index is ~w, num to prepare is ~w, num_committed is ~w",[TxId, TxnMeta1#txn_metadata.index, TxnMeta1#txn_metadata.num_to_prepare, NumCommittedTxn]);
                         _ ->
                             ok
                     end,
