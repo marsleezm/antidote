@@ -124,6 +124,7 @@ init([From, ClientClock, Txns]) ->
             all_txn_ops = Txns,
             num_txns = length(Txns),
             current_txn_index = 1,
+            updated_parts = dict:new(),
             specula_meta = dict:new(),
             txn_id_list = [],
             causal_clock = ClientClock,
