@@ -244,6 +244,12 @@ receive_reply({Type, TxId, Param},
                     end,
                     case can_commit(CurrentNumToPrepare, NewNumCommitted, CurrentTxnIndex) of
                         true ->
+                            case Type of
+                                read_valid ->
+                                    lager:info("~w: proceeding, num committd is ~w",[TxId, NewNumCommitted+1]);
+                                _ ->
+                                    ok
+                            end,
                            %%%%lager:info("~w: Current ~w can commit!",[TxId, CurrentTxnId]),
                             %lager:info("Current ~w committed ~w", [CurrentTxnId, CurrentTxnIndex]),
                             ?CLOCKSI_VNODE:commit(UpdatedParts, CurrentTxnId, 
@@ -320,7 +326,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
             %io:format(user, "Finishing txn ~w ~n", [NumTxns]),
             AllReadSet = get_readset(TxIdList, SpeculaMeta, []),
             AllReadSet1 = [ReadSet|AllReadSet],
-            lager:info("Transaction finished, commit time ~w",[MaxPrepTime]),
+            %lager:info("Transaction finished, commit time ~w",[MaxPrepTime]),
             From ! {ok, {TxId, lists:reverse(lists:flatten(AllReadSet1)), 
                 MaxPrepTime}},
             {stop, normal, S0};
