@@ -117,7 +117,7 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({replicate, PendingLog}, 
 	    SD0=#state{partition=Partition, replicated_log=ReplicatedLog, quorum=Quorum,
             log_size=LogSize, successors=Successors, mode=Mode}) ->
-    timer:sleep(5),
+    timer:sleep(3),
     {TxId, PendingRecord} = PendingLog,        
     {RecordType, Sender, MsgToReply, Record} = PendingRecord,
     case Mode of 
