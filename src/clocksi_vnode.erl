@@ -357,7 +357,6 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     Tables = PreparedTxs, %{PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     Result = prepare(TxId, WriteSet, CommittedTx, Tables, SpeculaStore, IfCertify),
-    timer:sleep(5),
     %%lager:info("Tx ~w: for key ~w prep res is ~w",[TxId, WriteSet, Result]),
     case Result of
         {ok, PrepareTime} ->
