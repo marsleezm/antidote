@@ -84,6 +84,7 @@
                 total_time :: non_neg_integer(),
                 prepare_count :: non_neg_integer(),
                 num_committed :: non_neg_integer(),
+                num_specula_read :: non_neg_integer(),
                 num_aborted :: non_neg_integer(),
                 num_read_abort :: non_neg_integer(),
                 num_cert_fail :: non_neg_integer(),
@@ -182,7 +183,7 @@ init([Partition]) ->
                 specula_store=SpeculaStore,
                 specula_dep=SpeculaDep,
                 inmemory_store=InMemoryStore,
-                total_time=0, prepare_count=0,
+                total_time=0, prepare_count=0, num_specula_read=0,
                 num_committed=0, num_cert_fail=0, num_aborted=0, num_read_invalid=0, num_read_abort=0}}.
 
 
@@ -209,17 +210,17 @@ check_table_ready([{Partition,Node}|Rest]) ->
 print_stat() ->
     {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
     PartitionList = chashbin:to_list(CHBin),
-    print_stat(PartitionList, {0,0,0,0,0,0,0}).
+    print_stat(PartitionList, {0,0,0,0,0,0,0,0}).
 
-print_stat([], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc6, Acc7}) ->
-    lager:info("In total: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, prepare time ~w",
-                [Acc1, Acc2, Acc3, Acc4, Acc5, Acc6 div Acc7]);
-print_stat([{Partition,Node}|Rest], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc6, Acc7}) ->
-    {Add1, Add2, Add3, Add4, Add5, Add6, Add7} = riak_core_vnode_master:sync_command({Partition,Node},
+print_stat([], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc6, Acc7}) ->
+    lager:info("In total: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, specula read ~w, prepare time ~w",
+                [Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc6 div Acc7]);
+print_stat([{Partition,Node}|Rest], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc6, Acc7}) ->
+    {Add1, Add2, Add3, Add4, Add5, Add55, Add6, Add7} = riak_core_vnode_master:sync_command({Partition,Node},
 						            {print_stat},
 						            ?CLOCKSI_MASTER,
 						            infinity),
-    print_stat(Rest, {Acc1+Add1, Acc2+Add2, Acc3+Add3, Acc4+Add4, Acc5+Add5, Acc6+Add6, Acc7+Add7}).
+    print_stat(Rest, {Acc1+Add1, Acc2+Add2, Acc3+Add3, Acc4+Add4, Acc5+Add5, Acc55+Add55, Acc6+Add6, Acc7+Add7}).
 
 check_tables() ->
     {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
@@ -271,10 +272,10 @@ handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, specula_s
     lager:warning("Partition ~w: Dep is ~w, Store is ~w, Prepared is ~w", [Partition, ets:tab2list(S1), ets:tab2list(S2), ets:tab2list(S3)]),
     {reply, ok, SD0};
 
-handle_command({print_stat},_Sender,SD0=#state{num_committed=A1, num_aborted=A2, num_cert_fail=A3, 
+handle_command({print_stat},_Sender,SD0=#state{num_committed=A1, num_aborted=A2, num_cert_fail=A3, num_specula_read=A55, 
                     num_read_invalid=A4, num_read_abort=A5, total_time=A6, prepare_count=A7, partition=Partition}) ->
-    lager:info("~w: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, ~w, ~w", [Partition, A1, A2, A3, A4, A5, A6, A7]),
-    {reply, {A1, A2, A3, A4, A5, A6, A7}, SD0};
+    lager:info("~w: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, specula read ~w, ~w, ~w", [Partition, A1, A2, A3, A4, A5, A55, A6, A7]),
+    {reply, {A1, A2, A3, A4, A5, A55, A6, A7}, SD0};
 
 handle_command({check_tables_ready},_Sender,SD0=#state{partition=Partition}) ->
     Result = case ets:info(get_cache_name(Partition,prepared)) of
@@ -298,7 +299,7 @@ handle_command({check_prepared_empty},_Sender,SD0=#state{prepared_txs=PreparedTx
 handle_command({check_servers_ready},_Sender,SD0) ->
     {reply, true, SD0};
 
-handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
+handle_command({read, Key, Type, TxId}, Sender, SD0=#state{num_specula_read=NumSpeculaRead,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_store=SpeculaStore,
             specula_dep=SpeculaDep, partition=Partition}) ->
     Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
@@ -311,13 +312,13 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
             {noreply, SD0};
         {specula, Value} ->
             %%lager:info("Replying specula value for key ~w of tx ~w",[Key, TxId]),
-            {reply, {specula, Value}, SD0};
+            {reply, {specula, Value}, SD0#state{num_specula_read=NumSpeculaRead+1}};
         ready ->
             Result = clocksi_readitem:return(Key, Type, TxId, Tables),
             {reply, Result, SD0}
     end;
 
-handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
+handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{num_specula_read=NumSpeculaRead,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_store=SpeculaStore, 
             specula_dep=SpeculaDep, partition=Partition}) ->
     %%lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
@@ -332,7 +333,7 @@ handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
         {specula, Value} ->
             %%lager:info("Async: repling specula value for key ~w of tx ~w to ~w",[Key, TxId, OrgSender]),
             riak_core_vnode:reply(OrgSender, {specula, Value}),
-            {noreply, SD0};
+            {noreply, SD0#state{num_specula_read=NumSpeculaRead+1}};
         ready ->
             Result = clocksi_readitem:return(Key, Type, TxId, Tables),
             riak_core_vnode:reply(OrgSender, Result),
