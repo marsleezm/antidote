@@ -272,8 +272,9 @@ handle_command({check_servers_ready},_Sender,SD0) ->
 
 handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=Partition}) ->
-    tx_utilities:update_ts(TxId#tx_id.snapshot_time),
-    case clocksi_readitem:check_prepared(Key, TxId, PreparedTxs) of
+    %tx_utilities:update_ts(TxId#tx_id.snapshot_time),
+    %case clocksi_readitem:check_prepared(Key, TxId, PreparedTxs) of
+    case clocksi_readitem:check_clock(Key, TxId, PreparedTxs) of
         {not_ready, Delay} ->
             spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
                          Sender}, {Partition, node()}]),
@@ -288,8 +289,8 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
 handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=Partition}) ->
     %lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
-    tx_utilities:update_ts(TxId#tx_id.snapshot_time),
-    case clocksi_readitem:check_prepared(Key, TxId, PreparedTxs) of
+    %tx_utilities:update_ts(TxId#tx_id.snapshot_time),
+    case clocksi_readitem:check_clock(Key, TxId, PreparedTxs) of
         {not_ready, Delay} ->
             spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
                          OrgSender}, {Partition, node()}]),
@@ -490,7 +491,8 @@ prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify)->
             %case TxWriteSet of 
             %    [{Key, Type, Op} | Rest] -> 
 
-            PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
+            %PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
+            PrepareTime = clocksi_vnode:now_microsec(now()),
 		    set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime),
 
 		    %LogRecord = #log_record{tx_id=TxId,

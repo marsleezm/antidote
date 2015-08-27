@@ -27,7 +27,7 @@
 -define(GET_MAX_TS(APP, KEY), application:get_env(APP, KEY)).
 -endif.
 
--export([create_transaction_record/1, update_ts/1, increment_ts/1, get_snapshot_time/1]).
+-export([create_transaction_record/1]).
 
 
 -spec create_transaction_record(snapshot_time() | ignore) -> txid().
@@ -35,34 +35,15 @@ create_transaction_record(ClientClock) ->
     %% Seed the random because you pick a random read server, this is stored in the process state
     {A1,A2,A3} = now(),
     _ = random:seed(A1, A2, A3),
-    TransactionId = #tx_id{snapshot_time=get_and_update_ts(ClientClock), server_pid=self()},
-    TransactionId.
-
--spec get_and_update_ts(non_neg_integer()) -> non_neg_integer().
-get_and_update_ts(CausalTS) ->
-    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
-    Max = max(clocksi_vnode:now_microsec(now()), TS),
-    Max2 = max(Max, CausalTS) + 1,
-    application:set_env(antidote, max_ts, Max2),
-    Max2.
-
--spec update_ts(non_neg_integer()) -> non_neg_integer().
-update_ts(SnapshotTS) ->
-    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
-    case TS >= SnapshotTS of
-        true ->
-            TS;
+    {ok, SnapshotTime} = case ClientClock of
+        ignore ->
+            get_snapshot_time();
         _ ->
-            application:set_env(antidote, max_ts, SnapshotTS),
-            SnapshotTS 
-    end.
-
--spec increment_ts(non_neg_integer()) -> non_neg_integer().
-increment_ts(SnapshotTS) ->
-    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
-    MaxTS = max(SnapshotTS, TS),
-    application:set_env(antidote, max_ts, MaxTS+1),
-    MaxTS+1.
+            get_snapshot_time(ClientClock)
+    end,
+    TransactionId = #tx_id{snapshot_time=SnapshotTime, server_pid=self()},
+    %TransactionId = #tx_id{snapshot_time=get_and_update_ts(ClientClock), server_pid=self()},
+    TransactionId.
 
 %%@doc Set the transaction Snapshot Time to the maximum value of:
 %%     1.ClientClock, which is the last clock of the system the client
@@ -89,9 +70,8 @@ wait_for_clock(Clock) ->
                      {ok, SnapshotTime};
                  false ->
                      %% wait for snapshot time to catch up with Client Clock
-                     timer:sleep(10),
+                     timer:sleep(5),
                      wait_for_clock(Clock)
              end
     end.
-
 
