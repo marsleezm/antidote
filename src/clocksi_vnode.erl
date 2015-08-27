@@ -302,8 +302,9 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_store=SpeculaStore,
             specula_dep=SpeculaDep, partition=Partition}) ->
     Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
-    tx_utilities:update_ts(TxId#tx_id.snapshot_time),
-    case clocksi_readitem:check_prepared(Key, TxId, Tables) of
+    %tx_utilities:update_ts(TxId#tx_id.snapshot_time),
+    %case clocksi_readitem:check_prepared(Key, TxId, Tables) of
+    case clocksi_readitem:check_clock(Key, TxId, Tables) of
         {not_ready, Delay} ->
             spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
                          Sender}, {Partition, node()}]),
@@ -321,9 +322,10 @@ handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_store=SpeculaStore, 
             specula_dep=SpeculaDep, partition=Partition}) ->
     %%lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
-    tx_utilities:update_ts(TxId#tx_id.snapshot_time),
+    %tx_utilities:update_ts(TxId#tx_id.snapshot_time),
     Tables = {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
-    case clocksi_readitem:check_prepared(Key, TxId, Tables) of
+    %case clocksi_readitem:check_prepared(Key, TxId, Tables) of
+    case clocksi_readitem:check_clock(Key, TxId, Tables) of
         {not_ready, Delay} ->
             spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
                          OrgSender}, {Partition, node()}]),
@@ -550,14 +552,16 @@ async_send_msg(Delay, Msg, To) ->
 prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, SpeculaStore, IfCertify)->
     case certification_check(TxId, TxWriteSet, CommittedTx, PreparedTxs, SpeculaStore, IfCertify) of
         true ->
-            PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
+            %PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
+            PrepareTime = now_microsec(erlang:now()),
             %{PreparedTxs, _, _, _} = Tables,
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {ok, PrepareTime};
         specula_prepared ->
             %%lager:info("~w: Certification check returns specula_prepared", [TxId]),
             %{PreparedTxs, _, _, _} = Tables,
-            PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
+            %PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
+            PrepareTime = now_microsec(erlang:now()),
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {specula_prepared, PrepareTime};
 	    false ->
