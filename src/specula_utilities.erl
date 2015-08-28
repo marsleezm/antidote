@@ -63,15 +63,17 @@ make_specula_version_final(TxId, Key, TxCommitTime, PreparedTxs, InMemoryStore) 
                       {RemainList, _} = lists:split(min(20,length(ValueList)), ValueList),
                       true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, SpeculaValue}|RemainList]})
             end,
-            %%Remove this version from specula_store
             ets:delete(PreparedTxs, Key);
-        [{Key, []}] -> %% The version should still be in prepared table. It's not made specula yet.
-            false;    
-        [] -> %% The version should still be in prepared table. It's not made specula yet.
-            false;    
-        Record ->
-            lager:warning("Something is wrong!!!! ~w", [Record]),
-            error
+            %%Remove this version from specula_store
+        [{Key, {TxId, _, _, _}}] ->
+            false;
+        [] ->
+            false;
+        _ -> %% The version should still be in prepared table. It's not made specula yet.
+            false   
+        %Record ->
+        %    lager:warning("Something is wrong!!!! ~w", [Record]),
+        %    error
     end.
 
 abort_specula_committed(TxId, Key, PreparedTxs) ->
