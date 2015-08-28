@@ -94,6 +94,7 @@ should_specula(PreparedTime, SnapshotTime) ->
             NowTime = clocksi_vnode:now_microsec(now()),
             NowTime - ?SPECULA_TIMEOUT > PreparedTime;
         true ->
+            lager:info("Should speculate read ~w, preparetime ~w", [SnapshotTime, PreparedTime]),
             true
     end.
 
@@ -190,6 +191,7 @@ handle_dependency(NumInvalidRead, [{DepTxId=#tx_id{snapshot_time=DepSnapshotTime
     case DepSnapshotTime < TxCommitTime of
         true -> %% The transaction committed with larger timestamp which will invalide depending txns..
                 %% Has to abort...
+            lager:info("Invalid read! Snapshot time is ~w, commit time is ~w", [DepSnapshotTime, TxCommitTime]),
             ?SEND_MSG(CoordPid, {abort, DepTxId}),
             handle_dependency(NumInvalidRead+1, T, TxCommitTime);
         false ->
