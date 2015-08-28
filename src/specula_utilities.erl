@@ -30,7 +30,7 @@
 -define(SEND_MSG(PID, MSG),  gen_fsm:send_event(PID, MSG)).
 -endif.
 
--export([should_specula/2, make_prepared_specula/4, speculate_and_read/4, find_specula_version/4,
+-export([should_specula/2, make_prepared_specula/4, speculate_and_read/4, 
             abort_specula_committed/3, coord_should_specula/1, make_specula_version_final/5,
             finalize_dependency/5]).
 
@@ -69,11 +69,11 @@ make_specula_version_final(TxId, Key, TxCommitTime, PreparedTxs, InMemoryStore) 
             false;
         [] ->
             false;
-        _ -> %% The version should still be in prepared table. It's not made specula yet.
-            false   
-        %Record ->
-        %    lager:warning("Something is wrong!!!! ~w", [Record]),
-        %    error
+        %_ -> %% The version should still be in prepared table. It's not made specula yet.
+        %    false; 
+        Record ->
+            lager:warning("Something is wrong!!!! ~w, TxId is ~w", [Record, TxId]),
+            error
     end.
 
 abort_specula_committed(TxId, Key, PreparedTxs) ->
@@ -116,19 +116,6 @@ make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore) ->
     true = ets:insert(PreparedTxs, {Key, {TxId, PrepareTime, SpeculaValue}}),
     {TxId, {Type, SpeculaValue}}.
 
-find_specula_version(TxId=#tx_id{snapshot_time=SnapshotTime}, Key, PreparedTxs, SpeculaDep) ->
-    case ets:lookup(PreparedTxs, Key) of
-        [{Key, {DependingTxId, PrepareTime, SpeculaValue}}] ->
-            case SnapshotTime >= PrepareTime of
-                true ->
-                    add_specula_meta(SpeculaDep, DependingTxId, TxId, Key),
-                    SpeculaValue;
-                false ->
-                    false
-            end;
-        _ -> %% No specula version
-            false
-    end.
 
 %%%%%%%%%%%%%%%%  Private function %%%%%%%%%%%%%%%%%
 generate_snapshot(Snapshot, Type, Param, Actor) ->
@@ -325,32 +312,32 @@ make_prepared_specula_test() ->
     ets:delete(SpeculaDep),
     pass.
 
-find_specula_version_test() ->
-    TxId1 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
-    Tx1PrepareTime = clocksi_vnode:now_microsec(now()),
-    TxId2 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
-    Type = riak_dt_pncounter,
-    Key = 1,
-    {ok, Counter1} = Type:update(increment, haha, Type:new()),
-    Record1 = {TxId1, Tx1PrepareTime, Type, {increment, haha}},
-    InMemoryStore = ets:new(inmemory_store, [set,named_table,protected]),
-    PreparedTxs = ets:new(prepared_txs, [set,named_table,protected]),
-    SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
+%find_specula_version_test() ->
+%    TxId1 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
+%    Tx1PrepareTime = clocksi_vnode:now_microsec(now()),
+%    TxId2 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
+%    Type = riak_dt_pncounter,
+%    Key = 1,
+%    {ok, Counter1} = Type:update(increment, haha, Type:new()),
+%    Record1 = {TxId1, Tx1PrepareTime, Type, {increment, haha}},
+%    InMemoryStore = ets:new(inmemory_store, [set,named_table,protected]),
+%    PreparedTxs = ets:new(prepared_txs, [set,named_table,protected]),
+%    SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
 
-    _ = make_prepared_specula(Key, Record1, PreparedTxs, InMemoryStore), 
-    ?assertEqual(ets:lookup(SpeculaDep, TxId1), []),
+%    _ = make_prepared_specula(Key, Record1, PreparedTxs, InMemoryStore), 
+%    ?assertEqual(ets:lookup(SpeculaDep, TxId1), []),
 
-    Result1 = find_specula_version(TxId1, Key, PreparedTxs, SpeculaDep),
-    ?assertEqual(Result1, false),
+%    Result1 = find_specula_version(TxId1, Key, PreparedTxs, SpeculaDep),
+%    ?assertEqual(Result1, false),
 
-    Result2 = find_specula_version(TxId2, Key, PreparedTxs, SpeculaDep),
-    ?assertEqual(Result2, Counter1),
-    ?assertEqual(ets:lookup(SpeculaDep, TxId1), [{TxId1, [{TxId2, Key}]}]),
+%    Result2 = find_specula_version(TxId2, Key, PreparedTxs, SpeculaDep),
+%    ?assertEqual(Result2, Counter1),
+%    ?assertEqual(ets:lookup(SpeculaDep, TxId1), [{TxId1, [{TxId2, Key}]}]),
 
-    ets:delete(SpeculaDep),
-    ets:delete(InMemoryStore),
-    ets:delete(PreparedTxs),
-    pass.
+%    ets:delete(SpeculaDep),
+%    ets:delete(InMemoryStore),
+%    ets:delete(PreparedTxs),
+%    pass.
 
 
 -endif.

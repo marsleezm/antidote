@@ -50,7 +50,7 @@ check_clock(Key,TxId, Tables) ->
 
 check_prepared(Key, MyTxId, Tables) ->
     SnapshotTime = MyTxId#tx_id.snapshot_time,
-    {PreparedTx, _, _} = Tables,
+    {PreparedTx, _, SpeculaDep} = Tables,
     case ets:lookup(PreparedTx, Key) of
         [] ->
             ready;
@@ -66,26 +66,27 @@ check_prepared(Key, MyTxId, Tables) ->
                     end;
                 false ->
                     ready
+            end;
+        [{Key, {SpeculaTxId, PrepareTime, SpeculaValue}}] ->
+            case specula_utilities:should_specula(PrepareTime, SnapshotTime) of
+                true ->
+                    specula_utilities:add_specula_meta(SpeculaDep, SpeculaTxId, MyTxId, Key),
+                    {specula, SpeculaValue};
+                false ->
+                    false
             end
     end.
 
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
-return(Key, Type,TxId, Tables) ->
+return(Key, Type,TxId, InMemoryStore) ->
     %%lager:info("Returning for key ~w",[Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
-    {PreparedTxs, InMemoryStore, SpeculaDep} = Tables,
-    case specula_utilities:find_specula_version(
-            TxId, Key, PreparedTxs, SpeculaDep) of
-        false ->
-            case ets:lookup(InMemoryStore, Key) of
-                [] ->
-                    {ok, {Type,Type:new()}};
-                [{Key, ValueList}] ->
-                    {ok, find_version(ValueList, SnapshotTime, Type)}
-            end;
-        Value ->
-            {specula, {Type, Value}}
+    case ets:lookup(InMemoryStore, Key) of
+        [] ->
+            {ok, {Type,Type:new()}};
+        [{Key, ValueList}] ->
+            {ok, find_version(ValueList, SnapshotTime, Type)}
     end.
 
 %%%%%%%%%Intenal%%%%%%%%%%%%%%%%%%

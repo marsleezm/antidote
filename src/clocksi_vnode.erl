@@ -311,7 +311,7 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{num_specula_read=NumS
             %%lager:info("Replying specula value for key ~w of tx ~w",[Key, TxId]),
             {reply, {specula, Value}, SD0#state{num_specula_read=NumSpeculaRead+1}};
         ready ->
-            Result = clocksi_readitem:return(Key, Type, TxId, Tables),
+            Result = clocksi_readitem:return(Key, Type, TxId, InMemoryStore),
             {reply, Result, SD0}
     end;
 
@@ -332,7 +332,7 @@ handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{num_
             riak_core_vnode:reply(OrgSender, {specula, Value}),
             {noreply, SD0#state{num_specula_read=NumSpeculaRead+1}};
         ready ->
-            Result = clocksi_readitem:return(Key, Type, TxId, Tables),
+            Result = clocksi_readitem:return(Key, Type, TxId, InMemoryStore),
             riak_core_vnode:reply(OrgSender, Result),
             {noreply, SD0}
     end;
