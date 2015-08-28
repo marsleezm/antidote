@@ -653,20 +653,22 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, true) ->
     end.
 
 check_prepared(TxId, Key, PreparedTxs) -> 
-    SnapshotTime = TxId#tx_id.snapshot_time,
+    _SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             true;
-        [{Key, {PreparedTxId, PrepareTime, _Type, _Op}}] ->
-            lager:info("Abort for ~w Key ~w, preparetime ~w, snapshottime ~w", [PreparedTxId, Key, PrepareTime, SnapshotTime]),
-            case PrepareTime > SnapshotTime of
-                true ->
-                    false;
-                false ->
-                    false
+        _ ->
+            false
+        %[{Key, {PreparedTxId, PrepareTime, _Type, _Op}}] ->
+        %    lager:info("Abort for ~w Key ~w, preparetime ~w, snapshottime ~w", [PreparedTxId, Key, PrepareTime, SnapshotTime]),
+        %    case PrepareTime > SnapshotTime of
+        %        true ->
+        %            false;
+        %        false ->
+        %            false
                     %lager:info("Sending wait of ~w for ~w, preptime ~w of ~w", [TxId, Key, PrepareTime, PreparedTxId]),
                     %wait
-            end
+        %    end
     end.
 
 
