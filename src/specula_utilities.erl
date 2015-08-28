@@ -31,7 +31,7 @@
 -endif.
 
 -export([should_specula/2, make_prepared_specula/4, speculate_and_read/4, 
-            abort_specula_committed/3, coord_should_specula/1, make_specula_version_final/5,
+            coord_should_specula/1, make_specula_version_final/5,
             finalize_dependency/5]).
 
 coord_should_specula(Aborted) ->
@@ -74,15 +74,6 @@ make_specula_version_final(TxId, Key, TxCommitTime, PreparedTxs, InMemoryStore) 
         Record ->
             lager:warning("Something is wrong!!!! ~w, TxId is ~w", [Record, TxId]),
             error
-    end.
-
-abort_specula_committed(TxId, Key, PreparedTxs) ->
-    case ets:lookup(PreparedTxs, Key) of
-        [{Key, {TxId, _, _SpeculaValue}}] ->
-            ets:delete(PreparedTxs, Key),
-            true;
-        _ -> %% Just prepared
-            false   
     end.
 
 
@@ -251,33 +242,16 @@ make_specula_version_final_test() ->
     
 clean_specula_committed_test() ->
     TxId1 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
-    Tx1PrepareTime = clocksi_vnode:now_microsec(now()),
     TxId2 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
     Key = 1,
     SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
     PreparedTxs = ets:new(prepared_txs, [set,named_table,protected]),
-    
-    Result1 = abort_specula_committed(TxId1, Key, PreparedTxs),
-    ?assertEqual(Result1, false),
 
-    ets:insert(PreparedTxs, {Key, {TxId1, Tx1PrepareTime, value1}}), 
-    Result2 = abort_specula_committed(TxId2, Key, PreparedTxs),
-    ?assertEqual(Result2, false),
-
-    Result3 = abort_specula_committed(TxId1, Key, PreparedTxs),
-    ?assertEqual(Result3, true),
-
-    Result4 = abort_specula_committed(TxId1, Key, PreparedTxs),
-    ?assertEqual(Result4, false),
-
-    ets:insert(PreparedTxs, {Key, {TxId1, Tx1PrepareTime, value1}}), 
     ets:insert(SpeculaDep, {TxId1, [{TxId2, Key}]}), 
-    Result5 = abort_specula_committed(TxId1, Key, PreparedTxs),
     finalize_dependency(0, TxId1, ignore, SpeculaDep, abort),
     receive Msg2 ->
         ?assertEqual({abort, TxId2}, Msg2)
     end,
-    ?assertEqual(Result5, true),
     ?assertEqual(ets:lookup(SpeculaDep, TxId1), []),
 
     ets:delete(PreparedTxs),

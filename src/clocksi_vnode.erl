@@ -389,7 +389,7 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                               if_replicate=IfReplicate,
                               if_certify=IfCertify,
                               committed_tx=CommittedTx,
-                              %inmemory_store=InMemoryStore,
+                              inmemory_store=InMemoryStore,
                               specula_dep=SpeculaDep,
                               num_cert_fail=NumCertFail,
                               num_committed=NumCommitted,
@@ -399,7 +399,8 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
     Result = prepare(TxId, WriteSet, CommittedTx, PreparedTxs, IfCertify), 
     case Result of
         {ok, PrepareTime} ->
-            ResultCommit = commit(TxId, PrepareTime, WriteSet, CommittedTx, State),
+            ResultCommit = commit(TxId, PrepareTime, WriteSet, CommittedTx, 
+                        InMemoryStore, PreparedTxs, SpeculaDep),
             case ResultCommit of
                 {ok, {committed, NewCommittedTx}} ->
                     NewInvalid = specula_utilities:finalize_dependency(NumInvalid, TxId, 
@@ -442,13 +443,16 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                #state{partition=Partition,
                       committed_tx=CommittedTx,
                       num_committed=NumCommitted,
+                      inmemory_store=InMemoryStore,
+                      prepared_txs=PreparedTxs,
                       if_replicate=IfReplicate,
                       specula_dep=SpeculaDep,
                       num_read_invalid=NumInvalid
                       } = State) ->
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     %lager:info("Received commit of Tx ~w",[TxId]),
-    Result = commit(TxId, TxCommitTime, Updates, CommittedTx, State),
+    Result = commit(TxId, TxCommitTime, Updates, CommittedTx, 
+                InMemoryStore, PreparedTxs, SpeculaDep),
     case Result of
         {ok, {committed,NewCommittedTx}} ->
             NewInvalid = specula_utilities:finalize_dependency(NumInvalid, TxId, 
@@ -545,12 +549,10 @@ prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify)->
     case certification_check(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify) of
         true ->
             PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
-            %{PreparedTxs, _, _, _} = Tables,
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {ok, PrepareTime};
         specula_prepared ->
             %%lager:info("~w: Certification check returns specula_prepared", [TxId]),
-            %{PreparedTxs, _, _, _} = Tables,
             PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {specula_prepared, PrepareTime};
@@ -567,8 +569,7 @@ set_prepared(PreparedTxs,[{Key, Type, Op}|Rest], TxId, Time) ->
     true = ets:insert(PreparedTxs, {Key, {TxId, Time, Type, Op}}),
     set_prepared(PreparedTxs,Rest,TxId, Time).
 
-commit(TxId, TxCommitTime, Updates, CommittedTx, #state{
-                inmemory_store=InMemoryStore, prepared_txs=PreparedTxs, specula_dep=SpeculaDep})->
+commit(TxId, TxCommitTime, Updates, CommittedTx, InMemoryStore, PreparedTxs, SpeculaDep)->
     case Updates of
         [{Key, _Type, _Value} | _Rest] -> 
             update_and_clean(Updates, TxId, TxCommitTime, InMemoryStore, 
@@ -592,22 +593,18 @@ commit(TxId, TxCommitTime, Updates, CommittedTx, #state{
 abort_clean(_PreparedTxs, _TxId, []) ->
     ok;
 abort_clean(PreparedTxs, TxId, [{Key, _, _}|Rest]) ->
-    case specula_utilities:abort_specula_committed(TxId, Key, PreparedTxs) of
-        true ->
-            abort_clean(PreparedTxs, TxId, Rest);
-        false ->
-            clean_prepared(PreparedTxs, Key, TxId),
-            abort_clean(PreparedTxs, TxId, Rest)
-    end. 
+    clean_prepared(PreparedTxs, Key, TxId),
+    abort_clean(PreparedTxs, TxId, Rest).
 
 clean_prepared(PreparedTxs, Key, TxId) ->
     case ets:lookup(PreparedTxs, Key) of
         [{Key, {TxId, _Time, _Type, _Op}}] ->
             ets:delete(PreparedTxs, Key);
+        [{Key, {TxId, _, _SpeculaValue}}] ->
+            ets:delete(PreparedTxs, Key);
         _ ->
             %lager:warning("My prepared record disappeard!"),
             ok
-        %_ ->
     end.
 
 
