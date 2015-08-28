@@ -396,8 +396,6 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                               prepared_txs=PreparedTxs,
                               num_read_invalid=NumInvalid
                               }) ->
-    %Tables = PreparedTxs, %{PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
-    %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     Result = prepare(TxId, WriteSet, CommittedTx, PreparedTxs, IfCertify), 
     case Result of
         {ok, PrepareTime} ->
