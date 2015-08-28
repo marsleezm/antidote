@@ -50,7 +50,7 @@ check_clock(Key,TxId, Tables) ->
 
 check_prepared(Key, MyTxId, Tables) ->
     SnapshotTime = MyTxId#tx_id.snapshot_time,
-    {PreparedTx, _, _, _} = Tables,
+    {PreparedTx, _, _} = Tables,
     case ets:lookup(PreparedTx, Key) of
         [] ->
             ready;
@@ -74,9 +74,9 @@ check_prepared(Key, MyTxId, Tables) ->
 return(Key, Type,TxId, Tables) ->
     %%lager:info("Returning for key ~w",[Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
-    {_PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep} = Tables,
+    {PreparedTxs, InMemoryStore, SpeculaDep} = Tables,
     case specula_utilities:find_specula_version(
-            TxId, Key, SpeculaStore, SpeculaDep) of
+            TxId, Key, PreparedTxs, SpeculaDep) of
         false ->
             case ets:lookup(InMemoryStore, Key) of
                 [] ->

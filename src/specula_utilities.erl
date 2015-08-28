@@ -30,7 +30,7 @@
 -define(SEND_MSG(PID, MSG),  gen_fsm:send_event(PID, MSG)).
 -endif.
 
--export([should_specula/2, make_prepared_specula/5, speculate_and_read/4, find_specula_version/4,
+-export([should_specula/2, make_prepared_specula/4, speculate_and_read/4, find_specula_version/4,
             abort_specula_committed/3, coord_should_specula/1, make_specula_version_final/5,
             finalize_dependency/5]).
 
@@ -50,10 +50,10 @@ coord_should_specula(Aborted) ->
 %%      If depending txn works fine, either return to coord 'prepared' or 'read-valid'. 
 %% Return true if found any specula version and made specula; false otherwise
 %% TODO: This function should checks all keys of a transaction. Current one is incorrect 
-make_specula_version_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore) ->
+make_specula_version_final(TxId, Key, TxCommitTime, PreparedTxs, InMemoryStore) ->
     %% Firstly, make this specula version finally committed.
     %lager:info("In making specula final for tx ~w",[TxId]),
-    case ets:lookup(SpeculaStore, Key) of
+    case ets:lookup(PreparedTxs, Key) of
         [{Key, {TxId, _, SpeculaValue}}] ->    
             %lager:info("Found ~w of TxId ~w in speculstore",[Key, TxId]),
             case ets:lookup(InMemoryStore, Key) of
@@ -64,7 +64,7 @@ make_specula_version_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore)
                       true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, SpeculaValue}|RemainList]})
             end,
             %%Remove this version from specula_store
-            ets:delete(SpeculaStore, Key);
+            ets:delete(PreparedTxs, Key);
         [{Key, []}] -> %% The version should still be in prepared table. It's not made specula yet.
             false;    
         [] -> %% The version should still be in prepared table. It's not made specula yet.
@@ -74,17 +74,13 @@ make_specula_version_final(TxId, Key, TxCommitTime, SpeculaStore, InMemoryStore)
             error
     end.
 
-abort_specula_committed(TxId, Key, SpeculaStore) ->
-    case ets:lookup(SpeculaStore, Key) of
+abort_specula_committed(TxId, Key, PreparedTxs) ->
+    case ets:lookup(PreparedTxs, Key) of
         [{Key, {TxId, _, _SpeculaValue}}] ->
-            ets:delete(SpeculaStore, Key),
+            ets:delete(PreparedTxs, Key),
             true;
         _ -> %% Just prepared
             false   
-        %[] -> %% Just prepared
-        %    false;    
-        %Record ->
-        %    error
     end.
 
 
@@ -99,15 +95,13 @@ should_specula(PreparedTime, SnapshotTime) ->
     end.
 
 speculate_and_read(Key, MyTxId, PreparedRecord, Tables) ->
-    {PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep} = Tables,
-    {SpeculatedTxId, Value} = make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore,
-                               SpeculaStore),
+    {PreparedTxs, InMemoryStore, SpeculaDep} = Tables,
+    {SpeculatedTxId, Value} = make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore),
     %lager:info("Specula reading ~w of ~w", [Key, MyTxId]),
     add_specula_meta(SpeculaDep, SpeculatedTxId, MyTxId, Key),
     {specula, Value}.
 
-make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore,
-                             SpeculaStore) ->
+make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore) ->
     {TxId, PrepareTime, Type, {Param, Actor}} = PreparedRecord,
     %lager:info("Trying to make prepared specula ~w for ~w",[Key, TxId]),
     SpeculaValue =  case ets:lookup(InMemoryStore, Key) of
@@ -117,34 +111,22 @@ make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore,
                             [{_CommitTime, Snapshot}|_] = CommittedVersions,
                             generate_snapshot(Snapshot, Type, Param, Actor)
                     end,
-    true = ets:insert(SpeculaStore, {Key, {TxId, PrepareTime, SpeculaValue}}),
-    true = ets:delete(PreparedTxs, Key),
+    true = ets:insert(PreparedTxs, {Key, {TxId, PrepareTime, SpeculaValue}}),
     {TxId, {Type, SpeculaValue}}.
 
-find_specula_version(TxId=#tx_id{snapshot_time=SnapshotTime}, Key, SpeculaStore, SpeculaDep) ->
-    case ets:lookup(SpeculaStore, Key) of
-        [] -> %% No specula version
-            false;
-        [{Key, SpeculaValue}] ->
-            case find_version(SpeculaValue, SnapshotTime) of
-                false -> %% No corresponding specula version TODO: will this ever happen?
-                    false;
-                {DependingTxId, Value} -> 
-                    %lager:info("Find specula version..adding dep ~w",[SenderPId]),
+find_specula_version(TxId=#tx_id{snapshot_time=SnapshotTime}, Key, PreparedTxs, SpeculaDep) ->
+    case ets:lookup(PreparedTxs, Key) of
+        [{Key, {DependingTxId, PrepareTime, SpeculaValue}}] ->
+            case SnapshotTime >= PrepareTime of
+                true ->
                     add_specula_meta(SpeculaDep, DependingTxId, TxId, Key),
-                    Value
-            end
-    end.
-            
-
-find_version({TxId, TS, Value}, SnapshotTime) ->
-    case SnapshotTime >= TS of
-        true ->
-            {TxId,Value};
-        false ->
+                    SpeculaValue;
+                false ->
+                    false
+            end;
+        _ -> %% No specula version
             false
     end.
-
 
 %%%%%%%%%%%%%%%%  Private function %%%%%%%%%%%%%%%%%
 generate_snapshot(Snapshot, Type, Param, Actor) ->
@@ -227,32 +209,31 @@ make_specula_version_final_test() ->
     Tx3CommitTime = clocksi_vnode:now_microsec(now()),
     TxId4 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
     Key = 1,
-    SpeculaStore = ets:new(specula_store, [set,named_table,protected]),
     InMemoryStore = ets:new(inmemory_store, [set,named_table,protected]),
     PreparedTxs = ets:new(prepared_store, [set,named_table,protected]),
     SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
-    ets:insert(SpeculaStore, {Key, {TxId1, Tx1PrepareTime, whatever}}),
+    ets:insert(PreparedTxs, {Key, {TxId1, Tx1PrepareTime, whatever}}),
 
     %% Will succeed
-    Result1 = make_specula_version_final(TxId1, Key, Tx1CommitTime, SpeculaStore, InMemoryStore),
+    Result1 = make_specula_version_final(TxId1, Key, Tx1CommitTime, PreparedTxs, InMemoryStore),
     finalize_dependency(0 ,TxId1, Tx1CommitTime, SpeculaDep, commit),
     ?assertEqual(Result1, true),
-    ?assertEqual([], ets:lookup(SpeculaStore, Key)),
+    ?assertEqual([], ets:lookup(PreparedTxs, Key)),
     ?assertEqual([{Key, [{Tx1CommitTime, whatever}]}], ets:lookup(InMemoryStore, Key)),
 
-    Result2 = make_specula_version_final(TxId1, Key, Tx1CommitTime, SpeculaStore, InMemoryStore),
+    Result2 = make_specula_version_final(TxId1, Key, Tx1CommitTime, PreparedTxs, InMemoryStore),
     ?assertEqual(Result2, false),
     
     %% Wrong key
-    ets:insert(SpeculaStore, {Key, {TxId2, Tx2PrepareTime, whereever}}),
-    Result3 = make_specula_version_final(TxId1, Key, Tx2CommitTime, SpeculaStore, InMemoryStore),
+    ets:insert(PreparedTxs, {Key, {TxId2, Tx2PrepareTime, whereever}}),
+    Result3 = make_specula_version_final(TxId1, Key, Tx2CommitTime, PreparedTxs, InMemoryStore),
     ?assertEqual(Result3, error),
 
     %% Multiple values in inmemory_store will not lost.
-    Result4 = make_specula_version_final(TxId2, Key, Tx2CommitTime, SpeculaStore, InMemoryStore),
+    Result4 = make_specula_version_final(TxId2, Key, Tx2CommitTime, PreparedTxs, InMemoryStore),
     finalize_dependency(0, TxId2, Tx2CommitTime, SpeculaDep, commit),
     ?assertEqual(Result4, true),
-    ?assertEqual([], ets:lookup(SpeculaStore, Key)),
+    ?assertEqual([], ets:lookup(PreparedTxs, Key)),
     ?assertEqual([{Key, [{Tx2CommitTime, whereever}, {Tx1CommitTime, whatever}]}], 
             ets:lookup(InMemoryStore, Key)),
 
@@ -260,10 +241,10 @@ make_specula_version_final_test() ->
     %% Tx2, smaller timestamp than Tx3: both aborted
     %% Tx3, larger timestamp than Tx3: read valid, write prepared
     Dependency = [{TxId2, Key}, {TxId4, Key}],
-    ets:insert(SpeculaStore, {Key, {TxId3, Tx3PrepareTime, lotsofdep}}),
+    ets:insert(PreparedTxs, {Key, {TxId3, Tx3PrepareTime, lotsofdep}}),
     ets:insert(SpeculaDep, {TxId3, Dependency}),
     Result5 = make_specula_version_final(TxId3, Key, Tx3CommitTime, 
-                SpeculaStore, InMemoryStore),
+                PreparedTxs, InMemoryStore),
     finalize_dependency(0, TxId3, Tx3CommitTime, SpeculaDep, commit),
     receive Msg2 ->
         ?assertEqual({abort, TxId2}, Msg2)
@@ -274,7 +255,6 @@ make_specula_version_final_test() ->
     ?assertEqual(Result5, true),
     ?assertEqual(ets:lookup(SpeculaDep, TxId2), []),
 
-    ets:delete(SpeculaStore),
     ets:delete(InMemoryStore),
     ets:delete(PreparedTxs),
     ets:delete(SpeculaDep),
@@ -285,25 +265,25 @@ clean_specula_committed_test() ->
     Tx1PrepareTime = clocksi_vnode:now_microsec(now()),
     TxId2 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
     Key = 1,
-    SpeculaStore = ets:new(specula_store, [set,named_table,protected]),
     SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
+    PreparedTxs = ets:new(prepared_txs, [set,named_table,protected]),
     
-    Result1 = abort_specula_committed(TxId1, Key, SpeculaStore),
+    Result1 = abort_specula_committed(TxId1, Key, PreparedTxs),
     ?assertEqual(Result1, false),
 
-    ets:insert(SpeculaStore, {Key, {TxId1, Tx1PrepareTime, value1}}), 
-    Result2 = abort_specula_committed(TxId2, Key, SpeculaStore),
+    ets:insert(PreparedTxs, {Key, {TxId1, Tx1PrepareTime, value1}}), 
+    Result2 = abort_specula_committed(TxId2, Key, PreparedTxs),
     ?assertEqual(Result2, false),
 
-    Result3 = abort_specula_committed(TxId1, Key, SpeculaStore),
+    Result3 = abort_specula_committed(TxId1, Key, PreparedTxs),
     ?assertEqual(Result3, true),
 
-    Result4 = abort_specula_committed(TxId1, Key, SpeculaStore),
+    Result4 = abort_specula_committed(TxId1, Key, PreparedTxs),
     ?assertEqual(Result4, false),
 
-    ets:insert(SpeculaStore, {Key, {TxId1, Tx1PrepareTime, value1}}), 
+    ets:insert(PreparedTxs, {Key, {TxId1, Tx1PrepareTime, value1}}), 
     ets:insert(SpeculaDep, {TxId1, [{TxId2, Key}]}), 
-    Result5 = abort_specula_committed(TxId1, Key, SpeculaStore),
+    Result5 = abort_specula_committed(TxId1, Key, PreparedTxs),
     finalize_dependency(0, TxId1, ignore, SpeculaDep, abort),
     receive Msg2 ->
         ?assertEqual({abort, TxId2}, Msg2)
@@ -311,7 +291,7 @@ clean_specula_committed_test() ->
     ?assertEqual(Result5, true),
     ?assertEqual(ets:lookup(SpeculaDep, TxId1), []),
 
-    ets:delete(SpeculaStore),
+    ets:delete(PreparedTxs),
     ets:delete(SpeculaDep),
     pass.
     
@@ -325,26 +305,21 @@ make_prepared_specula_test() ->
     _Record2 = {TxId2, 500, Type, {increment, haha}},
     {ok, Counter1} = Type:update(increment, haha, Type:new()),
     {ok, Counter2} = Type:update(increment, haha, Counter1),
-    SpeculaStore = ets:new(specula_store, [set,named_table,protected]),
     SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
     InMemoryStore = ets:new(inmemory_store, [set,named_table,protected]),
     PreparedTxs = ets:new(prepared_txs, [set,named_table,protected]),
 
     ets:insert(PreparedTxs, {Key, whatever}),   
-    Result1 = make_prepared_specula(Key, Record1, PreparedTxs, InMemoryStore, 
-                SpeculaStore),
+    Result1 = make_prepared_specula(Key, Record1, PreparedTxs, InMemoryStore),
     ?assertEqual(Result1, {TxId1, {Type, Counter1}}),
-    ?assertEqual([], ets:lookup(PreparedTxs, Key)),
 
     ets:insert(InMemoryStore, {Key, [{200, Counter1}]}),   
-    ets:delete(SpeculaStore, Key),   
-    Result2 = make_prepared_specula(Key, Record1, PreparedTxs, InMemoryStore, 
-                SpeculaStore),
+    ets:delete(PreparedTxs, Key),   
+    Result2 = make_prepared_specula(Key, Record1, PreparedTxs, InMemoryStore), 
     ?assertEqual(Result2, {TxId1, {Type, Counter2}}),
 
-    ets:delete(SpeculaStore),
-    ets:delete(InMemoryStore),
     ets:delete(PreparedTxs),
+    ets:delete(InMemoryStore),
     ets:delete(SpeculaDep),
     pass.
 
@@ -358,21 +333,18 @@ find_specula_version_test() ->
     Record1 = {TxId1, Tx1PrepareTime, Type, {increment, haha}},
     InMemoryStore = ets:new(inmemory_store, [set,named_table,protected]),
     PreparedTxs = ets:new(prepared_txs, [set,named_table,protected]),
-    SpeculaStore = ets:new(specula_store, [set,named_table,protected]),
     SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
 
-    _ = make_prepared_specula(Key, Record1, PreparedTxs, InMemoryStore, 
-                SpeculaStore),
+    _ = make_prepared_specula(Key, Record1, PreparedTxs, InMemoryStore), 
     ?assertEqual(ets:lookup(SpeculaDep, TxId1), []),
 
-    Result1 = find_specula_version(TxId1, Key, SpeculaStore, SpeculaDep),
+    Result1 = find_specula_version(TxId1, Key, PreparedTxs, SpeculaDep),
     ?assertEqual(Result1, false),
 
-    Result2 = find_specula_version(TxId2, Key, SpeculaStore, SpeculaDep),
+    Result2 = find_specula_version(TxId2, Key, PreparedTxs, SpeculaDep),
     ?assertEqual(Result2, Counter1),
     ?assertEqual(ets:lookup(SpeculaDep, TxId1), [{TxId1, [{TxId2, Key}]}]),
 
-    ets:delete(SpeculaStore),
     ets:delete(SpeculaDep),
     ets:delete(InMemoryStore),
     ets:delete(PreparedTxs),
