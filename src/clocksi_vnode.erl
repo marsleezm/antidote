@@ -367,7 +367,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                     PendingRecord = {prepare, OriginalSender, 
                             {prepared, TxId, PrepareTime}, {TxId, WriteSet}},
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
-                    {noreply, State};
+                    {noreply, State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}};
                 false ->
                     %%lager:info("Returning prepare of ~w ~w",[TxId, PrepareTime]),
                     riak_core_vnode:reply(OriginalSender, {prepared, TxId, PrepareTime}),
