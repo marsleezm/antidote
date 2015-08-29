@@ -121,7 +121,7 @@ generate_snapshot(Snapshot, Type, Param, Actor) ->
 
 %%TODO: to optimize: no need to store the snapshottime of txn.. TxId already includs it.
 add_specula_meta(SpeculaDep, DependingTxId, TxId, Key) ->
-    %lager:info("Adding specula meta: deping tx ~w, depent tx ~w",[DependingTxId, TxId]),    
+    lager:info("Adding specula meta: deping tx ~w, read tx ~w",[DependingTxId, TxId]),    
     case ets:lookup(SpeculaDep, DependingTxId) of
         [] ->
             true = ets:insert(SpeculaDep, {DependingTxId, [{TxId, Key}]});
