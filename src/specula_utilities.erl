@@ -78,13 +78,14 @@ make_specula_version_final(TxId, Key, TxCommitTime, PreparedTxs, InMemoryStore) 
 
 
 should_specula(PreparedTime, SnapshotTime) ->
-    case SnapshotTime - ?SPECULA_TIMEOUT > PreparedTime of
-        false ->
-            NowTime = tx_utilities:get_ts(),
-            NowTime - ?SPECULA_TIMEOUT > PreparedTime;
-        true ->
-            true
-    end.
+    SnapshotTime - ?SPECULA_TIMEOUT > PreparedTime.
+    %case SnapshotTime - ?SPECULA_TIMEOUT > PreparedTime of
+    %    false ->
+    %        NowTime = tx_utilities:get_ts(),
+    %        NowTime - ?SPECULA_TIMEOUT > PreparedTime;
+    %    true ->
+    %        true
+    %end.
 
 speculate_and_read(Key, MyTxId, PreparedRecord, Tables) ->
     {PreparedTxs, InMemoryStore, SpeculaDep} = Tables,
