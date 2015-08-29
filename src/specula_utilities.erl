@@ -18,7 +18,7 @@
 %%
 %% -------------------------------------------------------------------
 -module(specula_utilities).
--define(SPECULA_TIMEOUT, 2000).
+-define(SPECULA_TIMEOUT, 2500).
 
 -include("include/speculation.hrl").
 -include("include/antidote.hrl").
@@ -80,10 +80,9 @@ make_specula_version_final(TxId, Key, TxCommitTime, PreparedTxs, InMemoryStore) 
 should_specula(PreparedTime, SnapshotTime) ->
     case SnapshotTime - ?SPECULA_TIMEOUT > PreparedTime of
         false ->
-            NowTime = clocksi_vnode:now_microsec(now()),
+            NowTime = tx_utilities:get_ts(),
             NowTime - ?SPECULA_TIMEOUT > PreparedTime;
         true ->
-            lager:info("Should speculate read ~w, preparetime ~w", [SnapshotTime, PreparedTime]),
             true
     end.
 

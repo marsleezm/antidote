@@ -27,7 +27,7 @@
 -define(GET_MAX_TS(APP, KEY), application:get_env(APP, KEY)).
 -endif.
 
--export([create_transaction_record/1, update_ts/1, increment_ts/1]).
+-export([create_transaction_record/1, update_ts/1, increment_ts/1, get_ts/0]).
 
 -spec create_transaction_record(snapshot_time() | ignore) -> txid().
 create_transaction_record(ClientClock) ->
@@ -63,3 +63,7 @@ increment_ts(SnapshotTS) ->
     application:set_env(antidote, max_ts, MaxTS+1),
     MaxTS+1.
 
+-spec get_ts() -> non_neg_integer().
+get_ts() ->
+    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
+    max(clocksi_vnode:now_microsec(now()), TS).
