@@ -92,10 +92,10 @@ init(_Args) ->
     		      permanent, 5000, supervisor,
     		      [repl_fsm_sup]},
 
-    VectorClockMaster = {vectorclock_vnode_master,
-                         {riak_core_vnode_master,  start_link,
-                          [vectorclock_vnode]},
-                         permanent, 5000, worker, [riak_core_vnode_master]},
+    ClockService = {clock_service,
+                         {clock_service,  start_link,
+                          []},
+                         permanent, 5000, worker, [clock_service]},
 
     %MaterializerMaster = {materializer_vnode_master,
     %                      {riak_core_vnode_master,  start_link,
@@ -127,6 +127,6 @@ init(_Args) ->
        %InterDcRepMaster,
        %InterDcRecvrMaster,
        %InterDcManager,
-       VectorClockMaster]}}.
+       ClockService]}}.
        %InterDcSenderSup,
        %MaterializerMaster]}}.

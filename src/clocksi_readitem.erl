@@ -59,7 +59,7 @@ check_prepared(Key, MyTxId, Tables) ->
                 true ->
                     case specula_utilities:should_specula(PrepareTime, SnapshotTime) of
                         true ->
-                            lager:info("Specula and read, TxId ~w, PrepareTime is ~w, Key ~w",[PrepareTxId, PrepareTime, Key]), 
+                            lager:info("Specula and read, reader TxId ~w, PrepareTime is ~w, Key ~w",[MyTxId, PrepareTime, Key]), 
                             specula_utilities:speculate_and_read(Key, MyTxId, {PrepareTxId, PrepareTime, Type, Op}, Tables);
                         false ->
                             {not_ready, 2}

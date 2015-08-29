@@ -300,7 +300,8 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{num_specula_read=NumS
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, 
             specula_dep=SpeculaDep, partition=Partition}) ->
     Tables = {PreparedTxs, InMemoryStore, SpeculaDep},
-    tx_utilities:update_ts(TxId#tx_id.snapshot_time),
+    %tx_utilities:update_ts(TxId#tx_id.snapshot_time),
+    clock_service:update_ts(TxId#tx_id.snapshot_time),
     case clocksi_readitem:check_prepared(Key, TxId, Tables) of
         {not_ready, Delay} ->
             spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
@@ -319,7 +320,8 @@ handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{num_
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, 
             specula_dep=SpeculaDep, partition=Partition}) ->
     %%lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
-    tx_utilities:update_ts(TxId#tx_id.snapshot_time),
+    %tx_utilities:update_ts(TxId#tx_id.snapshot_time),
+    clock_service:update_ts(TxId#tx_id.snapshot_time),
     Tables = {PreparedTxs, InMemoryStore, SpeculaDep},
     case clocksi_readitem:check_prepared(Key, TxId, Tables) of
         {not_ready, Delay} ->
@@ -548,12 +550,14 @@ async_send_msg(Delay, Msg, To) ->
 prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify)->
     case certification_check(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify) of
         true ->
-            PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
+            %PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
+            PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {ok, PrepareTime};
         specula_prepared ->
             %%lager:info("~w: Certification check returns specula_prepared", [TxId]),
-            PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
+            %PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
+            PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
 		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
 		    {specula_prepared, PrepareTime};
 	    false ->
