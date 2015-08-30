@@ -74,7 +74,7 @@ check_prepared(Key, MyTxId, Tables) ->
                     specula_utilities:add_specula_meta(SpeculaDep, SpeculaTxId, MyTxId, Key),
                     {specula, SpeculaValue};
                 false ->
-                    false
+                    {not_ready, 2}
             end
     end.
 
