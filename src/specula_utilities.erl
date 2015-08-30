@@ -31,7 +31,7 @@
 -endif.
 
 -export([should_specula/2, make_prepared_specula/4, speculate_and_read/4, 
-            coord_should_specula/1, make_specula_version_final/4,
+            coord_should_specula/1, make_specula_version_final/4, add_specula_meta/4,
             finalize_dependency/5]).
 
 coord_should_specula(Aborted) ->
