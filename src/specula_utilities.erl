@@ -31,7 +31,7 @@
 -endif.
 
 -export([should_specula/2, make_prepared_specula/4, speculate_and_read/4, 
-            coord_should_specula/1, make_specula_version_final/5,
+            coord_should_specula/1, make_specula_version_final/4,
             finalize_dependency/5]).
 
 coord_should_specula(Aborted) ->
@@ -50,30 +50,14 @@ coord_should_specula(Aborted) ->
 %%      If depending txn works fine, either return to coord 'prepared' or 'read-valid'. 
 %% Return true if found any specula version and made specula; false otherwise
 %% TODO: This function should checks all keys of a transaction. Current one is incorrect 
-make_specula_version_final(TxId, Key, TxCommitTime, PreparedTxs, InMemoryStore) ->
+make_specula_version_final(Key, TxCommitTime, SpeculaValue, InMemoryStore) ->
     %% Firstly, make this specula version finally committed.
-    %lager:info("In making specula final for tx ~w",[TxId]),
-    case ets:lookup(PreparedTxs, Key) of
-        [{Key, {TxId, _, SpeculaValue}}] ->    
-            %lager:info("Found ~w of TxId ~w in speculstore",[Key, TxId]),
-            case ets:lookup(InMemoryStore, Key) of
-                  [] ->
-                      true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, SpeculaValue}]});
-                  [{Key, ValueList}] ->
-                      {RemainList, _} = lists:split(min(20,length(ValueList)), ValueList),
-                      true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, SpeculaValue}|RemainList]})
-            end,
-            ets:delete(PreparedTxs, Key);
-            %%Remove this version from specula_store
-        [{Key, {TxId, _, _, _}}] ->
-            false;
-        [] ->
-            false;
-        %_ -> %% The version should still be in prepared table. It's not made specula yet.
-        %    false; 
-        Record ->
-            lager:warning("Something is wrong!!!! ~w, TxId is ~w", [Record, TxId]),
-            error
+    case ets:lookup(InMemoryStore, Key) of
+          [] ->
+              true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, SpeculaValue}]});
+          [{Key, ValueList}] ->
+              {RemainList, _} = lists:split(min(20,length(ValueList)), ValueList),
+              true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, SpeculaValue}|RemainList]})
     end.
 
 
@@ -181,7 +165,6 @@ make_specula_version_final_test() ->
     Tx1PrepareTime = clocksi_vnode:now_microsec(now()),
     Tx1CommitTime = clocksi_vnode:now_microsec(now()),
     TxId2 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
-    Tx2PrepareTime = clocksi_vnode:now_microsec(now()),
     Tx2CommitTime = clocksi_vnode:now_microsec(now()),
     TxId3 = tx_utilities:create_transaction_record(clocksi_vnode:now_microsec(now())),
     Tx3PrepareTime = clocksi_vnode:now_microsec(now()),
@@ -194,26 +177,17 @@ make_specula_version_final_test() ->
     ets:insert(PreparedTxs, {Key, {TxId1, Tx1PrepareTime, whatever}}),
 
     %% Will succeed
-    Result1 = make_specula_version_final(TxId1, Key, Tx1CommitTime, PreparedTxs, InMemoryStore),
+    ets:delete(PreparedTxs, Key),
+    Result1 = make_specula_version_final(Key, Tx1CommitTime, whatever, InMemoryStore),
     finalize_dependency(0 ,TxId1, Tx1CommitTime, SpeculaDep, commit),
     ?assertEqual(Result1, true),
-    ?assertEqual([], ets:lookup(PreparedTxs, Key)),
     ?assertEqual([{Key, [{Tx1CommitTime, whatever}]}], ets:lookup(InMemoryStore, Key)),
 
-    Result2 = make_specula_version_final(TxId1, Key, Tx1CommitTime, PreparedTxs, InMemoryStore),
-    ?assertEqual(Result2, false),
-    
-    %% Wrong key
-    ets:insert(PreparedTxs, {Key, {TxId2, Tx2PrepareTime, whereever}}),
-    Result3 = make_specula_version_final(TxId1, Key, Tx2CommitTime, PreparedTxs, InMemoryStore),
-    ?assertEqual(Result3, error),
-
     %% Multiple values in inmemory_store will not lost.
-    Result4 = make_specula_version_final(TxId2, Key, Tx2CommitTime, PreparedTxs, InMemoryStore),
+    Result4 = make_specula_version_final(Key, Tx2CommitTime, whatever, InMemoryStore),
     finalize_dependency(0, TxId2, Tx2CommitTime, SpeculaDep, commit),
     ?assertEqual(Result4, true),
-    ?assertEqual([], ets:lookup(PreparedTxs, Key)),
-    ?assertEqual([{Key, [{Tx2CommitTime, whereever}, {Tx1CommitTime, whatever}]}], 
+    ?assertEqual([{Key, [{Tx2CommitTime, whatever}, {Tx1CommitTime, whatever}]}], 
             ets:lookup(InMemoryStore, Key)),
 
     %% Deps will be handled correctly
@@ -222,8 +196,8 @@ make_specula_version_final_test() ->
     Dependency = [{TxId2, Key}, {TxId4, Key}],
     ets:insert(PreparedTxs, {Key, {TxId3, Tx3PrepareTime, lotsofdep}}),
     ets:insert(SpeculaDep, {TxId3, Dependency}),
-    Result5 = make_specula_version_final(TxId3, Key, Tx3CommitTime, 
-                PreparedTxs, InMemoryStore),
+    Result5 = make_specula_version_final(Key, Tx3CommitTime, 
+                whatever, InMemoryStore),
     finalize_dependency(0, TxId3, Tx3CommitTime, SpeculaDep, commit),
     receive Msg2 ->
         ?assertEqual({abort, TxId2}, Msg2)

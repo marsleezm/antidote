@@ -83,6 +83,7 @@
                 total_time :: non_neg_integer(),
                 prepare_count :: non_neg_integer(),
                 num_committed :: non_neg_integer(),
+                committed_diff :: non_neg_integer(),
                 num_specula_read :: non_neg_integer(),
                 num_aborted :: non_neg_integer(),
                 num_read_abort :: non_neg_integer(),
@@ -180,7 +181,7 @@ init([Partition]) ->
                 if_replicate = IfReplicate,
                 specula_dep=SpeculaDep,
                 inmemory_store=InMemoryStore,
-                total_time=0, prepare_count=0, num_specula_read=0,
+                total_time=0, prepare_count=0, num_specula_read=0, committed_diff=0,
                 num_committed=0, num_cert_fail=0, num_aborted=0, num_read_invalid=0, num_read_abort=0}}.
 
 
@@ -209,15 +210,15 @@ print_stat() ->
     PartitionList = chashbin:to_list(CHBin),
     print_stat(PartitionList, {0,0,0,0,0,0,0,0}).
 
-print_stat([], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc6, Acc7}) ->
-    lager:info("In total: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, specula read ~w, prepare time ~w",
-                [Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc6 div Acc7]);
-print_stat([{Partition,Node}|Rest], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc6, Acc7}) ->
-    {Add1, Add2, Add3, Add4, Add5, Add55, Add6, Add7} = riak_core_vnode_master:sync_command({Partition,Node},
+print_stat([], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56, Acc6, Acc7}) ->
+    lager:info("In total: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, specula read ~w, avg diff ~w, prepare time ~w",
+                [Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56 div Acc1, Acc6 div Acc7]);
+print_stat([{Partition,Node}|Rest], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56, Acc6, Acc7}) ->
+    {Add1, Add2, Add3, Add4, Add5, Add55, Add56, Add6, Add7} = riak_core_vnode_master:sync_command({Partition,Node},
 						            {print_stat},
 						            ?CLOCKSI_MASTER,
 						            infinity),
-    print_stat(Rest, {Acc1+Add1, Acc2+Add2, Acc3+Add3, Acc4+Add4, Acc5+Add5, Acc55+Add55, Acc6+Add6, Acc7+Add7}).
+    print_stat(Rest, {Acc1+Add1, Acc2+Add2, Acc3+Add3, Acc4+Add4, Acc5+Add5, Acc55+Add55, Acc56+Add56, Acc6+Add6, Acc7+Add7}).
 
 check_tables() ->
     {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
@@ -270,9 +271,9 @@ handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, prepared_
     {reply, ok, SD0};
 
 handle_command({print_stat},_Sender,SD0=#state{num_committed=A1, num_aborted=A2, num_cert_fail=A3, num_specula_read=A55, 
-                    num_read_invalid=A4, num_read_abort=A5, total_time=A6, prepare_count=A7, partition=Partition}) ->
-    lager:info("~w: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, specula read ~w, ~w, ~w", [Partition, A1, A2, A3, A4, A5, A55, A6, A7]),
-    {reply, {A1, A2, A3, A4, A5, A55, A6, A7}, SD0};
+         committed_diff=A56, num_read_invalid=A4, num_read_abort=A5, total_time=A6, prepare_count=A7, partition=Partition}) ->
+    lager:info("~w: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, avg diff ~w, specula read ~w, ~w, ~w", [Partition, A1, A2, A3, A4, A5, A56 div A1, A55, A6, A7]),
+    {reply, {A1, A2, A3, A4, A5, A56, A55, A6, A7}, SD0};
 
 handle_command({check_tables_ready},_Sender,SD0=#state{partition=Partition}) ->
     Result = case ets:info(get_cache_name(Partition,prepared)) of
@@ -404,7 +405,7 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
             ResultCommit = commit(TxId, PrepareTime, WriteSet, CommittedTx, 
                         InMemoryStore, PreparedTxs, SpeculaDep),
             case ResultCommit of
-                {ok, {committed, NewCommittedTx}} ->
+                {ok, {committed, _, NewCommittedTx}} ->
                     NewInvalid = specula_utilities:finalize_dependency(NumInvalid, TxId, 
                             PrepareTime, SpeculaDep, commit),
                     case IfReplicate of
@@ -445,6 +446,7 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                #state{partition=Partition,
                       committed_tx=CommittedTx,
                       num_committed=NumCommitted,
+                      committed_diff=CommittedDiff,
                       inmemory_store=InMemoryStore,
                       prepared_txs=PreparedTxs,
                       if_replicate=IfReplicate,
@@ -456,7 +458,7 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
     Result = commit(TxId, TxCommitTime, Updates, CommittedTx, 
                 InMemoryStore, PreparedTxs, SpeculaDep),
     case Result of
-        {ok, {committed,NewCommittedTx}} ->
+        {ok, {committed, PTime, NewCommittedTx}} ->
             NewInvalid = specula_utilities:finalize_dependency(NumInvalid, TxId, 
                     TxCommitTime, SpeculaDep, commit),
             case IfReplicate of
@@ -465,12 +467,12 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                     %ets:insert(PreparedTxs, {committed_tx, NewCommittedTx}),
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                     %{noreply, State};
-                    {noreply, State#state{committed_tx=NewCommittedTx, 
+                    {noreply, State#state{committed_tx=NewCommittedTx, committed_diff=CommittedDiff+TxCommitTime-PTime, 
                                 num_committed=NumCommitted+1, num_read_invalid=NewInvalid}};
                 false ->
                     %%ets:insert(PreparedTxs, {committed_tx, NewCommittedTx}),
                     %{reply, committed, State}
-                    {noreply, State#state{committed_tx=NewCommittedTx,
+                    {noreply, State#state{committed_tx=NewCommittedTx, committed_diff=CommittedDiff+TxCommitTime-PTime, 
                                 num_committed=NumCommitted+1, num_read_invalid=NewInvalid}}
             end;
         %{error, materializer_failure} ->
@@ -576,10 +578,10 @@ set_prepared(PreparedTxs,[{Key, Type, Op}|Rest], TxId, Time) ->
 commit(TxId, TxCommitTime, Updates, CommittedTx, InMemoryStore, PreparedTxs, SpeculaDep)->
     case Updates of
         [{Key, _Type, _Value} | _Rest] -> 
-            update_and_clean(Updates, TxId, TxCommitTime, InMemoryStore, 
-                PreparedTxs, SpeculaDep),
+            PrepareTime=update_and_clean(Updates, TxId, TxCommitTime, InMemoryStore, 
+                        PreparedTxs, SpeculaDep, 0),
             NewDict = dict:store(Key, TxCommitTime, CommittedTx),
-            {ok, {committed, NewDict}};
+            {ok, {committed, PrepareTime, NewDict}};
         _ -> 
             {error, no_updates}
     end.
@@ -597,19 +599,15 @@ commit(TxId, TxCommitTime, Updates, CommittedTx, InMemoryStore, PreparedTxs, Spe
 abort_clean(_PreparedTxs, _TxId, []) ->
     ok;
 abort_clean(PreparedTxs, TxId, [{Key, _, _}|Rest]) ->
-    clean_prepared(PreparedTxs, Key, TxId),
-    abort_clean(PreparedTxs, TxId, Rest).
-
-clean_prepared(PreparedTxs, Key, TxId) ->
     case ets:lookup(PreparedTxs, Key) of
         [{Key, {TxId, _Time, _Type, _Op}}] ->
             ets:delete(PreparedTxs, Key);
-        [{Key, {TxId, _, _SpeculaValue}}] ->
+        [{Key, {TxId, _Time, _SpeculaValue}}] ->
             ets:delete(PreparedTxs, Key);
         _ ->
-            %lager:warning("My prepared record disappeard!"),
             ok
-    end.
+    end,
+    abort_clean(PreparedTxs, TxId, Rest).
 
 
 %% @doc converts a tuple {MegaSecs,Secs,MicroSecs} into microseconds
@@ -673,16 +671,14 @@ check_prepared(TxId, Key, PreparedTxs) ->
 
 -spec update_and_clean(KeyValues :: [{key(), atom(), term()}],
                           TxId::txid(),TxCommitTime:: {term(), term()}, InMemoryStore :: cache_id(), 
-                            PreparedTxs :: cache_id(), SpeculaDep :: cache_id()) -> ok.
-update_and_clean([], _TxId, _TxCommitTime, _, _, _) ->
-    ok;
+                            PreparedTxs :: cache_id(), SpeculaDep :: cache_id(), PrepareTime :: non_neg_integer()) -> ok.
+update_and_clean([], _TxId, TxCommitTime, _, _, _, PrepareTime) ->
+    TxCommitTime-PrepareTime;
 update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemoryStore, 
-                PreparedTxs, SpeculaDep) ->
+                PreparedTxs, SpeculaDep, _) ->
     %%lager:info("Storing key ~w for ~w",[Key, TxId]),
-    case specula_utilities:make_specula_version_final(TxId, Key, TxCommitTime, PreparedTxs, InMemoryStore) of
-        true -> %% The prepared value was made speculative and it is true
-            update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, PreparedTxs, SpeculaDep);
-        false -> %% There is no speculative version
+    case ets:lookup(PreparedTxs, Key) of
+        [{Key, {TxId, PrepareTime, _Type, _Op}}] ->
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
                     Init = Type:new(),
@@ -694,8 +690,12 @@ update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemor
                     {ok, NewSnapshot} = Type:update(Param, Actor, First),
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}|RemainList]})
             end,
-            clean_prepared(PreparedTxs, Key, TxId),
-            update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, PreparedTxs, SpeculaDep)
+            update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, PreparedTxs, SpeculaDep, PrepareTime);
+        [{Key, {TxId, PrepareTime, SpeculaValue}}] ->
+            ets:delete(PreparedTxs, Key),
+            specula_utilities:make_specula_version_final(Key, TxCommitTime, SpeculaValue, InMemoryStore),
+            update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, PreparedTxs, SpeculaDep, PrepareTime);
+        _ ->
+            lager:warning("My prepared record disappeard!")
     end.
-    %% Check if any txn depends on this version
 
