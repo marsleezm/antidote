@@ -89,7 +89,7 @@ make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore) ->
                             generate_snapshot(Snapshot, Type, Param, Actor)
                     end,
     true = ets:insert(PreparedTxs, {Key, {TxId, PrepareTime, SpeculaValue}}),
-    {TxId, {Type, SpeculaValue}}.
+    {TxId, SpeculaValue}.
 
 
 %%%%%%%%%%%%%%%%  Private function %%%%%%%%%%%%%%%%%
@@ -247,12 +247,12 @@ make_prepared_specula_test() ->
 
     ets:insert(PreparedTxs, {Key, whatever}),   
     Result1 = make_prepared_specula(Key, Record1, PreparedTxs, InMemoryStore),
-    ?assertEqual(Result1, {TxId1, {Type, Counter1}}),
+    ?assertEqual(Result1, {TxId1, Counter1}),
 
     ets:insert(InMemoryStore, {Key, [{200, Counter1}]}),   
     ets:delete(PreparedTxs, Key),   
     Result2 = make_prepared_specula(Key, Record1, PreparedTxs, InMemoryStore), 
-    ?assertEqual(Result2, {TxId1, {Type, Counter2}}),
+    ?assertEqual(Result2, {TxId1, Counter2}),
 
     ets:delete(PreparedTxs),
     ets:delete(InMemoryStore),

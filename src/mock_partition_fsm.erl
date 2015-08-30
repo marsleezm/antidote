@@ -104,12 +104,12 @@ read_data_item(_IndexNode, Key, _Type, TxId) ->
             Counter = riak_dt_gcounter:new(),
             {ok, Counter1} = riak_dt_gcounter:update(increment, haha, Counter),
             {ok, Counter2} = riak_dt_gcounter:update(increment, nono, Counter1),
-            {ok, {riak_dt_gcounter,Counter2}};
+            {ok, Counter2};
         {counter, _} ->
             Counter = riak_dt_gcounter:new(),
             {ok, Counter1} = riak_dt_gcounter:update(increment, haha, Counter),
             {ok, Counter2} = riak_dt_gcounter:update(increment, nono, Counter1),
-            {ok, {riak_dt_gcounter,Counter2}};
+            {ok, Counter2};
         {specula, _, Delay} -> %% Assume this txn depends on some other transaction
             Counter = riak_dt_gcounter:new(),
             {ok, Counter1} = riak_dt_gcounter:update(increment, haha, Counter),
@@ -117,17 +117,17 @@ read_data_item(_IndexNode, Key, _Type, TxId) ->
             Sender = self(),
             spawn(fun() -> timer:sleep(Delay), 
                     gen_fsm:send_event(Sender, {read_valid, TxId, 0}) end),
-            {specula, {riak_dt_gcounter,Counter2}};
+            {specula, Counter2};
         set ->
             Set = riak_dt_gset:new(),
             {ok, Set1} = riak_dt_gset:update({add, a}, haha, Set),
-            {ok, {riak_dt_gset,Set1}}; 
+            {ok, Set1}; 
         {set, _} ->
             Set = riak_dt_gset:new(),
             {ok, Set1} = riak_dt_gset:update({add, a}, haha, Set),
-            {ok, {riak_dt_gset,Set1}}; 
+            {ok, Set1}; 
         _ ->
-            {ok, {mock_partition_fsm,mock_value}}
+            {ok, mock_value}
     end.
 
 generate_downstream_op(_Transaction, _IndexNode, Key, _Type, _Param) ->

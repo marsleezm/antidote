@@ -144,7 +144,6 @@ start_processing(timeout, SD) ->
 process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,
         all_txn_ops=AllTxnOps, current_txn_index=CurrentTxnIndex, num_txns=NumTxns}) ->
     TxId = tx_utilities:create_transaction_record(CausalClock),
-    %lager:info("My Tx id is ~w", [TxId]),
     case NumTxns of
         0 ->
             proceed_txn(SD#state{prepare_time=TxId#tx_id.snapshot_time});
@@ -196,7 +195,6 @@ receive_reply({_Type, CurrentTxId, Param},
     %io:format(user, "Got something ~w for ~w, is current!~n", [Type, CurrentTxId]),
     case can_commit(NumToPrepare1, NumCommittedTxn, CurrentTxnIndex) of
         true ->
-            %lager:info("Current ~w committed ~w", [CurrentTxId, CurrentTxnIndex]),
             %case Type of
             %    read_valid ->
             %        lager:info("Current ~w can commit! Index is ~w",[CurrentTxId, CurrentTxnIndex]);
@@ -346,7 +344,6 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
             %io:format(user, "Finishing txn ~w ~n", [NumTxns]),
             AllReadSet = get_readset(TxIdList, SpeculaMeta, []),
             AllReadSet1 = [ReadSet|AllReadSet],
-            %lager:info("Transaction finished, commit time ~w",[MaxPrepTime]),
             From ! {ok, {TxId, lists:reverse(lists:flatten(AllReadSet1)), 
                 MaxPrepTime}},
             {stop, normal, S0};
@@ -416,18 +413,18 @@ process_operations(TxId, [{read, Key, Type}|Rest], UpdatedParts, RSet, Buffer, R
                         IndexNode = hd(Preflist),
                         ?CLOCKSI_VNODE:read_data_item(IndexNode, Key, Type, TxId);
                     {ok, SnapshotState} ->
-                        {ok, {Type,SnapshotState}}
+                        {ok, SnapshotState}
             end,
     %%%%lager:info("Read got reply ~w",[Reply]),
     {NewReadDep, CanCommit1} = case Reply of
-                                    {specula, {_Type, _Snapshot}} ->
+                                    {specula, _Snapshot} ->
                                         %lager:info("~w: ~w speculative", [TxId, Key]),
                                         {ReadDep+1, false};
                                     _ ->
                                         {ReadDep, CanCommit}
                                end,
-    %%io:format(user, "~nType is ~w, Key is ~w~n",[Type, Key]),
-    {_, {Type, KeySnapshot}} = Reply,
+    {_, KeySnapshot} = Reply,
+    %io:format(user, "~nType is ~w, Key is ~w, Snapshot is ~w, ~n",[Type, Key, KeySnapshot]),
     Buffer1 = dict:store(Key, KeySnapshot, Buffer),
     process_operations(TxId, Rest, UpdatedParts, 
             [Type:value(KeySnapshot)|RSet], Buffer1, NewReadDep, CanCommit1);
