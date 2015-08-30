@@ -357,7 +357,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
     %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     %Tables = PreparedTxs, %{PreparedTxs, InMemoryStore, SpeculaStore, SpeculaDep},
     Result = prepare(TxId, WriteSet, CommittedTx, PreparedTxs, IfCertify),
-    %%lager:info("Tx ~w: for key ~w prep res is ~w",[TxId, WriteSet, Result]),
+    %lager:info("Tx ~w: for key ~w prep res is ~w",[TxId, WriteSet, Result]),
     case Result of
         {ok, PrepareTime} ->
             UsedTime = now_microsec(erlang:now()) - PrepareTime,
@@ -676,7 +676,7 @@ update_and_clean([], _TxId, TxCommitTime, _, _, _, PrepareTime) ->
     TxCommitTime-PrepareTime;
 update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemoryStore, 
                 PreparedTxs, SpeculaDep, _) ->
-    %%lager:info("Storing key ~w for ~w",[Key, TxId]),
+    %lager:info("Storing key ~w for ~w",[Key, TxId]),
     case ets:lookup(PreparedTxs, Key) of
         [{Key, {TxId, PrepareTime, _Type, _Op}}] ->
             case ets:lookup(InMemoryStore, Key) of
