@@ -212,7 +212,7 @@ print_stat() ->
 
 print_stat([], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56, Acc6, Acc7}) ->
     lager:info("In total: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, specula read ~w, avg diff ~w, prepare time ~w",
-                [Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56 div Acc1, Acc6 div Acc7]);
+                [Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56 div max(1,Acc1), Acc6 div max(1,Acc7)]);
 print_stat([{Partition,Node}|Rest], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56, Acc6, Acc7}) ->
     {Add1, Add2, Add3, Add4, Add5, Add55, Add56, Add6, Add7} = riak_core_vnode_master:sync_command({Partition,Node},
 						            {print_stat},
@@ -272,7 +272,7 @@ handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, prepared_
 
 handle_command({print_stat},_Sender,SD0=#state{num_committed=A1, num_aborted=A2, num_cert_fail=A3, num_specula_read=A55, 
          committed_diff=A56, num_read_invalid=A4, num_read_abort=A5, total_time=A6, prepare_count=A7, partition=Partition}) ->
-    lager:info("~w: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, num specularead ~w, avg diff ~w, ~w, ~w", [Partition, A1, A2, A3, A4, A5, A55, A56 div A1, A6, A7]),
+    lager:info("~w: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, num specularead ~w, avg diff ~w, ~w, ~w", [Partition, A1, A2, A3, A4, A5, A55, A56 div max(1, A1), A6, A7]),
     {reply, {A1, A2, A3, A4, A5, A55, A56, A6, A7}, SD0};
 
 handle_command({check_tables_ready},_Sender,SD0=#state{partition=Partition}) ->
