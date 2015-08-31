@@ -18,7 +18,7 @@
 %%
 %% -------------------------------------------------------------------
 -module(specula_utilities).
--define(SPECULA_TIMEOUT, 800).
+-define(SPECULA_TIMEOUT, 1500).
 
 -include("include/speculation.hrl").
 -include("include/antidote.hrl").
