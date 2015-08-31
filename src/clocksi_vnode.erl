@@ -272,8 +272,8 @@ handle_command({check_tables_empty},_Sender,SD0=#state{specula_dep=S1, prepared_
 
 handle_command({print_stat},_Sender,SD0=#state{num_committed=A1, num_aborted=A2, num_cert_fail=A3, num_specula_read=A55, 
          committed_diff=A56, num_read_invalid=A4, num_read_abort=A5, total_time=A6, prepare_count=A7, partition=Partition}) ->
-    lager:info("~w: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, avg diff ~w, specula read ~w, ~w, ~w", [Partition, A1, A2, A3, A4, A5, A56 div A1, A55, A6, A7]),
-    {reply, {A1, A2, A3, A4, A5, A56, A55, A6, A7}, SD0};
+    lager:info("~w: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, num specularead ~w, avg diff ~w, ~w, ~w", [Partition, A1, A2, A3, A4, A5, A55, A56 div A1, A6, A7]),
+    {reply, {A1, A2, A3, A4, A5, A55, A56, A6, A7}, SD0};
 
 handle_command({check_tables_ready},_Sender,SD0=#state{partition=Partition}) ->
     Result = case ets:info(get_cache_name(Partition,prepared)) of
