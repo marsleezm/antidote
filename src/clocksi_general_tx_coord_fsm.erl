@@ -192,10 +192,8 @@ receive_reply({_Type, CurrentTxId, Param},
     %    _ ->
     %        ok
     %end,
-    lager:info("Got for current txn ~w", [CurrentTxId]),
     case can_commit(NumToPrepare1, NumCommittedTxn, CurrentTxnIndex) of
         true ->
-            lager:info("Can commit current txn"),
             %case Type of
             %    read_valid ->
             %        lager:info("Current ~w can commit! Index is ~w",[CurrentTxId, CurrentTxnIndex]);
@@ -206,7 +204,6 @@ receive_reply({_Type, CurrentTxId, Param},
                         PrepareTime1),
             proceed_txn(S0#state{num_committed_txn=NumCommittedTxn+1, prepare_time=PrepareTime1});
         false ->
-            lager:info("Can not commit current txn"),
             %case Type of
             %    read_valid ->
             %        lager:info("Current ~w can not commit! Index is ~w, num to prepare is ~w",[CurrentTxId, CurrentTxnIndex, NumToPrepare1]);
@@ -240,17 +237,14 @@ receive_reply({_Type, TxId, Param},
     %end,
     case dict:find(TxId, SpeculaMeta) of
         {ok, TxnMeta} ->
-            lager:info("Got of previous tx ~w", [TxId]),
             %io:format(user, "Got something ~w for ~w, num_committed txn is ~w, not current!~n", [Type, TxId, NumCommittedTxn]),
             PrepareTime1 = max(TxnMeta#txn_metadata.prepare_time, Param), 
             NumToPrepare1 = TxnMeta#txn_metadata.num_to_prepare - 1,
             TxnMeta1 = TxnMeta#txn_metadata{prepare_time=PrepareTime1, num_to_prepare=NumToPrepare1},
             case can_commit(NumToPrepare1, NumCommittedTxn, TxnMeta1#txn_metadata.index) of
                 true -> 
-                    lager:info("Can commit previous txn"),
                     NewNumCommitted = 
                             cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta, TxIdList),
-                    lager:info("Trying to cascading commit! ~w ~n", [TxId]),
                     %case Type of
                     %    read_valid ->
                     %        lager:info("~w: can commit! Old num is ~w, New num is ~w",[TxId, NumCommittedTxn, NewNumCommitted]);
@@ -276,7 +270,6 @@ receive_reply({_Type, TxId, Param},
                                 S0#state{num_committed_txn=NewNumCommitted}} 
                     end;
                 false ->
-                    lager:info("Can not commit previous txn"),
                     %case Type of
                     %    read_valid ->
                     %        lager:info("~w can not commit! Index is ~w, num to prepare is ~w, num_committed is ~w",[TxId, TxnMeta1#txn_metadata.index, TxnMeta1#txn_metadata.num_to_prepare, NumCommittedTxn]);

@@ -690,6 +690,7 @@ update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemor
                     {ok, NewSnapshot} = Type:update(Param, Actor, First),
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}|RemainList]})
             end,
+            ets:delete(PreparedTxs, Key),
             update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, PreparedTxs, SpeculaDep, PrepareTime);
         [{Key, {TxId, PrepareTime, SpeculaValue}}] ->
             ets:delete(PreparedTxs, Key),
