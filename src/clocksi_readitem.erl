@@ -62,6 +62,7 @@ check_prepared(Key, MyTxId, Tables) ->
                             lager:info("Specula and read, reader TxId ~w, PrepareTime is ~w, Key ~w",[MyTxId, PrepareTime, Key]), 
                             specula_utilities:speculate_and_read(Key, MyTxId, {PrepareTxId, PrepareTime, Type, Op}, Tables);
                         false ->
+                            lager:info("Speculation fail"),
                             {not_ready, 2}
                     end;
                 false ->
@@ -74,6 +75,7 @@ check_prepared(Key, MyTxId, Tables) ->
                     specula_utilities:add_specula_meta(SpeculaDep, SpeculaTxId, MyTxId, Key),
                     {specula, SpeculaValue};
                 false ->
+                    lager:info("Speculation fail"),
                     {not_ready, 2}
             end
     end.
