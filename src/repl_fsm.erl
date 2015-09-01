@@ -44,8 +44,9 @@
 -export([replicate/2,
         retrieve_log/2,
         quorum_replicate/3,
-        chain_replicate/5,
-        repl_ack/2]).
+        chain_replicate/6,
+        send_after/3,
+        repl_ack/3]).
 
 %% Spawn
 
@@ -57,6 +58,7 @@
         successors :: [atom()],
         replicated_log :: cache_id(),
         pending_log :: cache_id(),
+        delay :: non_neg_integer(),
 		self :: atom()}).
 
 %%%===================================================================
@@ -70,17 +72,21 @@ start_link(Partition) ->
 replicate(Partition, LogContent) ->
     gen_server:cast({global, get_replfsm_name(Partition)}, {replicate, LogContent}).
 
-quorum_replicate(Partitions, MyPartition, Log) ->
-    lists:foreach(fun(Partition) -> 
-                    gen_server:cast({global, Partition}, 
-                    {quorum_replicate, MyPartition, Log}) end, Partitions).
+quorum_replicate(Fsms, MyPartition, Log) ->
+    lists:foreach(fun(ReplFsm) -> 
+                    gen_server:cast({global, ReplFsm}, {quorum_replicate, MyPartition, Log}) 
+                    end, Fsms).
 
-chain_replicate(Partition, LogPartition, Log, MsgToReply, RepNeeded) ->
-    gen_server:cast({global, Partition}, 
-            {chain_replicate, LogPartition, Log, MsgToReply, RepNeeded}).
+chain_replicate(0, ReplFsm, LogPartition, Log, MsgToReply, RepNeeded) ->
+    gen_server:cast({global, ReplFsm}, {chain_replicate, LogPartition, Log, MsgToReply, RepNeeded});
+chain_replicate(Delay, ReplFsm, LogPartition, Log, MsgToReply, RepNeeded) ->
+    spawn(repl_fsm, send_after, [Delay, {global, ReplFsm}, 
+        {chain_replicate, LogPartition, Log, MsgToReply, RepNeeded}]).
 
-repl_ack(Partition, Reply) ->
-    gen_server:cast({global, get_replfsm_name(Partition)}, {repl_ack, Reply}).
+repl_ack(0, Fsm, Reply) ->
+    gen_server:cast({global, Fsm}, {repl_ack, Reply});
+repl_ack(Delay, Fsm, Reply) ->
+    spawn(repl_fsm, send_after, [Delay, {global, Fsm}, {repl_ack, Reply}]).
 
 retrieve_log(Partition, LogName) ->
     gen_server:call({global, get_replfsm_name(Partition)}, {retrieve_log, LogName}).
@@ -94,6 +100,7 @@ init([Partition]) ->
     Quorum = antidote_config:get(quorum),
     LogSize = antidote_config:get(log_size),
     Mode = antidote_config:get(mode),
+    Delay = antidote_config:get(delay),
     Successors = [get_replfsm_name(Index) || {Index, _Node} <- log_utilities:get_my_next(Partition, ReplFactor-1)],
     ReplicatedLog = clocksi_vnode:open_table(Partition, repl_log),
     PendingLog = clocksi_vnode:open_table(Partition, pending_log),
@@ -103,6 +110,7 @@ init([Partition]) ->
                 mode = Mode,
                 successors = Successors,
                 pending_log = PendingLog,
+                delay = Delay,
                 replicated_log = ReplicatedLog}}.
 
 handle_call({retrieve_log, LogName},  _Sender,
@@ -124,7 +132,6 @@ handle_cast({replicate, LogContent},
     {RecordType, Sender, MsgToReply, Record} = PendingRecord,
     case Mode of 
         quorum ->
-            %lager:info("Replicating ~w ~w to ~w, waiting for ~w replies", [TxId, Record, Successors, Quorum-1]),
             ets:insert(PendingLog, {TxId, PendingRecord, Quorum-1}),
             quorum_replicate(Successors, Partition, {RecordType, {TxId, Record}});
         chain ->
@@ -135,52 +142,13 @@ handle_cast({replicate, LogContent},
                                         lists:sublist(Result, LogSize)
                         end,
             ets:insert(ReplicatedLog, {Partition, [{TxId, Record}|DurableLog]}),
-            chain_replicate(hd(Successors), Partition, {TxId, Record}, {Sender, MsgToReply}, Quorum-1)
+            chain_replicate(0, hd(Successors), Partition, {TxId, Record}, {Sender, MsgToReply}, Quorum-1)
     end,
     {noreply, SD0};
 
-handle_cast({quorum_replicate, PrimaryPart, Log}, 
-	    SD0=#state{replicated_log=ReplicatedLog, log_size=LogSize, partition=_Partition}) ->
-    {Type, {TxId, Record}} = Log,
-    %lager:info("~w: Replicating ~w from ~w", [Partition, Log, PrimaryPart]),
-    DurableLog = case ets:lookup(ReplicatedLog, PrimaryPart) of
-                                            [] ->
-                                                [];
-                                            [{PrimaryPart, Result}] ->
-                                                lists:sublist(Result, LogSize)
-                                        end,
-    %lager:info("Got log, replying.."),
-    ets:insert(ReplicatedLog, {PrimaryPart, [{TxId, Record}|DurableLog]}),
-    repl_ack(PrimaryPart, {Type,TxId}),
-    %lager:info("~w: Replied", [Partition]),
-    {noreply, SD0};
-
-handle_cast({chain_replicate, Partition, Log, MsgToReply, RepNeeded}, 
-	    SD0=#state{replicated_log=ReplicatedLog, successors=Successors, log_size=LogSize}) ->
-    DurableLog = case ets:lookup(ReplicatedLog, Partition) of
-                            [] ->
-                                [];
-                            [{Partition, Result}] ->
-                                lists:sublist(Result, LogSize)
-                end,
-    ets:insert(ReplicatedLog, {Partition, [Log|DurableLog]}),
-    case RepNeeded of
-        1 ->
-            {{fsm, undefined, FSMSender}, Msg} = MsgToReply,
-            case Msg of
-                false ->
-                    ok;
-                _ ->
-                    gen_fsm:send_event(FSMSender, Msg)
-            end;
-        _ ->
-            chain_replicate(hd(Successors), Partition, Log, MsgToReply, RepNeeded-1)
-    end,
-    {noreply, SD0};
 
 handle_cast({repl_ack, {Type, TxId}}, SD0=#state{replicated_log=ReplicatedLog,
             partition=Partition, pending_log=PendingLog, log_size=LogSize}) ->
-    %lager:info("part ~w: Got reply from ~w for ~w, ~w", [Partition, PartSender, Type, TxId]),
     case ets:lookup(PendingLog, TxId) of
         [{TxId, {RecordType, Sender, MsgToReply, Record}, AckNeeded}] ->
             case Type of
@@ -195,7 +163,6 @@ handle_cast({repl_ack, {Type, TxId}}, SD0=#state{replicated_log=ReplicatedLog,
                                         end,
                             ets:insert(ReplicatedLog, {Partition, [{TxId, Record}|DurableLog]}),
                             ets:delete(PendingLog, TxId),
-                            %lager:info("#DONE#Sending ~p to ~p of ~p, Record is ~p", [Sender, MsgToReply, TxId, Record]),
                             {fsm, undefined, FSMSender} = Sender,
                             case MsgToReply of
                                 false ->
@@ -212,10 +179,46 @@ handle_cast({repl_ack, {Type, TxId}}, SD0=#state{replicated_log=ReplicatedLog,
                     ok
             end;
         [] -> %%The record is appended already, do nothing
-            %lager:info("No need to do anything ~p", [_SomeRecord]),
             ok
     end,
     {noreply, SD0};
+
+handle_cast({quorum_replicate, PrimaryPart, Log}, 
+	    SD0=#state{replicated_log=ReplicatedLog, log_size=LogSize, partition=_Partition, delay=Delay}) ->
+    %lager:info("Quorum got msg"),
+    {Type, {TxId, Record}} = Log,
+    DurableLog = case ets:lookup(ReplicatedLog, PrimaryPart) of
+                                            [] ->
+                                                [];
+                                            [{PrimaryPart, Result}] ->
+                                                lists:sublist(Result, LogSize)
+                                        end,
+    ets:insert(ReplicatedLog, {PrimaryPart, [{TxId, Record}|DurableLog]}),
+    repl_ack(Delay, get_replfsm_name(PrimaryPart), {Type,TxId}),
+    {noreply, SD0};
+
+handle_cast({chain_replicate, Partition, Log, MsgToReply, RepNeeded},
+        SD0=#state{replicated_log=ReplicatedLog, successors=Successors, log_size=LogSize, delay=Delay}) ->
+    DurableLog = case ets:lookup(ReplicatedLog, Partition) of
+                              [] ->
+                                  [];
+                              [{Partition, Result}] ->
+                                  lists:sublist(Result, LogSize)
+                  end,
+    ets:insert(ReplicatedLog, {Partition, [Log|DurableLog]}),
+    case RepNeeded of
+        1 ->
+            {{fsm, undefined, FSMSender}, Msg} = MsgToReply,
+            case Msg of
+                false ->
+                    ok;
+                _ ->
+                    gen_fsm:send_event(FSMSender, Msg)
+            end;
+        _ ->
+            chain_replicate(Delay, hd(Successors), Partition, Log, MsgToReply, RepNeeded-1)
+      end,
+     {noreply, SD0};
 
 handle_cast(_Info, StateData) ->
     {noreply,StateData}.
@@ -234,23 +237,10 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 terminate(_Reason, _SD) ->
     ok.
 
-%open_local_tables([], Dict) ->
-%    Dict;
-%open_local_tables([{Part, Node}|Rest], Dict) ->
-%    try
-%    Tab = ets:new(int_to_atom(Part),
-%            [set,?TABLE_CONCURRENCY]),
-%    NewDict = dict:store(Part, Tab, Dict),
-%    open_local_tables(Rest, NewDict)
-%    catch
-%    _:_Reason ->
-%        lager:info("Error opening table..."),
-%        %% Someone hasn't finished cleaning up yet
-%        open_local_tables([{Part, Node}|Rest], Dict)
-%    end.
-
-%int_to_atom(Int) ->
-%    list_to_atom(integer_to_list(Int)).
-
 get_replfsm_name(Partition) ->
     list_to_atom(atom_to_list(repl_fsm)++integer_to_list(Partition)).
+
+send_after(Delay, To, Msg) ->
+    timer:sleep(Delay),
+    %lager:info("Sending info after ~w", [Delay]),
+    gen_server:cast(To, Msg).

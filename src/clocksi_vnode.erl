@@ -80,6 +80,8 @@
                 specula_dep :: cache_id(),
                 inmemory_store :: cache_id(),
 
+                specula_timeout :: non_neg_integer(),
+
                 total_time :: non_neg_integer(),
                 prepare_count :: non_neg_integer(),
                 num_committed :: non_neg_integer(),
@@ -166,6 +168,7 @@ init([Partition]) ->
     
     IfCertify = antidote_config:get(do_cert),
     IfReplicate = antidote_config:get(do_repl),
+    SpeculaTimeout = antidote_config:get(specula_timeout),
 
     _ = case IfReplicate of
                     true ->
@@ -181,6 +184,7 @@ init([Partition]) ->
                 if_replicate = IfReplicate,
                 specula_dep=SpeculaDep,
                 inmemory_store=InMemoryStore,
+                specula_timeout=SpeculaTimeout,
                 total_time=0, prepare_count=0, num_specula_read=0, committed_diff=0,
                 num_committed=0, num_cert_fail=0, num_aborted=0, num_read_invalid=0, num_read_abort=0}}.
 
@@ -298,12 +302,12 @@ handle_command({check_servers_ready},_Sender,SD0) ->
     {reply, true, SD0};
 
 handle_command({read, Key, Type, TxId}, Sender, SD0=#state{num_specula_read=NumSpeculaRead,
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, 
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_timeout=SpeculaTimeout, 
             specula_dep=SpeculaDep, partition=Partition}) ->
     Tables = {PreparedTxs, InMemoryStore, SpeculaDep},
     %tx_utilities:update_ts(TxId#tx_id.snapshot_time),
     clock_service:update_ts(TxId#tx_id.snapshot_time),
-    case clocksi_readitem:check_prepared(Key, TxId, Tables) of
+    case clocksi_readitem:check_prepared(Key, TxId, Tables, SpeculaTimeout) of
         {not_ready, Delay} ->
             spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
                          Sender}, {Partition, node()}]),
@@ -318,13 +322,13 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{num_specula_read=NumS
     end;
 
 handle_command({async_read, Key, Type, TxId, OrgSender}, _Sender,SD0=#state{num_specula_read=NumSpeculaRead,
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, 
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_timeout=SpeculaTimeout, 
             specula_dep=SpeculaDep, partition=Partition}) ->
     %%lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
     %tx_utilities:update_ts(TxId#tx_id.snapshot_time),
     clock_service:update_ts(TxId#tx_id.snapshot_time),
     Tables = {PreparedTxs, InMemoryStore, SpeculaDep},
-    case clocksi_readitem:check_prepared(Key, TxId, Tables) of
+    case clocksi_readitem:check_prepared(Key, TxId, Tables, SpeculaTimeout) of
         {not_ready, Delay} ->
             spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
                          OrgSender}, {Partition, node()}]),

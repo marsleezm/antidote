@@ -18,7 +18,6 @@
 %%
 %% -------------------------------------------------------------------
 -module(specula_utilities).
--define(SPECULA_TIMEOUT, 100000).
 
 -include("include/speculation.hrl").
 -include("include/antidote.hrl").
@@ -30,7 +29,7 @@
 -define(SEND_MSG(PID, MSG),  gen_fsm:send_event(PID, MSG)).
 -endif.
 
--export([should_specula/2, make_prepared_specula/4, speculate_and_read/4, 
+-export([should_specula/3, make_prepared_specula/4, speculate_and_read/4, 
             coord_should_specula/1, make_specula_version_final/4, add_specula_meta/4,
             finalize_dependency/5]).
 
@@ -61,8 +60,8 @@ make_specula_version_final(Key, TxCommitTime, SpeculaValue, InMemoryStore) ->
     end.
 
 
-should_specula(PreparedTime, SnapshotTime) ->
-    SnapshotTime - ?SPECULA_TIMEOUT > PreparedTime.
+should_specula(PreparedTime, SnapshotTime, SpeculaTimeout) ->
+    SnapshotTime - PreparedTime > SpeculaTimeout.
     %case SnapshotTime - ?SPECULA_TIMEOUT > PreparedTime of
     %    false ->
     %        NowTime = tx_utilities:get_ts(),
