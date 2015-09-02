@@ -58,8 +58,7 @@
          terminate/3]).
 
 %% States
--export([
-         start_processing/2,
+-export([start_execute_txns/2,
          finish_op/3,
          receive_reply/2,
          single_committing/2]).
@@ -133,12 +132,12 @@ init([From, ClientClock, Txns]) ->
             from = From
            },
     %%io:format(user, "Sending msg to myself ~w, from is ~w~n", [Self, From]),
-    {ok, start_processing, SD, 0}.
+    {ok, start_execute_txns, SD, 0}.
 
 %% @doc Contact the leader computed in the prepare state for it to execute the
 %%      operation, wait for it to finish (synchronous) and go to the prepareOP
 %%       to execute the next operation.
-start_processing(timeout, SD) ->
+start_execute_txns(timeout, SD) ->
     process_txs(SD).
 
 process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn,

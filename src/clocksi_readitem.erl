@@ -28,25 +28,7 @@
 
 
 %% States
--export([return/4,
-        check_prepared/4]).
-
-
-%% @doc check_clock: Compares its local clock with the tx timestamp.
-%%      if local clock is behind, it sleeps the fms until the clock
-%%      catches up. CLOCK-SI: clock skew.
-%check_clock(Key,TxId, Tables) ->
-%    T_TS = TxId#tx_id.snapshot_time,
-%    Time = clocksi_vnode:now_microsec(erlang:now()),
-%    case T_TS > Time of
-%        true ->
-	    %% dont sleep in case there is another read waiting
-            %% timer:sleep((T_TS - Time) div 1000 +1 );
-        %%lager:info("Clock not ready"),
-%	        {not_ready, 2};
-%        false ->
-%	        check_prepared(Key,TxId, Tables)
-%    end.
+-export([check_prepared/4, return/4]).
 
 check_prepared(Key, MyTxId, Tables, SpeculaTimeout) ->
     SnapshotTime = MyTxId#tx_id.snapshot_time,
@@ -59,7 +41,6 @@ check_prepared(Key, MyTxId, Tables, SpeculaTimeout) ->
                 true ->
                     case specula_utilities:should_specula(PrepareTime, SnapshotTime, SpeculaTimeout) of
                         true ->
-                            %lager:info("Specula and read, reader TxId ~w, PrepareTime is ~w, Key ~w",[MyTxId, PrepareTime, Key]), 
                             specula_utilities:speculate_and_read(Key, MyTxId, {PrepareTxId, PrepareTime, Type, Op}, Tables);
                         false ->
                             {not_ready, 2}
@@ -70,7 +51,6 @@ check_prepared(Key, MyTxId, Tables, SpeculaTimeout) ->
         [{Key, {SpeculaTxId, PrepareTime, SpeculaValue}}] ->
             case specula_utilities:should_specula(PrepareTime, SnapshotTime, SpeculaTimeout) of
                 true ->
-                    %lager:info("Specula and read, TxId ~w, PrepareTime is ~w, Key ~w",[SpeculaTxId, PrepareTime, Key]), 
                     specula_utilities:add_specula_meta(SpeculaDep, SpeculaTxId, MyTxId, Key),
                     {specula, SpeculaValue};
                 false ->
@@ -81,7 +61,6 @@ check_prepared(Key, MyTxId, Tables, SpeculaTimeout) ->
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
 return(Key, Type, TxId, InMemoryStore) ->
-    %%lager:info("Returning for key ~w",[Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(InMemoryStore, Key) of
         [] ->

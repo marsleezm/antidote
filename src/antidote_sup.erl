@@ -79,9 +79,9 @@ init(_Args) ->
     		      [repl_fsm_sup]},
 
     ClockService = {clock_service,
-                         {clock_service,  start_link,
-                          []},
-                         permanent, 5000, worker, [clock_service]},
+                    {clock_service,  start_link,
+                    []},
+                    permanent, 5000, worker, [clock_service]},
 
     antidote_config:load("antidote.config"),
 
