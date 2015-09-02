@@ -21,51 +21,20 @@
 
 -include("antidote.hrl").
 
+
 -ifdef(TEST).
--define(CLOCK_SERVICE, tx_utilities).
--define(GET_MAX_TS(APP, KEY), {ok, clocksi_vnode:now_microsec(now())}).
+-define(GET_AND_UPDATE_TS(_), clocksi_vnode:now_microsec(now())).
 -else.
--define(CLOCK_SERVICE, clock_service).
--define(GET_MAX_TS(APP, KEY), application:get_env(APP, KEY)).
+-define(GET_AND_UPDATE_TS(Clock), clock_service:get_and_update_ts(Clock)).
 -endif.
 
--export([create_transaction_record/1, update_ts/1, get_and_update_ts/1, increment_ts/1, get_ts/0]).
+-export([create_transaction_record/1]).
 
 -spec create_transaction_record(snapshot_time() | ignore) -> txid().
 create_transaction_record(ClientClock) ->
     %% Seed the random because you pick a random read server, this is stored in the process state
     {A1,A2,A3} = now(),
+    _A = ClientClock,
     _ = random:seed(A1, A2, A3),
-    TransactionId = #tx_id{snapshot_time=?CLOCK_SERVICE:get_and_update_ts(ClientClock), server_pid=self()},
+    TransactionId = #tx_id{snapshot_time=?GET_AND_UPDATE_TS(ClientClock), server_pid=self()},
     TransactionId.
-
--spec get_and_update_ts(non_neg_integer()) -> non_neg_integer().
-get_and_update_ts(CausalTS) ->
-    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
-    Now = clocksi_vnode:now_microsec(now()),
-    Max2 = max(CausalTS, max(Now, TS)) + 1,
-    application:set_env(antidote, max_ts, Max2),
-    Max2.
-
--spec update_ts(non_neg_integer()) -> non_neg_integer().
-update_ts(SnapshotTS) ->
-    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
-    case TS >= SnapshotTS of
-        true ->
-            TS;
-        false ->
-            application:set_env(antidote, max_ts, SnapshotTS),
-            SnapshotTS
-    end.
-
--spec increment_ts(non_neg_integer()) -> non_neg_integer().
-increment_ts(SnapshotTS) ->
-    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
-    NewTS = max(SnapshotTS, TS) + 1,
-    application:set_env(antidote, max_ts, NewTS),
-    NewTS.
-
--spec get_ts() -> non_neg_integer().
-get_ts() ->
-    {ok, TS} = ?GET_MAX_TS(antidote, max_ts),
-    max(clocksi_vnode:now_microsec(now()), TS).
