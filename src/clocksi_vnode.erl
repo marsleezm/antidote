@@ -215,8 +215,10 @@ print_stat() ->
     print_stat(PartitionList, {0,0,0,0,0,0,0,0,0}).
 
 print_stat([], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56, Acc6, Acc7}) ->
+
     lager:info("In total: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, specula read ~w, avg diff ~w, prepare time ~w",
-                [Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56 div max(1,Acc1), Acc6 div max(1,Acc7)]);
+                [Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56 div max(1,Acc1), Acc6 div max(1,Acc7)]),
+    {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56, Acc6, Acc7};
 print_stat([{Partition,Node}|Rest], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56, Acc6, Acc7}) ->
     {Add1, Add2, Add3, Add4, Add5, Add55, Add56, Add6, Add7} = riak_core_vnode_master:sync_command({Partition,Node},
 						            {print_stat},
