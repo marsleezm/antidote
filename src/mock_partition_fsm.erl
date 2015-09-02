@@ -167,6 +167,8 @@ execute_op({update_data_item, Key}, _From, State) ->
     case Key of 
         fail_update ->
             {reply, {error, mock_downstream_fail}, execute_op, State#state{key=Key}};
+        fail ->
+            {reply, {error, mock_downstream_fail}, execute_op, State#state{key=Key}};
         _ ->
             {reply, ok, execute_op, State#state{key=Key}}
     end.
@@ -182,6 +184,7 @@ execute_op({prepare, TxId, From, [{Key, _, _}]}, State) ->
         timeout -> gen_fsm:send_event(From, timeout);
         {wait, Delay} -> timer:sleep(Delay), gen_fsm:send_event(From, {prepared, TxId, Now});
         {abort, Delay} -> timer:sleep(Delay), gen_fsm:send_event(From, {abort, TxId});
+        fail -> gen_fsm:send_event(From, {abort, TxId});
         _ -> gen_fsm:send_event(From, {prepared, TxId, Now})
     end,
     {next_state, execute_op, State#state{key=Key}};
@@ -189,11 +192,11 @@ execute_op({prepare, TxId, From, [{Key, _, _}]}, State) ->
 execute_op({commit, _From}, State) ->
     {stop, normal, State};
 
-execute_op({single_commit, {From, _TxId, WriteSet}}, State) ->
+execute_op({single_commit, {From, TxId, WriteSet}}, State) ->
     [{Key, _, _}] = WriteSet,
     Result = case Key of 
                 success -> {committed, 10};
-                _ -> abort 
+                _ -> {abort, TxId} 
             end,
     gen_fsm:send_event(From, Result),
     {stop, normal, State}.

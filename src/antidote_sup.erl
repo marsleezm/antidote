@@ -56,23 +56,9 @@ stop_rep() ->
 %% ===================================================================
 
 init(_Args) ->
-    %LoggingMaster = {logging_vnode_master,
-    %                 {riak_core_vnode_master, start_link, [logging_vnode]},
-    %                 permanent, 5000, worker, [riak_core_vnode_master]},
-
     ClockSIMaster = { clocksi_vnode_master,
                       {riak_core_vnode_master, start_link, [clocksi_vnode]},
                       permanent, 5000, worker, [riak_core_vnode_master]},
-
-    %InterDcRepMaster = {inter_dc_repl_vnode_master,
-    %                    {riak_core_vnode_master, start_link,
-    %                     [inter_dc_repl_vnode]},
-    %                    permanent, 5000, worker, [riak_core_vnode_master]},
-
-    %InterDcRecvrMaster = { inter_dc_recvr_vnode_master,
-    %                       {riak_core_vnode_master, start_link,
-    %                        [inter_dc_recvr_vnode]},
-    %                       permanent, 5000, worker, [riak_core_vnode_master]},
 
     ClockSIsTxCoordSup =  { clocksi_static_tx_coord_sup,
                            {clocksi_static_tx_coord_sup, start_link, []},
@@ -97,36 +83,13 @@ init(_Args) ->
                           []},
                          permanent, 5000, worker, [clock_service]},
 
-    %MaterializerMaster = {materializer_vnode_master,
-    %                      {riak_core_vnode_master,  start_link,
-    %                       [materializer_vnode]},
-    %                      permanent, 5000, worker, [riak_core_vnode_master]},
-
-
-    %InterDcSenderSup = {inter_dc_communication_sender_fsm_sup,
-    %		      {inter_dc_communication_sender_fsm_sup, start_link, []},
-    %		      permanent, 5000, supervisor,
-    %		      [inter_dc_communication_sender_fsm_sup]},
-
     antidote_config:load("antidote.config"),
-    application:set_env(antidote, max_ts, 0),
-
-
-    %InterDcManager = {inter_dc_manager,
-    %                    {inter_dc_manager, start_link, []},
-    %                    permanent, 5000, worker, [inter_dc_manager]},
 
     {ok,
      {{one_for_one, 5, 10},
-      %[LoggingMaster,
       [ClockSIMaster,
        ClockSIsTxCoordSup,
        ClockSIiTxCoordSup,
        ClockSIgTxCoordSup,
        ReplFsmSup,
-       %InterDcRepMaster,
-       %InterDcRecvrMaster,
-       %InterDcManager,
        ClockService]}}.
-       %InterDcSenderSup,
-       %MaterializerMaster]}}.

@@ -1,4 +1,3 @@
-%%
 %% Copyright (c) 2014 SyncFree Consortium.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
@@ -21,6 +20,8 @@
 
 -include("antidote.hrl").
 -include_lib("eunit/include/eunit.hrl").
+
+-define(NUM_VERSION, 20).
 
 -export([start_vnode/1,
 	    read_data_item/4,
@@ -691,7 +692,7 @@ update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemor
                     {ok, NewSnapshot} = Type:update(Param, Actor, Init),
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}]});
                 [{Key, ValueList}] ->
-                    {RemainList, _} = lists:split(min(20,length(ValueList)), ValueList),
+                    {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
                     [{_CommitTime, First}|_] = RemainList,
                     {ok, NewSnapshot} = Type:update(Param, Actor, First),
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}|RemainList]})

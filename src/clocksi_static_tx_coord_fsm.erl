@@ -246,7 +246,7 @@ single_committing({committed, CommitTime}, S0=#state{from=_From, num_to_read=Num
                         commit_time=CommitTime}}
     end;
     
-single_committing(abort, S0=#state{from=_From}) ->
+single_committing({abort, _}, S0=#state{from=_From}) ->
     reply_to_client(S0#state{state=aborted}).
 
 %% @doc after receiving all prepare_times, send the commit message to all
@@ -328,5 +328,3 @@ code_change(_OldVsn, StateName, State, _Extra) -> {ok, StateName, State}.
 
 terminate(_Reason, _SN, _SD) ->
     ok.
-
-
