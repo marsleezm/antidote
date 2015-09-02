@@ -135,7 +135,7 @@ handle_dependency(NumInvalidRead, [{DepTxId=#tx_id{snapshot_time=DepSnapshotTime
     case DepSnapshotTime < TxCommitTime of
         true -> %% The transaction committed with larger timestamp which will invalide depending txns..
                 %% Has to abort...
-            lager:info("Invalid read! Snapshot time is ~w, commit time is ~w", [DepSnapshotTime, TxCommitTime]),
+            %lager:info("Invalid read! Snapshot time is ~w, commit time is ~w", [DepSnapshotTime, TxCommitTime]),
             ?SEND_MSG(CoordPid, {abort, DepTxId}),
             handle_dependency(NumInvalidRead+1, T, TxCommitTime);
         false ->
