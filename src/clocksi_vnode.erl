@@ -648,8 +648,8 @@ update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemor
             ets:delete(PreparedTxs, Key),
             specula_utilities:make_specula_version_final(Key, TxCommitTime, SpeculaValue, InMemoryStore),
             update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, PreparedTxs, SpeculaDep, PrepareTime);
-        _ ->
-            lager:warning("My prepared record disappeard!"),
+        Record ->
+            lager:warning("My prepared record disappeard! Record is ~w", [Record]),
             0
     end.
 
