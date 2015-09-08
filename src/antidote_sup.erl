@@ -80,9 +80,14 @@ init(_Args) ->
 
 
     ClockService = {clock_service,
-                 {clock_service,  start_link,
-                  []},
-                 permanent, 5000, worker, [clock_service]},
+                    {clock_service,  start_link,
+                    []},
+                    permanent, 5000, worker, [clock_service]},
+
+    StatServer = {stat_server,
+                    {stat_server,  start_link,
+                    []},
+                    permanent, 5000, worker, [stat_server]},
 
     antidote_config:load("antidote.config"),
 
@@ -93,4 +98,5 @@ init(_Args) ->
        ClockSIiTxCoordSup,
        ClockSIgTxCoordSup,
        ReplFsmSup,
-       ClockService]}}.
+       ClockService,
+       StatServer]}}.

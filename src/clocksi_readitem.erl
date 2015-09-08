@@ -29,19 +29,6 @@
 %% API
 -export([check_prepared/3, return/4]).
 
-
-%% Spawn
-
-
-%%%===================================================================
-%%% API
-%%%===================================================================
-
-%% @doc check_clock: Compares its local clock with the tx timestamp.
-%%      if local clock is behind, it sleeps the fms until the clock
-%%      catches up. CLOCK-SI: clock skew.
-%%
-
 check_prepared(Key,TxId,PreparedCache) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedCache, Key) of
@@ -59,24 +46,23 @@ check_prepared(Key,TxId,PreparedCache) ->
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
 return(Key, Type,TxId, SnapshotCache) ->
-    %lager:info("Returning for key ~w",[Key]),
     case ets:lookup(SnapshotCache, Key) of
         [] ->
-            {ok, {Type,Type:new()}};
+            {ok, Type:new()};
         [{Key, ValueList}] ->
             MyClock = TxId#tx_id.snapshot_time,
-            find_version(ValueList, MyClock, Type)
+            {ok, find_version(ValueList, MyClock, Type)}
     end.
 
 
 %%%%%%%%%Intenal%%%%%%%%%%%%%%%%%%
 find_version([], _SnapshotTime, Type) ->
     %{error, not_found};
-    {ok, {Type,Type:new()}};
+    Type:new();
 find_version([{TS, Value}|Rest], SnapshotTime, Type) ->
     case SnapshotTime >= TS of
         true ->
-            {ok, {Type,Value}};
+            Value;
         false ->
             find_version(Rest, SnapshotTime, Type)
     end.

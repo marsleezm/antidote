@@ -29,14 +29,12 @@
 	    get_cache_name/2,
         set_prepared/4,
         async_send_msg/3,
-        update_store/4,
 
-        check_prepared/3,
-        certification_check/5,
         prepare/2,
         commit/3,
         single_commit/2,
         abort/2,
+
         now_microsec/1,
         init/1,
         terminate/2,
@@ -45,6 +43,7 @@
         delete/1,
         open_table/2,
     
+        check_prepared/3,
 	    check_tables_ready/0,
 	    check_prepared_empty/0,
         print_stat/0]).
@@ -156,7 +155,6 @@ get_cache_name(Partition,Base) ->
 init([Partition]) ->
     PreparedTxs = open_table(Partition, prepared),
     CommittedTx = dict:new(),
-    %%true = ets:insert(PreparedTxs, {committed_tx, dict:new()}),
     InMemoryStore = open_table(Partition, inmemory_store),
 
     IfCertify = antidote_config:get(do_cert),
@@ -282,7 +280,6 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{num_blocked=NumBlocke
         {not_ready, Delay} ->
             spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
                          Sender, now_microsec(now())}, {Partition, node()}]),
-            %lager:info("Not ready for key ~w ~w, reader is ~w",[Key, TxId, Sender]),
             {noreply, SD0#state{num_blocked=NumBlocked+1}};
         ready ->
             Result = clocksi_readitem:return(Key, Type, TxId, InMemoryStore),
@@ -291,7 +288,6 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{num_blocked=NumBlocke
 
 
 handle_command({async_read, Key, Type, TxId, OrgSender, LastTime}, _Sender,SD0=#state{num_blocked=NumBlocked, blocked_time=BlockedTime, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=Partition}) ->
-    %lager:info("Got async read request for key ~w of tx ~w",[Key, TxId]),
     clock_service:update_ts(TxId#tx_id.snapshot_time),
     case clocksi_readitem:check_prepared(Key, TxId, PreparedTxs) of
         {not_ready, Delay} ->
@@ -314,7 +310,6 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                               num_cert_fail=NumCertFail,
                               prepared_txs=PreparedTxs
                               }) ->
-    %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     Result = prepare(TxId, WriteSet, CommittedTx, PreparedTxs, IfCertify),
     case Result of
         {ok, PrepareTime} ->
@@ -335,7 +330,6 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
             {noreply, State};
         {error, write_conflict} ->
             riak_core_vnode:reply(OriginalSender, {abort, TxId}),
-            %gen_fsm:send_event(OriginalSender, abort),
             {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1}}
     end;
 
@@ -349,7 +343,6 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                               num_cert_fail=NumCertFail,
                               num_committed=NumCommitted
                               }) ->
-    %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     Result = prepare_and_commit(TxId, WriteSet, CommittedTx, PreparedTxs, InMemoryStore, IfCertify), 
     case Result of
         {ok, {committed, CommitTime, NewCommittedTx}} ->
@@ -357,14 +350,11 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                 true ->
                     PendingRecord = {commit, OriginalSender, 
                         {committed, CommitTime}, {TxId, WriteSet}},
-                    %ets:insert(PreparedTxs, {committed_tx, NewCommittedTx}),
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                     {noreply, State#state{committed_tx=NewCommittedTx, 
                             num_committed=NumCommitted+1}};
                 false ->
-                    %ets:insert(PreparedTxs, {committed_tx, NewCommittedTx}),
                     riak_core_vnode:reply(OriginalSender, {committed, CommitTime}),
-                    %{noreply, State}
                     {noreply, State#state{committed_tx=NewCommittedTx,
                             num_committed=NumCommitted+1}}
             end;
@@ -374,13 +364,9 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
             {noreply, State};
         {error, write_conflict} ->
             riak_core_vnode:reply(OriginalSender, {abort, TxId}),
-            %gen_fsm:send_event(OriginalSender, abort),
             {noreply, State#state{num_cert_fail=NumCertFail+1}}
     end;
 
-%% TODO: sending empty writeset to clocksi_downstream_generatro
-%% Just a workaround, need to delete downstream_generator_vnode
-%% eventually.
 handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                #state{partition=Partition,
                       committed_tx=CommittedTx,
@@ -389,7 +375,6 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                       inmemory_store=InMemoryStore,
                       num_committed=NumCommitted
                       } = State) ->
-    %[{committed_tx, CommittedTx}] = ets:lookup(PreparedTxs, committed_tx),
     Result = commit(TxId, TxCommitTime, Updates, CommittedTx, PreparedTxs, InMemoryStore),
     case Result of
         {ok, {committed,NewCommittedTx}} ->
@@ -397,20 +382,13 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                 true ->
                     PendingRecord = {commit, Sender, 
                         false, {TxId, TxCommitTime, Updates}},
-                    %ets:insert(PreparedTxs, {committed_tx, NewCommittedTx}),
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                     {noreply, State#state{committed_tx=NewCommittedTx,
                             num_committed=NumCommitted+1}};
                 false ->
-                    %%ets:insert(PreparedTxs, {committed_tx, NewCommittedTx}),
-                    %{reply, committed, State}
                     {noreply, State#state{committed_tx=NewCommittedTx,
                             num_committed=NumCommitted+1}}
             end;
-        %{error, materializer_failure} ->
-        %    {reply, {error, materializer_failure}, State};
-        %{error, timeout} ->
-        %    {reply, {error, timeout}, State};
         {error, no_updates} ->
             {reply, no_tx_record, State}
     end;
@@ -423,7 +401,6 @@ handle_command({abort, TxId, Updates}, _Sender,
         _ -> 
             clean_prepared(PreparedTxs,Updates,TxId),
             {noreply, State#state{num_aborted=NumAborted+1}}
-            %%{reply, ack_abort, State};
     end;
 
 %% @doc Return active transactions in prepare state with their preparetime
@@ -531,8 +508,6 @@ commit(TxId, TxCommitTime, Updates, CommittedTx,
     end.
 
 
-
-
 %% @doc clean_and_notify:
 %%      This function is used for cleanning the state a transaction
 %%      stores in the vnode while it is being procesed. Once a
@@ -560,8 +535,6 @@ now_microsec({MegaSecs, Secs, MicroSecs}) ->
 
 %% @doc Performs a certification check when a transaction wants to move
 %%      to the prepared state.
-%certification_check(_TxId, _H, _CommittedTx, _PreparedTxs) ->
-%    true.
 certification_check(_, _, _, _, false) ->
     true;
 certification_check(_, [], _, _, true) ->
@@ -579,9 +552,7 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, true) ->
                         true ->
                             certification_check(TxId, T, CommittedTx, PreparedTxs, true);
                         false ->
-                            false;
-                        wait ->
-                            wait
+                            false
                     end
             end;
         error ->
@@ -589,30 +560,17 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, true) ->
                 true ->
                     certification_check(TxId, T, CommittedTx, PreparedTxs, true); 
                 false ->
-                    false;
-                wait ->
-                    wait
+                    false
             end
     end.
 
 check_prepared(TxId, PreparedTxs, Key) ->
-    SnapshotTime = TxId#tx_id.snapshot_time,
+    _SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             true;
-        [{Key, {_TxId1, PrepareTime}}] ->
-            case PrepareTime > SnapshotTime of
-                true ->
-                    %lager:info("Has to abort for Key ~w", [Key]),
-                    false;
-                false ->
-                    %case random:uniform(2) of
-                    %    1 ->
-                            false
-                    %    2 ->
-                    %        wait  
-                    %end
-            end
+        _ ->
+            false
     end.
 
 -spec update_store(KeyValues :: [{key(), atom(), term()}],
@@ -621,15 +579,12 @@ check_prepared(TxId, PreparedTxs, Key) ->
 update_store([], _TxId, _TxCommitTime, _InMemoryStore) ->
     ok;
 update_store([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemoryStore) ->
-    %lager:info("Store ~w",[InMemoryStore]),
     case ets:lookup(InMemoryStore, Key) of
         [] ->
-     %       lager:info("Wrote ~w to key ~w",[Value, Key]),
             Init = Type:new(),
             {ok, NewSnapshot} = Type:update(Param, Actor, Init),
             true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}]});
         [{Key, ValueList}] ->
-      %      lager:info("Wrote ~w to key ~w with ~w",[Value, Key, ValueList]),
             {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
             [{_CommitTime, First}|_] = RemainList,
             {ok, NewSnapshot} = Type:update(Param, Actor, First),

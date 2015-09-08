@@ -31,14 +31,10 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--define(DC_UTIL, mock_partition_fsm).
--define(VECTORCLOCK, mock_partition_fsm).
 -define(LOG_UTIL, mock_partition_fsm).
 -define(CLOCKSI_VNODE, mock_partition_fsm).
 -define(CLOCKSI_DOWNSTREAM, mock_partition_fsm).
 -else.
--define(DC_UTIL, dc_utilities).
--define(VECTORCLOCK, vectorclock).
 -define(LOG_UTIL, log_utilities).
 -define(CLOCKSI_VNODE, clocksi_vnode).
 -define(CLOCKSI_DOWNSTREAM, clocksi_downstream).
@@ -77,17 +73,20 @@
 %%    state: state of the transaction: {active|prepared|committing|committed}
 %%----------------------------------------------------------------------
 -record(state, {
-	  from :: {pid(), term()},
-	  tx_id :: txid(),
-      operations :: [],
-	  num_to_ack :: non_neg_integer(),
-	  prepare_time :: non_neg_integer(),
-	  commit_time :: non_neg_integer(),
-      updated_partitions :: dict(),
-      final_read_set :: [],
-      read_set :: [],
-      causal_clock :: non_neg_integer(),
-	  state :: active | prepared | committing | committed | undefined | aborted}).
+	    from :: {pid(), term()},
+	    tx_id :: txid(),
+        operations :: [],
+	    num_to_ack :: non_neg_integer(),
+	    prepare_time :: non_neg_integer(),
+	    commit_time :: non_neg_integer(),
+        updated_partitions :: dict(),
+        final_read_set :: [],
+        read_set :: [],
+        causal_clock :: non_neg_integer(),
+	    state :: active | prepared | committing | committed | undefined | aborted,
+        prepare_begin=0 :: non_neg_integer(),
+        prepare_stat=[] :: [],
+        read_stat=[] :: []}).
 
 %%%===================================================================
 %%% API
@@ -137,9 +136,10 @@ execute_batch_ops(SD=#state{causal_clock=CausalClock,
     TxId = tx_utilities:create_transaction_record(CausalClock),
     %lager:info("My tx id is ~w", [TxId]),
     [CurrentOps|_RestOps] = Operations, 
-    ProcessOp = fun(Operation, {UpdatedParts, RSet, Buffer}) ->
+    ProcessOp = fun(Operation, {UpdatedParts, RSet, Buffer, ReadStat, OldPrepareBegin}) ->
                     case Operation of
                         {read, Key, Type} ->
+                            ReadBegin = clocksi_vnode:now_microsec(now()),
                             {ok, {Type, Snapshot}} = case dict:find(Key, Buffer) of
                                                     error ->
                                                         Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
@@ -148,12 +148,15 @@ execute_batch_ops(SD=#state{causal_clock=CausalClock,
                                                     {ok, SnapshotState} ->
                                                         {ok, {Type,SnapshotState}}
                                                     end,
+                            ReadLength = clocksi_vnode:now_microsec(now()) - ReadBegin,
                             Buffer1 = dict:store(Key, Snapshot, Buffer),
                             %%lager:info("New read set is ~w",[RSet]),
-                            {UpdatedParts, [Type:value(Snapshot)|RSet], Buffer1};
+                            {UpdatedParts, [Type:value(Snapshot)|RSet], 
+                                Buffer1, [ReadLength|ReadStat], OldPrepareBegin};
                         {update, Key, Type, Op} ->
                             Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
                             IndexNode = hd(Preflist),
+                            PrepareBegin = clocksi_vnode:now_microsec(now()),
                             UpdatedParts1 = case dict:is_key(IndexNode, UpdatedParts) of
                                                 false ->
                                                     dict:store(IndexNode, [{Key, Type, Op}], UpdatedParts);
@@ -171,42 +174,49 @@ execute_batch_ops(SD=#state{causal_clock=CausalClock,
                                             {ok, NewSnapshot} = Type:update(Param, Actor, Snapshot),
                                             dict:store(Key, NewSnapshot, Buffer)
                                         end,
-                            {UpdatedParts1, RSet, Buffer1}
+                            {UpdatedParts1, RSet, Buffer1, ReadStat, PrepareBegin}
                     end
                 end,
-    {WriteSet1, ReadSet1, _} = lists:foldl(ProcessOp, {dict:new(), [], dict:new()}, CurrentOps),
+    {WriteSet1, ReadSet1, _, ReadStat, PrepareBegin} = 
+                lists:foldl(ProcessOp, {dict:new(), [], dict:new(), [], 0}, CurrentOps),
     %%lager:info("Operations are ~w, WriteSet is ~w, ReadSet is ~w",[CurrentOps, WriteSet1, ReadSet1]),
     case dict:size(WriteSet1) of
         0->
             reply_to_client(SD#state{state=committed, tx_id=TxId, read_set=ReadSet1, 
-                commit_time=clocksi_vnode:now_microsec(now())});
+                commit_time=clocksi_vnode:now_microsec(now()), 
+                read_stat=lists:reverse(ReadStat), prepare_begin=PrepareBegin});
         1->
             UpdatedPart = dict:to_list(WriteSet1),
             ?CLOCKSI_VNODE:single_commit(UpdatedPart, TxId),
             {next_state, single_committing,
-            SD#state{state=committing, num_to_ack=1, read_set=ReadSet1, tx_id=TxId}};
+            SD#state{state=committing, num_to_ack=1, read_set=ReadSet1, tx_id=TxId,
+                read_stat=lists:reverse(ReadStat), prepare_begin=PrepareBegin}};
         N->
             %lager:info("Txn ~w , write set size ~w",[TxId, N]),
             ?CLOCKSI_VNODE:prepare(WriteSet1, TxId),
             {next_state, receive_prepared, SD#state{num_to_ack=N, state=prepared,
-                 updated_partitions=WriteSet1, read_set=ReadSet1, tx_id=TxId}}
+                 updated_partitions=WriteSet1, read_set=ReadSet1, tx_id=TxId,
+                read_stat=lists:reverse(ReadStat), prepare_begin=PrepareBegin}}
     end.
 
 %% @doc in this state, the fsm waits for prepare_time from each updated
 %%      partitions in order to compute the final tx timestamp (the maximum
 %%      of the received prepare_time).
 receive_prepared({prepared, TxId, ReceivedPrepareTime},
-                 S0=#state{num_to_ack=NumToAck, tx_id=TxId,
-                            prepare_time=PrepareTime}) ->
+                 S0=#state{num_to_ack=NumToAck, tx_id=TxId, prepare_time=PrepareTime,
+                            prepare_begin=PrepareBegin, prepare_stat=PrepareStat}) ->
     %lager:info("Got prepared of ~w", [TxId]),
     MaxPrepareTime = max(PrepareTime, ReceivedPrepareTime),
     case NumToAck of 
         1 ->
-            send_commit(S0#state{prepare_time=MaxPrepareTime, commit_time=MaxPrepareTime, state=committing});
+            send_commit(S0#state{prepare_time=MaxPrepareTime, commit_time=MaxPrepareTime, 
+                    state=committing, 
+                prepare_stat=[(clocksi_vnode:now_microsec(now())-PrepareBegin)|PrepareStat]});
         _ ->
             %%lager:info("Txn ~w , Got reply ~w, NumtoAck ~w",[TxId, ReceivedPrepareTime, NumToAck]),
             {next_state, receive_prepared,
-             S0#state{num_to_ack= NumToAck-1, prepare_time=MaxPrepareTime}}
+             S0#state{num_to_ack= NumToAck-1, prepare_time=MaxPrepareTime,
+                prepare_stat=[(clocksi_vnode:now_microsec(now())-PrepareBegin)|PrepareStat]}}
     end;
 
 receive_prepared({prepared, _, _}, S0) ->
@@ -258,7 +268,8 @@ abort(SD0=#state{tx_id = TxId, updated_partitions=UpdatedPartitions}) ->
 %% @doc when the transaction has committed or aborted,
 %%       a reply is sent to the client that started the tx_id.
 reply_to_client(SD=#state{from=From, tx_id=TxId, state=TxState, read_set=ReadSet,
-                final_read_set=FinalReadSet, commit_time=CommitTime, operations=Operations}) ->
+                final_read_set=FinalReadSet, read_stat=ReadStat, prepare_stat=PrepareStat,
+                commit_time=CommitTime, operations=Operations}) ->
     case TxState of
         committed ->
             case length(Operations) of 
@@ -266,6 +277,7 @@ reply_to_client(SD=#state{from=From, tx_id=TxId, state=TxState, read_set=ReadSet
                     RRSet = lists:reverse(lists:flatten([ReadSet|FinalReadSet])),
                     %lager:info("Replying to clinet"),
                     From ! {ok, {TxId, RRSet, CommitTime}},
+                    stat_server:send_stat(ReadStat, lists:reverse(PrepareStat)),
                     {stop, normal, SD};
                 _ ->
                     %lager:info("Continuing"),
