@@ -130,17 +130,17 @@ start_execute_txns(timeout, SD) ->
     execute_batch_ops(SD).
 
 execute_batch_ops(SD=#state{causal_clock=CausalClock,
-                    operations=Operations
+                    operations=Operations, read_stat=ReadStat
 		      }) ->
     %lager:info("In execute batch"),
     TxId = tx_utilities:create_transaction_record(CausalClock),
     %lager:info("My tx id is ~w", [TxId]),
     [CurrentOps|_RestOps] = Operations, 
-    ProcessOp = fun(Operation, {UpdatedParts, RSet, Buffer, ReadStat, OldPrepareBegin}) ->
+    ProcessOp = fun(Operation, {UpdatedParts, RSet, Buffer, TmpReadStat, TmpPrepareBegin}) ->
                     case Operation of
                         {read, Key, Type} ->
                             ReadBegin = clocksi_vnode:now_microsec(now()),
-                            {ok, {Type, Snapshot}} = case dict:find(Key, Buffer) of
+                            {ok, Snapshot} = case dict:find(Key, Buffer) of
                                                     error ->
                                                         Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
                                                         IndexNode = hd(Preflist),
@@ -152,11 +152,11 @@ execute_batch_ops(SD=#state{causal_clock=CausalClock,
                             Buffer1 = dict:store(Key, Snapshot, Buffer),
                             %%lager:info("New read set is ~w",[RSet]),
                             {UpdatedParts, [Type:value(Snapshot)|RSet], 
-                                Buffer1, [ReadLength|ReadStat], OldPrepareBegin};
+                                Buffer1, [ReadLength|TmpReadStat], TmpPrepareBegin};
                         {update, Key, Type, Op} ->
                             Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
                             IndexNode = hd(Preflist),
-                            PrepareBegin = clocksi_vnode:now_microsec(now()),
+                            NewPrepareBegin = clocksi_vnode:now_microsec(now()),
                             UpdatedParts1 = case dict:is_key(IndexNode, UpdatedParts) of
                                                 false ->
                                                     dict:store(IndexNode, [{Key, Type, Op}], UpdatedParts);
@@ -174,29 +174,29 @@ execute_batch_ops(SD=#state{causal_clock=CausalClock,
                                             {ok, NewSnapshot} = Type:update(Param, Actor, Snapshot),
                                             dict:store(Key, NewSnapshot, Buffer)
                                         end,
-                            {UpdatedParts1, RSet, Buffer1, ReadStat, PrepareBegin}
+                            {UpdatedParts1, RSet, Buffer1, TmpReadStat, NewPrepareBegin}
                     end
                 end,
-    {WriteSet1, ReadSet1, _, ReadStat, PrepareBegin} = 
-                lists:foldl(ProcessOp, {dict:new(), [], dict:new(), [], 0}, CurrentOps),
+    {WriteSet1, ReadSet1, _, ReadStat1, PrepareBegin} = 
+                lists:foldl(ProcessOp, {dict:new(), [], dict:new(), ReadStat, 0}, CurrentOps),
     %%lager:info("Operations are ~w, WriteSet is ~w, ReadSet is ~w",[CurrentOps, WriteSet1, ReadSet1]),
     case dict:size(WriteSet1) of
         0->
             reply_to_client(SD#state{state=committed, tx_id=TxId, read_set=ReadSet1, 
                 commit_time=clocksi_vnode:now_microsec(now()), 
-                read_stat=lists:reverse(ReadStat), prepare_begin=PrepareBegin});
+                read_stat=ReadStat1, prepare_begin=PrepareBegin});
         1->
             UpdatedPart = dict:to_list(WriteSet1),
             ?CLOCKSI_VNODE:single_commit(UpdatedPart, TxId),
             {next_state, single_committing,
             SD#state{state=committing, num_to_ack=1, read_set=ReadSet1, tx_id=TxId,
-                read_stat=lists:reverse(ReadStat), prepare_begin=PrepareBegin}};
+                read_stat=ReadStat1, prepare_begin=PrepareBegin}};
         N->
             %lager:info("Txn ~w , write set size ~w",[TxId, N]),
             ?CLOCKSI_VNODE:prepare(WriteSet1, TxId),
             {next_state, receive_prepared, SD#state{num_to_ack=N, state=prepared,
                  updated_partitions=WriteSet1, read_set=ReadSet1, tx_id=TxId,
-                read_stat=lists:reverse(ReadStat), prepare_begin=PrepareBegin}}
+                read_stat=ReadStat1, prepare_begin=PrepareBegin}}
     end.
 
 %% @doc in this state, the fsm waits for prepare_time from each updated
@@ -257,7 +257,6 @@ send_commit(SD0=#state{tx_id = TxId,
     end.
 
 
-
 %% @doc when an error occurs or an updated partition 
 %% does not pass the certification check, the transaction aborts.
 abort(SD0=#state{tx_id = TxId, updated_partitions=UpdatedPartitions}) ->
@@ -277,7 +276,7 @@ reply_to_client(SD=#state{from=From, tx_id=TxId, state=TxState, read_set=ReadSet
                     RRSet = lists:reverse(lists:flatten([ReadSet|FinalReadSet])),
                     %lager:info("Replying to clinet"),
                     From ! {ok, {TxId, RRSet, CommitTime}},
-                    stat_server:send_stat(ReadStat, lists:reverse(PrepareStat)),
+                    stat_server:send_stat(lists:reverse(lists:flatten(ReadStat)), lists:reverse(PrepareStat)),
                     {stop, normal, SD};
                 _ ->
                     %lager:info("Continuing"),
