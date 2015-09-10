@@ -4,6 +4,7 @@
         prepare_time = 0 :: non_neg_integer(),
         updated_parts = dict:new() :: dict(),
         read_set = [] :: [],
+        prepare_stat = [],
         index :: pos_integer()
         }).
 
