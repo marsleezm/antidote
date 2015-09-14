@@ -441,7 +441,6 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                 true ->
                     PendingRecord = {commit, Sender, false, {TxId, TxCommitTime, Updates}},
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
-                    lager:info("Org is ~w, diff is ~w, Committed diff is ~w", [CommittedDiff, Diff, CommittedDiff+Diff]),
                     {noreply, State#state{committed_tx=NewCommittedTx, committed_diff=CommittedDiff+Diff, 
                                 num_committed=NumCommitted+1, num_read_invalid=NewInvalid}};
                 false ->
