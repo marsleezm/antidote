@@ -441,6 +441,7 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                 true ->
                     PendingRecord = {commit, Sender, false, {TxId, TxCommitTime, Updates}},
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
+                    lager:info("Org is ~w, diff is ~w, Committed diff is ~w", [CommittedDiff, Diff, CommittedDiff+Diff]),
                     {noreply, State#state{committed_tx=NewCommittedTx, committed_diff=CommittedDiff+Diff, 
                                 num_committed=NumCommitted+1, num_read_invalid=NewInvalid}};
                 false ->
@@ -626,7 +627,6 @@ check_prepared(TxId, Key, PreparedTxs) ->
                           TxId::txid(),TxCommitTime:: {term(), term()}, InMemoryStore :: cache_id(), 
                             PreparedTxs :: cache_id(), SpeculaDep :: cache_id(), PrepareTime :: non_neg_integer()) -> ok.
 update_and_clean([], _TxId, TxCommitTime, _, _, _, PrepareTime) ->
-    lager:info("Prepare time is ~w, CommitTime is ~w, diff is ~w", [PrepareTime, TxCommitTime, TxCommitTime-PrepareTime]),
     TxCommitTime-PrepareTime;
 update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemoryStore, 
                 PreparedTxs, SpeculaDep, _) ->
