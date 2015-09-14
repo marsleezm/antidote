@@ -353,7 +353,6 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
     Result = prepare(TxId, WriteSet, CommittedTx, PreparedTxs, IfCertify),
     case Result of
         {ok, PrepareTime} ->
-            lager:info("~w: PrepareTime is ~w", [TxId, PrepareTime]),
             UsedTime = now_microsec(erlang:now()) - PrepareTime,
             case IfReplicate of
                 true ->
@@ -625,7 +624,6 @@ check_prepared(TxId, Key, PreparedTxs) ->
                           TxId::txid(),TxCommitTime:: {term(), term()}, InMemoryStore :: cache_id(), 
                             PreparedTxs :: cache_id(), SpeculaDep :: cache_id(), PrepareTime :: non_neg_integer()) -> ok.
 update_and_clean([], _TxId, TxCommitTime, _, _, _, PrepareTime) ->
-    lager:info("Ct ~w, Pt ~w, diff ~w", [TxCommitTime, PrepareTime, TxCommitTime-PrepareTime]),
     TxCommitTime-PrepareTime;
 update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemoryStore, 
                 PreparedTxs, SpeculaDep, _) ->
