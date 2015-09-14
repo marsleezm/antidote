@@ -626,6 +626,7 @@ check_prepared(TxId, Key, PreparedTxs) ->
                           TxId::txid(),TxCommitTime:: {term(), term()}, InMemoryStore :: cache_id(), 
                             PreparedTxs :: cache_id(), SpeculaDep :: cache_id(), PrepareTime :: non_neg_integer()) -> ok.
 update_and_clean([], _TxId, TxCommitTime, _, _, _, PrepareTime) ->
+    lager:info("Prepare time is ~w, CommitTime is ~w, diff is ~w", [PrepareTime, TxCommitTime, TxCommitTime-PrepareTime]),
     TxCommitTime-PrepareTime;
 update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemoryStore, 
                 PreparedTxs, SpeculaDep, _) ->
