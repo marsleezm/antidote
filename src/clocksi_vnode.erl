@@ -56,8 +56,6 @@
          handoff_finished/2,
          handle_handoff_data/2,
          encode_handoff_item/2,
-
-
          handle_coverage/4,
          handle_exit/3]).
 
