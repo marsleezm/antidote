@@ -353,6 +353,7 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
     Result = prepare(TxId, WriteSet, CommittedTx, PreparedTxs, IfCertify),
     case Result of
         {ok, PrepareTime} ->
+            lager:info("~w: PrepareTime is ~w", [TxId, PrepareTime]),
             UsedTime = now_microsec(erlang:now()) - PrepareTime,
             case IfReplicate of
                 true ->
