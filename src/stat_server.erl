@@ -88,7 +88,7 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({send_stat, ReadL, PrepareL}, 
 	    SD0=#state{read_count=ReadCount, read_stat=ReadStat, 
             prepare_count=PrepareCount, prepare_stat=PrepareStat}) ->
-    lager:info("Read stat is ~w, prepare stat is ~w", [ReadStat1, PrepareStat1]),
+    lager:info("Read stat is ~w ~w, prepare stat is ~w ~w", [ReadL, ReadStat, PrepareL, PrepareStat]),
     ReadStat1 = increment_all(ReadL, ReadStat, []),
     PrepareStat1 = increment_all(PrepareL, PrepareStat, []),
     {noreply, SD0#state{prepare_count=PrepareCount+1, prepare_stat=PrepareStat1, 
