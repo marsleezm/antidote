@@ -187,12 +187,10 @@ init([Partition]) ->
                 total_time=0, prepare_count=0, num_specula_read=0, committed_diff=0,
                 num_committed=0, num_cert_fail=0, num_aborted=0, num_read_invalid=0, num_read_abort=0}}.
 
-
 check_tables_ready() ->
     {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
     PartitionList = chashbin:to_list(CHBin),
     check_table_ready(PartitionList).
-
 
 check_table_ready([]) ->
     true;
