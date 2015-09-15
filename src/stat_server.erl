@@ -41,7 +41,7 @@
         terminate/2]).
 
 %% States
--export([send_stat/2, get_stat/0]).
+-export([send_stat/2, get_stat/1]).
 
 %% Spawn
 
@@ -63,8 +63,8 @@ start_link() ->
 send_stat(ReadStat, PrepareStat) ->
     gen_server:cast({global, get_statserv_name()}, {send_stat, ReadStat, PrepareStat}).
 
-get_stat() ->
-    gen_server:call({global, get_statserv_name()}, {get_stat}).
+get_stat(Node) ->
+    gen_server:call({global, get_statserv_name(Node)}, {get_stat}).
 
 %%%===================================================================
 %%% Internal
@@ -122,6 +122,9 @@ terminate(_Reason, _SD) ->
 
 get_statserv_name() ->
     list_to_atom(atom_to_list(stat_server)++atom_to_list(node())).
+
+get_statserv_name(Node) ->
+    list_to_atom(atom_to_list(stat_server)++atom_to_list(Node)).
 
 increment_all([], [], LAcc) ->
     lists:reverse(LAcc);
