@@ -144,7 +144,7 @@ init([From, ClientClock, Txns]) ->
 start_execute_txns(timeout, SD) ->
     process_txs(SD).
 
-process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn, read_stat=ReadStat,
+process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn, 
         all_txn_ops=AllTxnOps, prepare_begin_list=PrepareBeginList,  
         current_txn_index=CurrentTxnIndex, num_txns=NumTxns}) ->
     TxId = tx_utilities:create_transaction_record(CausalClock),
@@ -155,7 +155,7 @@ process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn, 
             MyOperations = lists:nth(CurrentTxnIndex, AllTxnOps),
             PrecCommitted = (CommittedTxn == CurrentTxnIndex -1),
             {CanCommit, WriteSet, ReadSet, NumToPrepare, NewReadStat, PrepareBegin} = 
-                        process_operations(TxId, MyOperations, dict:new(), [], dict:new(), 0, PrecCommitted, ReadStat),
+                        process_operations(TxId, MyOperations, dict:new(), [], dict:new(), 0, PrecCommitted, []),
             case CanCommit of
                 true -> %%TODO: has to find some way to deal with read-only transaction
                     proceed_txn(SD#state{read_set=ReadSet, read_stat=NewReadStat, 
