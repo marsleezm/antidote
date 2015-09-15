@@ -86,6 +86,7 @@
 	    state :: active | prepared | committing | committed | undefined | aborted,
         prepare_begin=0 :: non_neg_integer(),
         prepare_stat=[] :: [],
+        final_read_stat=[] :: [],
         read_stat=[] :: []}).
 
 %%%===================================================================
@@ -130,8 +131,7 @@ start_execute_txns(timeout, SD) ->
     execute_batch_ops(SD).
 
 execute_batch_ops(SD=#state{causal_clock=CausalClock,
-                    operations=Operations, read_stat=ReadStat
-		      }) ->
+                    operations=Operations}) ->
     %lager:info("In execute batch"),
     TxId = tx_utilities:create_transaction_record(CausalClock),
     %lager:info("My tx id is ~w", [TxId]),
@@ -177,26 +177,26 @@ execute_batch_ops(SD=#state{causal_clock=CausalClock,
                             {UpdatedParts1, RSet, Buffer1, TmpReadStat, NewPrepareBegin}
                     end
                 end,
-    {WriteSet1, ReadSet1, _, ReadStat1, PrepareBegin} = 
-                lists:foldl(ProcessOp, {dict:new(), [], dict:new(), ReadStat, 0}, CurrentOps),
+    {WriteSet1, ReadSet1, _, ReadStat, PrepareBegin} = 
+                lists:foldl(ProcessOp, {dict:new(), [], dict:new(), [], 0}, CurrentOps),
     %%lager:info("Operations are ~w, WriteSet is ~w, ReadSet is ~w",[CurrentOps, WriteSet1, ReadSet1]),
     case dict:size(WriteSet1) of
         0->
             reply_to_client(SD#state{state=committed, tx_id=TxId, read_set=ReadSet1, 
                 commit_time=clocksi_vnode:now_microsec(now()), 
-                read_stat=ReadStat1, prepare_begin=PrepareBegin});
+                read_stat=ReadStat, prepare_begin=PrepareBegin});
         1->
             UpdatedPart = dict:to_list(WriteSet1),
             ?CLOCKSI_VNODE:single_commit(UpdatedPart, TxId),
             {next_state, single_committing,
             SD#state{state=committing, num_to_ack=1, read_set=ReadSet1, tx_id=TxId,
-                read_stat=ReadStat1, prepare_begin=PrepareBegin}};
+                read_stat=ReadStat, prepare_begin=PrepareBegin}};
         N->
             %lager:info("Txn ~w , write set size ~w",[TxId, N]),
             ?CLOCKSI_VNODE:prepare(WriteSet1, TxId),
             {next_state, receive_prepared, SD#state{num_to_ack=N, state=prepared,
                  updated_partitions=WriteSet1, read_set=ReadSet1, tx_id=TxId,
-                read_stat=ReadStat1, prepare_begin=PrepareBegin}}
+                read_stat=ReadStat, prepare_begin=PrepareBegin}}
     end.
 
 %% @doc in this state, the fsm waits for prepare_time from each updated
@@ -266,7 +266,7 @@ abort(SD0=#state{tx_id = TxId, updated_partitions=UpdatedPartitions}) ->
 
 %% @doc when the transaction has committed or aborted,
 %%       a reply is sent to the client that started the tx_id.
-reply_to_client(SD=#state{from=From, tx_id=TxId, state=TxState, read_set=ReadSet,
+reply_to_client(SD=#state{from=From, tx_id=TxId, state=TxState, read_set=ReadSet, final_read_stat=FinalReadStat,
                 final_read_set=FinalReadSet, read_stat=ReadStat, prepare_stat=PrepareStat,
                 commit_time=CommitTime, operations=Operations}) ->
     case TxState of
@@ -274,14 +274,14 @@ reply_to_client(SD=#state{from=From, tx_id=TxId, state=TxState, read_set=ReadSet
             case length(Operations) of 
                 1 ->
                     RRSet = lists:reverse(lists:flatten([ReadSet|FinalReadSet])),
-                    %lager:info("Replying to clinet"),
+                    FRStat = lists:reverse(lists:flatten([ReadStat|FinalReadStat])), 
                     From ! {ok, {TxId, RRSet, CommitTime}},
-                    stat_server:send_stat(lists:reverse(lists:flatten(ReadStat)), lists:reverse(PrepareStat)),
+                    stat_server:send_stat(FRStat, lists:reverse(PrepareStat)),
                     {stop, normal, SD};
                 _ ->
                     %lager:info("Continuing"),
                     [_ExecutedOps|RestOps] = Operations,
-                    execute_batch_ops(SD#state{operations=RestOps,
+                    execute_batch_ops(SD#state{operations=RestOps, final_read_stat=[ReadStat|FinalReadStat],
                         final_read_set=[ReadSet|FinalReadSet], causal_clock=CommitTime})
             end;
         aborted ->
