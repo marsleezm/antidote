@@ -195,10 +195,10 @@ receive_reply({Type, CurrentTxId, Param},
     PrepareTime1 = max(PrepareTime, Param), 
     NumToPrepare1 = NumToPrepare-1,
     NewPrepareStat = case Type of 
-                prepared -> 
-                    [clocksi_vnode:now_microsec(now())-hd(PrepareBeginList)|PrepareStat];
-                _ ->
-                    PrepareStat 
+                        prepared -> 
+                            [clocksi_vnode:now_microsec(now())-hd(PrepareBeginList)|PrepareStat];
+                        _ ->
+                            PrepareStat 
                     end,
     case can_commit(NumToPrepare1, NumCommittedTxn, CurrentTxnIndex) of
         true ->
@@ -255,14 +255,6 @@ receive_reply({Type, TxId, Param},
                             cascading_commit_tx(TxId, TxnMeta1, SpeculaMeta, TxIdList),
                     case can_commit(CurrentNumToPrepare, NewNumCommitted, CurrentTxnIndex) of
                         true ->
-                            %case Type of
-                            %    read_valid ->
-                            %        lager:info("~w: proceeding, num committd is ~w",[TxId, NewNumCommitted+1]);
-                            %    _ ->
-                            %        ok
-                            %end,
-                           %%%%lager:info("~w: Current ~w can commit!",[TxId, CurrentTxnId]),
-                            %lager:info("Current ~w committed ~w", [CurrentTxnId, CurrentTxnIndex]),
                             SpeculaMeta1 = dict:store(TxId, TxnMeta1, SpeculaMeta),
                             ?CLOCKSI_VNODE:commit(UpdatedParts, CurrentTxnId, 
                                     CurrentPrepareTime),
@@ -349,7 +341,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
             {next_state, receive_reply, S0};
         %% Proceed
         _ -> 
-            SpeculaMeta1= dict:store(TxId, #txn_metadata{read_set=ReadSet, prepare_time=MaxPrepTime, 
+            SpeculaMeta1= dict:store(TxId, #txn_metadata{read_set=ReadSet, prepare_time=MaxPrepTime, prepare_stat=PrepareStat, 
                         index=CurrentTxnIndex, num_to_prepare=NumToPrepare, updated_parts=UpdatedParts}, 
                             SpeculaMeta),
             TxIdList1 = TxIdList ++ [TxId],
