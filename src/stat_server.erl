@@ -77,10 +77,10 @@ init([]) ->
                 read_stat=[],
                 prepare_stat=[]}}.
 
-handle_call({get_stat}, _Sender, SD0=#state{read_stat=ReadStat, 
+handle_call({get_stat}, _Sender, SD0=#state{read_stat=ReadStat, read_count=ReadCount, 
             prepare_count=PrepareCount, prepare_stat=PrepareStat}) ->
-    lager:info("Stat is ~w, ~w, ~w", [PrepareCount, ReadStat, PrepareStat]),
-    {reply, {PrepareCount, ReadStat, PrepareStat}, SD0};
+    lager:info("PStat is ~w, ~w, RStat is ~w, ~w", [PrepareCount, PrepareStat, ReadCount, ReadStat]),
+    {reply, {PrepareCount, PrepareStat, ReadCount, ReadStat}, SD0};
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
@@ -88,11 +88,20 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({send_stat, ReadL, PrepareL}, 
 	    SD0=#state{read_count=ReadCount, read_stat=ReadStat, 
             prepare_count=PrepareCount, prepare_stat=PrepareStat}) ->
-    ReadStat1 = increment_all(ReadL, ReadStat, []),
-    PrepareStat1 = increment_all(PrepareL, PrepareStat, []),
-    {noreply, SD0#state{prepare_count=PrepareCount+1, prepare_stat=PrepareStat1, 
-                        read_count=ReadCount+1, read_stat=ReadStat1}};
-
+    {ReadCount1, ReadStat1} = case ReadL of
+                                [] ->
+                                    {ReadCount, ReadStat};
+                                _ ->            
+                                    {ReadCount+1, increment_all(ReadL, ReadStat, [])}
+                              end,
+    {PrepareCount1, PrepareStat1} = case PrepareL of
+                                        [] ->
+                                            {PrepareCount, PrepareStat};
+                                        _ ->            
+                                            {PrepareCount+1, increment_all(PrepareL, PrepareStat, [])}
+                                    end,
+    {noreply, SD0#state{prepare_count=PrepareCount1, prepare_stat=PrepareStat1, 
+                        read_count=ReadCount1, read_stat=ReadStat1}};
 
 handle_cast(_Info, StateData) ->
     {noreply,StateData}.
