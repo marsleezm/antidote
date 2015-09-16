@@ -212,7 +212,6 @@ print_stat() ->
     print_stat(PartitionList, {0,0,0,0,0,0,0,0,0}).
 
 print_stat([], {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56, Acc6, Acc7}) ->
-
     lager:info("In total: committed ~w, aborted ~w, cert fail ~w, read invalid ~w, read abort ~w, specula read ~w, avg diff ~w, prepare time ~w",
                 [Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56 div max(1,Acc1), Acc6 div max(1,Acc7)]),
     {Acc1, Acc2, Acc3, Acc4, Acc5, Acc55, Acc56, Acc6, Acc7};

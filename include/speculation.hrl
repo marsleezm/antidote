@@ -5,6 +5,7 @@
         updated_parts = dict:new() :: dict(),
         read_set = [] :: [],
         prepare_stat = [],
+        read_stat = [],
         index :: pos_integer()
         }).
 

@@ -328,11 +328,12 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
     case NumTxns of
         %% The last txn has already committed
         NumCommittedTxn ->
-            {AllReadSet, AllPrepareStat} = get_list_meta(TxIdList, SpeculaMeta, [], []),
+            {AllReadSet, AllPrepareStat, AllReadStat} = get_list_meta(TxIdList, SpeculaMeta, [], [], []),
             AllReadSet1 = [ReadSet|AllReadSet],
             AllPrepareStat1 = [PrepareStat|AllPrepareStat],
+            AllReadStat1 = [ReadStat|AllReadStat],
             %lager:info("ReadStat is ~w, prepareStat is ~w", [ReadStat, AllPrepareStat1]),
-            stat_server:send_stat(lists:reverse(ReadStat), lists:reverse(lists:flatten(AllPrepareStat1))),
+            stat_server:send_stat(lists:reverse(lists:flatten(AllReadStat1)), lists:reverse(lists:flatten(AllPrepareStat1))),
             From ! {ok, {TxId, lists:reverse(lists:flatten(AllReadSet1)), 
                 MaxPrepTime}},
             {stop, normal, S0};
@@ -342,7 +343,7 @@ proceed_txn(S0=#state{from=From, tx_id=TxId, txn_id_list=TxIdList, current_txn_i
         %% Proceed
         _ -> 
             SpeculaMeta1= dict:store(TxId, #txn_metadata{read_set=ReadSet, prepare_time=MaxPrepTime, prepare_stat=PrepareStat, 
-                        index=CurrentTxnIndex, num_to_prepare=NumToPrepare, updated_parts=UpdatedParts}, 
+                        index=CurrentTxnIndex, num_to_prepare=NumToPrepare, read_stat=ReadStat, updated_parts=UpdatedParts}, 
                             SpeculaMeta),
             TxIdList1 = TxIdList ++ [TxId],
             %lager:info("proceed with max prepe time ~w", [MaxPrepTime]),
@@ -480,11 +481,12 @@ can_commit(NumToPrepare, NumCommittedTxn, TxnIndex) ->
             false
     end.
 
-get_list_meta([], _SpeculaMeta, Acc1, Acc2) ->
-    {Acc1, Acc2};
-get_list_meta([H|T], SpeculaMeta, Acc1, Acc2) ->
+get_list_meta([], _SpeculaMeta, Acc1, Acc2, Acc3) ->
+    {Acc1, Acc2, Acc3};
+get_list_meta([H|T], SpeculaMeta, Acc1, Acc2, Acc3) ->
     Tx = dict:fetch(H, SpeculaMeta),
-    get_list_meta(T, SpeculaMeta, [Tx#txn_metadata.read_set|Acc1], [Tx#txn_metadata.prepare_stat|Acc2]).
+    get_list_meta(T, SpeculaMeta, [Tx#txn_metadata.read_set|Acc1], [Tx#txn_metadata.prepare_stat|Acc2],
+                    [Tx#txn_metadata.read_stat|Acc3]).
 
 
 -ifdef(TEST).
