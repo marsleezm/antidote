@@ -92,12 +92,14 @@ handle_cast({send_stat, ReadL, PrepareL},
                                 [] ->
                                     {ReadCount, ReadStat};
                                 _ ->            
+                                    lager:info("ReadL ~w", [ReadL]),
                                     {ReadCount+1, increment_all(ReadL, ReadStat, [])}
                               end,
     {PrepareCount1, PrepareStat1} = case PrepareL of
                                         [] ->
                                             {PrepareCount, PrepareStat};
                                         _ ->            
+                                            lager:info("PrepareL ~w", [PrepareL]),
                                             {PrepareCount+1, increment_all(PrepareL, PrepareStat, [])}
                                     end,
     {noreply, SD0#state{prepare_count=PrepareCount1, prepare_stat=PrepareStat1, 
