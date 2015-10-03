@@ -49,7 +49,7 @@
         read_count :: non_neg_integer(),
         prepare_count :: non_neg_integer(),
         read_stat :: [],
-        prepare_stat :: [] 
+        prepare_stat=0 :: non_neg_integer() 
         }).
 
 %%%===================================================================
@@ -74,8 +74,8 @@ get_stat(Node) ->
 init([]) ->
     {ok, #state{read_count=0,
                 prepare_count=0,
-                read_stat=[],
-                prepare_stat=[]}}.
+                read_stat=[]
+                }}.
 
 handle_call({get_stat}, _Sender, SD0=#state{read_stat=ReadStat, read_count=ReadCount, 
             prepare_count=PrepareCount, prepare_stat=PrepareStat}) ->
@@ -92,15 +92,13 @@ handle_cast({send_stat, ReadL, PrepareL},
                                 [] ->
                                     {ReadCount, ReadStat};
                                 _ ->            
-                                    lager:info("ReadL ~w", [ReadL]),
                                     {ReadCount+1, increment_all(ReadL, ReadStat, [])}
                               end,
     {PrepareCount1, PrepareStat1} = case PrepareL of
-                                        [] ->
+                                    [] ->
                                             {PrepareCount, PrepareStat};
-                                        _ ->            
-                                            lager:info("PrepareL ~w", [PrepareL]),
-                                            {PrepareCount+1, increment_all(PrepareL, PrepareStat, [])}
+                                        _ ->
+                                            {PrepareCount+length(PrepareL), PrepareStat+lists:sum(PrepareL)}
                                     end,
     {noreply, SD0#state{prepare_count=PrepareCount1, prepare_stat=PrepareStat1, 
                         read_count=ReadCount1, read_stat=ReadStat1}};

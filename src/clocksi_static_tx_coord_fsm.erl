@@ -148,7 +148,7 @@ execute_batch_ops(timeout, SD=#state{
             case NumOfReads of
                 0 ->
                     reply_to_client(SD#state{state=committed, 
-                            commit_time=clocksi_vnode:now_microsec(erlang:now())});
+                            commit_time=tx_utilities:now_microsec()});
                 _ ->
                     %%lager:info("Waiting for ~w reads to reply", [NumOfReads]),
                     Snapshot_time=TxId#tx_id.snapshot_time,

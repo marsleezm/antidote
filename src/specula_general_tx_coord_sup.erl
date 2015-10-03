@@ -18,7 +18,7 @@
 %%
 %% -------------------------------------------------------------------
 
--module(clocksi_general_tx_coord_sup).
+-module(specula_general_tx_coord_sup).
 -author("Christopher Meiklejohn <christopher.meiklejohn@gmail.com>").
 
 -behavior(supervisor).
@@ -39,6 +39,6 @@ start_fsm(Args) ->
 %% @doc Starts the coordinator of a ClockSI general transaction.
 init([]) ->
     Worker = {undefined,
-              {clocksi_general_tx_coord_fsm, start_link, []},
-               temporary, 5000, worker, [clocksi_general_tx_coord_fsm]},
+              {specula_general_tx_coord_fsm, start_link, []},
+               temporary, 5000, worker, [specula_general_tx_coord_fsm]},
     {ok, {{simple_one_for_one, 5, 10}, [Worker]}}.

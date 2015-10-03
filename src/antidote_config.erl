@@ -28,6 +28,12 @@ load(File) ->
         false ->
             lager:info("No replication")
     end,
+    case antidote_config:get(do_specula) of
+        true ->
+            lager:info("Will do speculation");
+        false ->
+            lager:info("No speculation")
+    end,
     case antidote_config:get(do_cert) of
         true ->
             lager:info("Will do certification");

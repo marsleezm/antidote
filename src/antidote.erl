@@ -22,18 +22,15 @@
 -include("antidote.hrl").
 
 -export([append/3,
-         read/2,
+         read/1,
          clocksi_execute_tx/2,
          clocksi_execute_tx/1,
-         clocksi_execute_g_tx/1,
-         clocksi_read/3,
-         clocksi_read/2,
-         clocksi_bulk_update/2,
-         clocksi_bulk_update/1,
+         execute_g_tx/1,
+         prepare/2,
          clocksi_istart_tx/1,
          clocksi_istart_tx/0,
-         clocksi_iread/3,
-         clocksi_iupdate/4,
+         clocksi_iread/2,
+         clocksi_iupdate/3,
          clocksi_iprepare/1,
          clocksi_full_icommit/1,
          clocksi_icommit/1]).
@@ -54,9 +51,13 @@ append(Key, Type, {OpParam, Actor}) ->
 
 %% @doc The read/2 function returns the current value for the CRDT
 %%      object stored at some key.
--spec read(Key::key(), Type::type()) -> {ok, val()} | {error, reason()}.
-read(Key, Type) ->
-    clocksi_interactive_tx_coord_fsm:perform_singleitem_read(Key,Type).
+-spec read(Key::key()) -> {ok, val()} | {error, reason()}.
+read(Key) ->
+    clocksi_interactive_tx_coord_fsm:perform_singleitem_read(Key).
+
+-spec prepare(TxId::txid(), Updates::[{key(), []}]) -> {ok, val()} | {error, reason()}.
+prepare(TxId, Updates) ->
+    i_tx_cert_sup:certify(TxId, Updates).
 
 %% Clock SI API
 
@@ -86,9 +87,14 @@ clocksi_execute_tx(Operations) ->
             EndOfTx
     end.
 
--spec clocksi_execute_g_tx(Operations::[any()]) -> term().
-clocksi_execute_g_tx(Operations) ->
-    {ok, _} = clocksi_general_tx_coord_sup:start_fsm([self(), Operations]),
+-spec execute_g_tx(Operations::[any()]) -> term().
+execute_g_tx(Operations) ->
+    case ets:lookup(meta_info, do_specula) of
+        [{_, true}] ->
+            {ok, _} = specula_general_tx_coord_sup:start_fsm([self(), Operations]);
+        [{_, false}] ->
+            {ok, _} = clocksi_general_tx_coord_sup:start_fsm([self(), Operations])
+    end,
     receive
         EndOfTx ->
             EndOfTx
@@ -114,28 +120,11 @@ clocksi_istart_tx() ->
             TxId
     end.
 
--spec clocksi_bulk_update(ClientClock:: snapshot_time(),
-                          Operations::[any()]) -> term().
-clocksi_bulk_update(ClientClock, Operations) ->
-    clocksi_execute_tx(ClientClock, Operations).
+clocksi_iread({_, _, CoordFsmPid}, Key) ->
+    gen_fsm:sync_send_event(CoordFsmPid, {read, {Key}}).
 
--spec clocksi_bulk_update(Operations :: [any()]) -> term().
-clocksi_bulk_update(Operations) ->
-    clocksi_execute_tx(Operations).
-
--spec clocksi_read(ClientClock :: snapshot_time(),
-                   Key :: key(), Type:: type()) -> term().
-clocksi_read(ClientClock, Key, Type) ->
-    clocksi_execute_tx(ClientClock, [{read, Key, Type}]).
-
-clocksi_read(Key, Type) ->
-    clocksi_execute_tx([{read, Key, Type}]).
-
-clocksi_iread({_, _, CoordFsmPid}, Key, Type) ->
-    gen_fsm:sync_send_event(CoordFsmPid, {read, {Key, Type}}).
-
-clocksi_iupdate({_, _, CoordFsmPid}, Key, Type, OpParams) ->
-    gen_fsm:sync_send_event(CoordFsmPid, {update, {Key, Type, OpParams}}).
+clocksi_iupdate({_, _, CoordFsmPid}, Key, Value) ->
+    gen_fsm:sync_send_event(CoordFsmPid, {update, {Key, Value}}).
 
 %% @doc This commits includes both prepare and commit phase. Thus
 %%      Client do not need to send to message to complete the 2PC

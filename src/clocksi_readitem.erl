@@ -19,7 +19,6 @@
 %% -------------------------------------------------------------------
 -module(clocksi_readitem).
 
-
 -include("antidote.hrl").
 
 -ifdef(TEST).
@@ -28,33 +27,37 @@
 
 
 %% States
--export([check_prepared/4, return/4]).
+-export([ready_or_block/5, return/4]).
 
-check_prepared(Key, MyTxId, Tables, SpeculaTimeout) ->
+ready_or_block(Key, MyTxId, Tables, SpeculaTimeout, Sender) ->
     SnapshotTime = MyTxId#tx_id.snapshot_time,
-    {PreparedTx, _, SpeculaDep} = Tables,
-    case ets:lookup(PreparedTx, Key) of
+    {PreparedTxs, _, SpeculaDep} = Tables,
+    case ets:lookup(PreparedTxs, Key) of
         [] ->
             ready;
-        [{Key, {PrepareTxId, PrepareTime, Type, Op}}] ->
+        [{Key, {PreparedTxId, PrepareTime, Type, Op, PendingReaders}}] ->
             case PrepareTime =< SnapshotTime of
                 true ->
                     case specula_utilities:should_specula(PrepareTime, SnapshotTime, SpeculaTimeout) of
                         true ->
-                            specula_utilities:speculate_and_read(Key, MyTxId, {PrepareTxId, PrepareTime, Type, Op}, Tables);
+                            specula_utilities:speculate_and_read(Key, MyTxId, {PreparedTxId, PrepareTime, Type, Op}, Tables);
                         false ->
-                            {not_ready, 2}
+                            ets:insert(PreparedTxs, {Key, {PreparedTxId, PrepareTime, 
+                                    Type, Op, [{MyTxId#tx_id.snapshot_time, Sender}|PendingReaders]}}),
+                            not_ready
                     end;
                 false ->
                     ready
             end;
-        [{Key, {SpeculaTxId, PrepareTime, SpeculaValue}}] ->
+        [{Key, {SpeculaTxId, PrepareTime, SpeculaValue, PendingReaders}}] ->
             case specula_utilities:should_specula(PrepareTime, SnapshotTime, SpeculaTimeout) of
                 true ->
                     specula_utilities:add_specula_meta(SpeculaDep, SpeculaTxId, MyTxId, Key),
                     {specula, SpeculaValue};
                 false ->
-                    {not_ready, 2}
+                    ets:insert(PreparedTxs, {Key, {SpeculaTxId, PrepareTime, 
+                            SpeculaValue, [{MyTxId#tx_id.snapshot_time, Sender}|PendingReaders]}}),
+                    not_ready
             end
     end.
 
@@ -72,10 +75,10 @@ return(Key, Type, TxId, InMemoryStore) ->
 %%%%%%%%%Intenal%%%%%%%%%%%%%%%%%%
 find_version([], _SnapshotTime, Type) ->
     Type:new();
-find_version([{TS, Value}|Rest], SnapshotTime, Type) ->
+find_version([{TS, Snapshot}|Rest], SnapshotTime, Type) ->
     case SnapshotTime >= TS of
         true ->
-            Value;
+            Snapshot; 
         false ->
             find_version(Rest, SnapshotTime, Type)
     end.

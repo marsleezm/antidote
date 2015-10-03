@@ -18,21 +18,33 @@
 %%
 %% -------------------------------------------------------------------
 
--module(clocksi_general_tx_coord_worker_sup).
--author("Christopher Meiklejohn <christopher.meiklejohn@gmail.com>").
+-module(i_tx_cert_sup).
 
 -behavior(supervisor).
 
--export([start_link/1]).
+-include("antidote.hrl").
 
--export([init/1]).
+-export([start_link/0]).
 
-start_link(Name) ->
-    supervisor:start_link({local, Name}, ?MODULE, []).
+-export([init/1, certify/2]).
 
-%% @doc Starts the coordinator of a ClockSI static transaction.
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+certify(TxId, Updates) ->
+    random:seed(now()),
+    i_tx_cert_server:certify(generate_module_name(random:uniform(?NUM_SUP)), TxId, Updates).
+
+generate_module_name(N) ->
+    list_to_atom(atom_to_list(?MODULE) ++ "-" ++ integer_to_list(N)).
+
+generate_supervisor_spec(N) ->
+    Module = generate_module_name(N),
+    {Module,
+     {i_tx_cert_server, start_link, [Module]},
+      permanent, 5000, worker, [i_tx_cert_server]}.
+
+%% @doc Starts the coordinator of a ClockSI interactive transaction.
 init([]) ->
-    Worker = {undefined,
-              {clocksi_general_tx_coord_fsm, start_link, []},
-               temporary, 5000, worker, [clocksi_general_tx_coord_fsm]},
-    {ok, {{simple_one_for_one, 5, 10}, [Worker]}}.
+    Pool = [generate_supervisor_spec(N) || N <- lists:seq(1, ?NUM_SUP)],
+    {ok, {{one_for_one, 5, 10}, Pool}}.

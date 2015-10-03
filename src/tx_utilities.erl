@@ -23,12 +23,12 @@
 
 
 -ifdef(TEST).
--define(GET_AND_UPDATE_TS(_), clocksi_vnode:now_microsec(now())).
+-define(GET_AND_UPDATE_TS(_), now_microsec()).
 -else.
 -define(GET_AND_UPDATE_TS(Clock), clock_service:get_and_update_ts(Clock)).
 -endif.
 
--export([create_transaction_record/1]).
+-export([create_transaction_record/1, now_microsec/0, open_table/2, open_private_table/1, get_table_name/2]).
 
 -spec create_transaction_record(snapshot_time() | ignore) -> txid().
 create_transaction_record(ClientClock) ->
@@ -38,3 +38,32 @@ create_transaction_record(ClientClock) ->
     _ = random:seed(A1, A2, A3),
     TransactionId = #tx_id{snapshot_time=?GET_AND_UPDATE_TS(ClientClock), server_pid=self()},
     TransactionId.
+
+%% @doc converts a tuple {MegaSecs,Secs,MicroSecs} into microseconds
+now_microsec() ->
+    {MegaSecs, Secs, MicroSecs} = now(),
+    (MegaSecs * 1000000 + Secs) * 1000000 + MicroSecs.
+
+open_table(Partition, Name) ->
+    try
+    ets:new(get_table_name(Partition,Name),
+        [set,protected,named_table,?TABLE_CONCURRENCY])
+    catch
+    _:_Reason ->
+        %% Someone hasn't finished cleaning up yet
+        open_table(Partition, Name)
+    end.
+
+open_private_table(Name) ->
+    try
+    ets:new(Name,
+        [set,private,?TABLE_CONCURRENCY])
+    catch
+    _:_Reason ->
+        %% Someone hasn't finished cleaning up yet
+        open_private_table(Name)
+    end.
+
+get_table_name(Partition,Base) ->
+      list_to_atom(atom_to_list(Base) ++ "-" ++ integer_to_list(Partition)).
+

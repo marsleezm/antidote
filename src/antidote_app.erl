@@ -25,9 +25,7 @@
 -export([start/2, stop/1]).
 
 %% PB Services
--define(SERVICES, [{antidote_pb_counter, 94, 98},
-                   {antidote_pb_set, 99, 101},
-                   {antidote_pb_txn, 102, 111}]).
+-define(SERVICES, [{antidote_pb_txn, 91, 99}]).
 
 %% ===================================================================
 %% Application callbacks
@@ -36,23 +34,14 @@
 start(_StartType, _StartArgs) ->
     case antidote_sup:start_link() of
         {ok, Pid} ->
-            %ok = riak_core:register([{vnode_module, logging_vnode}]),
-            %ok = riak_core_node_watcher:service_up(logging, self()),
-            %%ClockSI layer
-
-            ok = riak_core:register([{vnode_module, clocksi_vnode}]),
-            ok = riak_core_node_watcher:service_up(clocksi, self()),
-
-            ok = riak_core:register([{vnode_module, vectorclock_vnode}]),
-            ok = riak_core_node_watcher:service_up(vectorclock, self()),
-
-            %ok = riak_core:register([{vnode_module, materializer_vnode}]),
-            %ok = riak_core_node_watcher:service_up(materializer, self()),
-
-            %ok = riak_core:register([{vnode_module, inter_dc_repl_vnode}]),
-            %ok = riak_core_node_watcher:service_up(interdcreplication, self()),
-            %ok = riak_core:register([{vnode_module, inter_dc_recvr_vnode}]),
-            %ok = riak_core_node_watcher:service_up(inter_dc_recvr, self()),
+            case antidote_config:get(do_specula) of
+                true ->
+                    ok = riak_core:register([{vnode_module, specula_vnode}]),
+                    ok = riak_core_node_watcher:service_up(clocksi, self());
+                false ->
+                    ok = riak_core:register([{vnode_module, clocksi_vnode}]),
+                    ok = riak_core_node_watcher:service_up(clocksi, self())
+            end,
 
             ok = riak_core_ring_events:add_guarded_handler(antidote_ring_event_handler, []),
             ok = riak_core_node_watcher_events:add_guarded_handler(antidote_node_event_handler, []),

@@ -102,8 +102,8 @@ init([Partition]) ->
     Mode = antidote_config:get(mode),
     Delay = antidote_config:get(delay),
     Successors = [get_replfsm_name(Index) || {Index, _Node} <- log_utilities:get_my_next(Partition, ReplFactor-1)],
-    ReplicatedLog = clocksi_vnode:open_table(Partition, repl_log),
-    PendingLog = clocksi_vnode:open_table(Partition, pending_log),
+    ReplicatedLog = tx_utilities:open_table(Partition, repl_log),
+    PendingLog = tx_utilities:open_table(Partition, pending_log),
     {ok, #state{partition=Partition,
                 log_size = LogSize,
                 quorum = Quorum,
@@ -163,12 +163,11 @@ handle_cast({repl_ack, {Type, TxId}}, SD0=#state{replicated_log=ReplicatedLog,
                                         end,
                             ets:insert(ReplicatedLog, {Partition, [{TxId, Record}|DurableLog]}),
                             ets:delete(PendingLog, TxId),
-                            {fsm, undefined, FSMSender} = Sender,
                             case MsgToReply of
                                 false ->
                                     ok;
                                 _ ->
-                                    gen_fsm:send_event(FSMSender, MsgToReply)
+                                    gen_server:cast(Sender, MsgToReply)
                             end;
                         _ -> %%Wait for more replies
                             %lager:info("Log ~w waiting for more reply, Ackneeded is ~w", [Record, AckNeeded]),
@@ -208,12 +207,12 @@ handle_cast({chain_replicate, Partition, Log, MsgToReply, RepNeeded},
     ets:insert(ReplicatedLog, {Partition, [Log|DurableLog]}),
     case RepNeeded of
         1 ->
-            {{fsm, undefined, FSMSender}, Msg} = MsgToReply,
+            {Sender, Msg} = MsgToReply,
             case Msg of
                 false ->
                     ok;
                 _ ->
-                    gen_fsm:send_event(FSMSender, Msg)
+                    gen_server:cast(Sender, Msg)
             end;
         _ ->
             chain_replicate(Delay, hd(Successors), Partition, Log, MsgToReply, RepNeeded-1)

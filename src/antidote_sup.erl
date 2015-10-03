@@ -56,17 +56,37 @@ stop_rep() ->
 %% ===================================================================
 
 init(_Args) ->
-    ClockSIMaster = { clocksi_vnode_master,
+    antidote_config:load("antidote.config"),
+    ets:new(meta_info,
+        [set,public,named_table,{read_concurrency,true},{write_concurrency,false}]),
+
+    {VnodeMaster, GeneralTxSup} 
+        = case antidote_config:get(do_specula) of
+            true -> 
+                ets:insert(meta_info, {do_specula, true}),
+                {   { specula_vnode_master,
+                      {riak_core_vnode_master, start_link, [specula_vnode]},
+                      permanent, 5000, worker, [riak_core_vnode_master]},
+                    { specula_general_tx_coord_sup,
+                            {specula_general_tx_coord_sup, start_link, []},
+                            permanent, 5000, supervisor, [specula_general_tx_coord_sup]}
+                };
+            false ->
+                ets:insert(meta_info, {do_specula, false}),
+                { { clocksi_vnode_master,
                       {riak_core_vnode_master, start_link, [clocksi_vnode]},
                       permanent, 5000, worker, [riak_core_vnode_master]},
+                  { clocksi_general_tx_coord_sup,
+                            {clocksi_general_tx_coord_sup, start_link, []},
+                            permanent, 5000, supervisor, [clockSI_general_tx_coord_sup]}
+                }
+          end,
+            
 
     ClockSIsTxCoordSup =  { clocksi_static_tx_coord_sup,
                            {clocksi_static_tx_coord_sup, start_link, []},
                            permanent, 5000, supervisor, [clockSI_static_tx_coord_sup]},
 
-    ClockSIgTxCoordSup =  { clocksi_general_tx_coord_sup,
-                           {clocksi_general_tx_coord_sup, start_link, []},
-                           permanent, 5000, supervisor, [clockSI_general_tx_coord_sup]},
 
     ClockSIiTxCoordSup =  { clocksi_interactive_tx_coord_sup,
                             {clocksi_interactive_tx_coord_sup, start_link, []},
@@ -88,14 +108,19 @@ init(_Args) ->
                     []},
                     permanent, 5000, worker, [stat_server]},
 
-    antidote_config:load("antidote.config"),
+    ICertSup = {i_tx_cert_sup,
+                    {i_tx_cert_sup,  start_link,
+                    []},
+                    permanent, 5000, worker, [i_tx_cert_sup]},
+
 
     {ok,
      {{one_for_one, 5, 10},
-      [ClockSIMaster,
+      [VnodeMaster,
        ClockSIsTxCoordSup,
        ClockSIiTxCoordSup,
-       ClockSIgTxCoordSup,
+       GeneralTxSup,
        ReplFsmSup,
        ClockService,
+       ICertSup,
        StatServer]}}.

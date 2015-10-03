@@ -78,11 +78,11 @@ get_ts()->
             {get_ts},infinity).
 
 init(_) ->
-    {ok, #state{max_ts=clocksi_vnode:now_microsec(now())}}.
+    {ok, #state{max_ts=tx_utilities:now_microsec()}}.
 
 handle_call({get_and_update_ts, CausalTS}, _,
         SD0=#state{max_ts=TS}) ->
-    Now = clocksi_vnode:now_microsec(now()),
+    Now = tx_utilities:now_microsec(),
     Max2 = max(CausalTS, max(Now, TS)) + 1,
     {reply, Max2, SD0#state{max_ts=Max2}};
 
@@ -101,7 +101,7 @@ handle_call({increment_ts, SnapshotTS}, _,
     {reply, NewTS, SD0#state{max_ts=SnapshotTS}};
 
 handle_call({get_ts}, _, SD0=#state{max_ts=TS}) ->
-    {reply, max(clocksi_vnode:now_microsec(now()), TS), SD0}.
+    {reply, max(tx_utilities:now_microsec(), TS), SD0}.
 
 
 handle_cast(_, State) ->

@@ -179,7 +179,7 @@ execute_op({async_read_data_item, Key, From}, State) ->
     {next_state, execute_op, State#state{key=Key}};
 
 execute_op({prepare, TxId, From, [{Key, _, _}]}, State) ->
-    Now = clocksi_vnode:now_microsec(now()),
+    Now = tx_utilities:now_microsec(),
     case Key of 
         timeout -> gen_fsm:send_event(From, timeout);
         {wait, Delay} -> timer:sleep(Delay), gen_fsm:send_event(From, {prepared, TxId, Now});
