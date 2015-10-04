@@ -18,7 +18,7 @@
 %%
 %% -------------------------------------------------------------------
 
--module(i_tx_cert_sup).
+-module(tx_cert_sup).
 
 -behavior(supervisor).
 
@@ -33,16 +33,28 @@ start_link() ->
 
 certify(TxId, Updates) ->
     random:seed(now()),
-    i_tx_cert_server:certify(generate_module_name(random:uniform(?NUM_SUP)), TxId, Updates).
+    case ets:lookup(meta_info, do_specula) of
+        [{do_specula, true}] ->
+            specula_tx_cert_server:certify(generate_module_name(random:uniform(?NUM_SUP)), TxId, Updates);
+        [{do_specula, false}] ->
+            i_tx_cert_server:certify(generate_module_name(random:uniform(?NUM_SUP)), TxId, Updates)
+    end.
 
 generate_module_name(N) ->
     list_to_atom(atom_to_list(?MODULE) ++ "-" ++ integer_to_list(N)).
 
 generate_supervisor_spec(N) ->
     Module = generate_module_name(N),
-    {Module,
-     {i_tx_cert_server, start_link, [Module]},
-      permanent, 5000, worker, [i_tx_cert_server]}.
+    case ets:lookup(meta_info, do_specula) of
+        [{do_specula, true}] ->
+            {Module,
+             {specula_tx_cert_server, start_link, [Module]},
+              permanent, 5000, worker, [specula_tx_cert_server]};
+        [{do_specula, false}] ->
+            {Module,
+             {i_tx_cert_server, start_link, [Module]},
+              permanent, 5000, worker, [i_tx_cert_server]}
+    end.
 
 %% @doc Starts the coordinator of a ClockSI interactive transaction.
 init([]) ->

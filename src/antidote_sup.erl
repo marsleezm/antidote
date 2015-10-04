@@ -108,10 +108,9 @@ init(_Args) ->
                     []},
                     permanent, 5000, worker, [stat_server]},
 
-    ICertSup = {i_tx_cert_sup,
-                    {i_tx_cert_sup,  start_link,
-                    []},
-                    permanent, 5000, worker, [i_tx_cert_sup]},
+    CertSup = {tx_cert_sup,
+                    {tx_cert_sup,  start_link, []},
+                    permanent, 5000, worker, [tx_cert_sup]},
 
 
     {ok,
@@ -122,5 +121,5 @@ init(_Args) ->
        GeneralTxSup,
        ReplFsmSup,
        ClockService,
-       ICertSup,
+       CertSup,
        StatServer]}}.

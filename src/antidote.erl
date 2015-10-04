@@ -57,7 +57,7 @@ read(Key) ->
 
 -spec prepare(TxId::txid(), Updates::[{key(), []}]) -> {ok, val()} | {error, reason()}.
 prepare(TxId, Updates) ->
-    i_tx_cert_sup:certify(TxId, Updates).
+    tx_cert_sup:certify(TxId, Updates).
 
 %% Clock SI API
 

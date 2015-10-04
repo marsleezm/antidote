@@ -93,7 +93,7 @@ speculate_and_read(Key, MyTxId, PreparedRecord, Tables) ->
 make_prepared_specula(Key, PreparedRecord, PreparedTxs, _InMemoryStore) ->
     {TxId, PrepareTime, Value, PendingReaders} = PreparedRecord,
     %lager:info("Trying to make prepared specula ~w for ~w",[Key, TxId]),
-    true = ets:insert(PreparedTxs, {Key, {TxId, PrepareTime, Value, PendingReaders}}),
+    true = ets:insert(PreparedTxs, {Key, {specula, TxId, PrepareTime, Value, PendingReaders}}),
     {TxId, Value}.
 
 

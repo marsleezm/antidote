@@ -24,12 +24,11 @@
 -define(NUM_VERSION, 20).
 
 -export([start_vnode/1,
-	    read_data_item/4,
-	    async_read_data_item/4,
+	    read_data_item/3,
         set_prepared/4,
         async_send_msg/3,
 
-        prepare/2,
+        prepare/3,
         commit/3,
         single_commit/2,
         abort/2,
@@ -97,26 +96,17 @@ start_vnode(I) ->
     riak_core_vnode_master:get_vnode_pid(I, ?MODULE).
 
 %% @doc Sends a read request to the Node that is responsible for the Key
-read_data_item(Node, Key, Type, TxId) ->
+read_data_item(Node, Key, TxId) ->
     riak_core_vnode_master:sync_command(Node,
-                                   {read, Key, Type, TxId},
+                                   {read, Key, TxId},
                                    ?SPECULA_MASTER, infinity).
 
-%% @doc Sends a read request to the Node that is responsible for the Key
-async_read_data_item(Node, Key, Type, TxId) ->
-    Self = {fsm, undefined, self()},
-    riak_core_vnode_master:command(Node,
-                                   {async_read, Key, Type, TxId, Self},
-                                   Self,
-                                   ?SPECULA_MASTER).
-
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
-prepare(ListofNodes, TxId) ->
-    Self = {fsm, undefined, self()},
+prepare(ListofNodes, TxId, Type) ->
     dict:fold(fun(Node,WriteSet,_Acc) ->
 			riak_core_vnode_master:command(Node,
-						       {prepare, TxId,WriteSet, Self},
-                               Self,
+						       {prepare, TxId, WriteSet, Type},
+                               self(),
 						       ?SPECULA_MASTER)
 		end, ok, ListofNodes).
 
@@ -125,10 +115,9 @@ prepare(ListofNodes, TxId) ->
 %%      Called by a Tx coordinator when the tx only
 %%      affects one partition
 single_commit([{Node,WriteSet}], TxId) ->
-    Self = {fsm, undefined, self()},
     riak_core_vnode_master:command(Node,
-                                   {single_commit, TxId,WriteSet, Self},
-                                   Self,
+                                   {single_commit, TxId,WriteSet},
+                                   self(),
                                    ?SPECULA_MASTER).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
@@ -136,7 +125,7 @@ commit(ListofNodes, TxId, CommitTime) ->
     dict:fold(fun(Node,WriteSet,_Acc) ->
 			riak_core_vnode_master:command(Node,
 						       {commit, TxId, CommitTime, WriteSet},
-						       {fsm, undefined, self()},
+						       self(),
 						       ?SPECULA_MASTER)
 		end, ok, ListofNodes).
 
@@ -145,7 +134,7 @@ abort(ListofNodes, TxId) ->
     dict:fold(fun(Node,WriteSet,_Acc) ->
 			riak_core_vnode_master:command(Node,
 						       {abort, TxId, WriteSet},
-						       {fsm, undefined, self()},
+						       self(),
 						       ?SPECULA_MASTER)
 		end, ok, ListofNodes).
 
@@ -280,7 +269,7 @@ handle_command({check_prepared_empty},_Sender,SD0=#state{prepared_txs=PreparedTx
 handle_command({check_servers_ready},_Sender,SD0) ->
     {reply, true, SD0};
 
-handle_command({read, Key, Type, TxId}, Sender, SD0=#state{num_specula_read=NumSpeculaRead,
+handle_command({read, Key, TxId}, Sender, SD0=#state{num_specula_read=NumSpeculaRead,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_timeout=SpeculaTimeout, 
             specula_dep=SpeculaDep}) ->
     Tables = {PreparedTxs, InMemoryStore, SpeculaDep},
@@ -291,11 +280,11 @@ handle_command({read, Key, Type, TxId}, Sender, SD0=#state{num_specula_read=NumS
         {specula, Value} ->
             {reply, {specula, Value}, SD0#state{num_specula_read=NumSpeculaRead+1}};
         ready ->
-            Result = clocksi_readitem:return(Key, Type, TxId, InMemoryStore),
+            Result = clocksi_readitem:return(Key, TxId, InMemoryStore),
             {reply, Result, SD0}
     end;
 
-handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
+handle_command({prepare, TxId, WriteSet, Type}, Sender,
                               State=#state{
                                partition=Partition,
                               if_replicate=IfReplicate,
@@ -312,24 +301,20 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
             UsedTime = tx_utilities:now_microsec() - PrepareTime,
             case IfReplicate of
                 true ->
-                    PendingRecord = {prepare, OriginalSender, 
-                            {prepared, TxId, PrepareTime}, {TxId, WriteSet}},
+                    PendingRecord = {prepare, Sender, 
+                            {prepared, TxId, PrepareTime, Type}, {TxId, WriteSet}},
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                     {noreply, State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}};
                 false ->
-                    riak_core_vnode:reply(OriginalSender, {prepared, TxId, PrepareTime}),
+                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, Type}),
                     {noreply, State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}}
             end;
-        {error, wait_more} ->
-            spawn(specula_vnode, async_send_msg, [50, {prepare, TxId, 
-                        WriteSet, OriginalSender}, {Partition, node()}]),
-            {noreply, State};
         {error, write_conflict} ->
-            riak_core_vnode:reply(OriginalSender, {abort, TxId}),
+            gen_server:cast(Sender, {abort, TxId, Type}),
             {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1}}
     end;
 
-handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
+handle_command({single_commit, TxId, WriteSet}, Sender,
                State = #state{partition=Partition,
                               if_replicate=IfReplicate,
                               if_certify=IfCertify,
@@ -352,26 +337,22 @@ handle_command({single_commit, TxId, WriteSet, OriginalSender}, _Sender,
                             PrepareTime, SpeculaDep, commit),
                     case IfReplicate of
                         true ->
-                            PendingRecord = {commit, OriginalSender, 
+                            PendingRecord = {commit, Sender, 
                                 {committed, PrepareTime}, {TxId, WriteSet}},
                             repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                             {noreply, State#state{num_committed=NumCommitted+1, 
                                 num_read_invalid=NewInvalid}};
                         false ->
-                            riak_core_vnode:reply(OriginalSender, {committed, PrepareTime}),
+                            gen_server:cast(Sender, {committed, PrepareTime}),
                             {reply, {committed, PrepareTime}, State#state{
                                     num_committed=NumCommitted+1, num_read_invalid=NewInvalid}}
                         end;
                 {error, no_updates} ->
-                    riak_core_vnode:reply(OriginalSender, no_tx_record),
+                    gen_server:cast(Sender, no_tx_record),
                     {noreply, State}
             end;
-        {error, wait_more}->
-            spawn(specula_vnode, async_send_msg, [50, {prepare, TxId, 
-                        WriteSet, OriginalSender}, {Partition, node()}]),
-            {noreply, State};
         {error, write_conflict} ->
-            riak_core_vnode:reply(OriginalSender, abort),
+            gen_server:cast(Sender, abort),
             {noreply, State#state{num_cert_fail=NumCertFail+1}}
     end;
 
@@ -494,8 +475,8 @@ prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify)->
 
 set_prepared(_PreparedTxs, [], _TxId, _Time) ->
     ok;
-set_prepared(PreparedTxs,[{Key, Type, Op}|Rest], TxId, Time) ->
-    true = ets:insert(PreparedTxs, {Key, {TxId, Time, Type, Op, []}}),
+set_prepared(PreparedTxs,[{Key, Value}|Rest], TxId, Time) ->
+    true = ets:insert(PreparedTxs, {Key, {TxId, Time, Value, []}}),
     set_prepared(PreparedTxs,Rest,TxId, Time).
 
 commit(TxId, TxCommitTime, Updates, CommittedTxs, InMemoryStore, PreparedTxs, SpeculaDep)->
@@ -513,12 +494,12 @@ commit(TxId, TxCommitTime, Updates, CommittedTxs, InMemoryStore, PreparedTxs, Sp
 %%      b. PreparedTxs
 clean_abort_prepared(_PreparedTxs, _TxId, [], _InMemoryStore) ->
     ok;
-clean_abort_prepared(PreparedTxs, TxId, [{Key, _, _}|Rest], InMemoryStore) ->
+clean_abort_prepared(PreparedTxs, TxId, [{Key, _}|Rest], InMemoryStore) ->
     ToReply = case ets:lookup(PreparedTxs, Key) of
-                [{Key, {TxId, _Time, _Type, _Op, PendingReaders}}] ->
+                [{Key, {TxId, _Time, _Value, PendingReaders}}] ->
                     ets:delete(PreparedTxs, Key),
                     PendingReaders;
-                [{Key, {TxId, _Time, _SpeculaValue, PendingReaders}}] ->
+                [{Key, {specula, TxId, _Time, _SpeculaValue, PendingReaders}}] ->
                     ets:delete(PreparedTxs, Key),
                     PendingReaders;
                 _ ->
@@ -526,11 +507,11 @@ clean_abort_prepared(PreparedTxs, TxId, [{Key, _, _}|Rest], InMemoryStore) ->
             end,
     case ets:lookup(InMemoryStore, Key) of
                 [{Key, ValueList}] ->
-                    {_, Value}=hd(ValueList),
-                    lists:foreach(fun(Sender) -> riak_core_vnode:reply(Sender, {ok, Value}) end,
+                    {_, FirstValue}=hd(ValueList),
+                    lists:foreach(fun(Sender) -> riak_core_vnode:reply(Sender, {ok, FirstValue}) end,
                             ToReply);
                 [] ->
-                    lists:foreach(fun(Sender) -> riak_core_vnode:reply(Sender, {ok, riak_dt_lwwreg:new()}) end, ToReply)
+                    lists:foreach(fun(Sender) -> riak_core_vnode:reply(Sender, {ok, nil}) end, ToReply)
     end,
     clean_abort_prepared(PreparedTxs, TxId, Rest, InMemoryStore).
 
@@ -542,7 +523,7 @@ certification_check(_, [], _, _, true) ->
     true;
 certification_check(TxId, [H|T], CommittedTx, PreparedTxs, true) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
-    {Key, _Type, _} = H,
+    {Key, _Value} = H,
     case ets:lookup(CommittedTx, Key) of
         [{Key, CommitTime}] ->
             case CommitTime > SnapshotTime of
@@ -574,30 +555,25 @@ check_prepared(TxId, Key, PreparedTxs) ->
             false
     end.
 
-
 -spec update_and_clean(KeyValues :: [{key(), atom(), term()}],
                           TxId::txid(),TxCommitTime:: {term(), term()}, InMemoryStore :: cache_id(), 
                             PreparedTxs :: cache_id(), SpeculaDep :: cache_id(), 
                             CommittedTxs :: cache_id(), PrepareTime :: non_neg_integer()) -> ok.
 update_and_clean([], _TxId, TxCommitTime, _, _, _, _, PrepareTime) ->
     TxCommitTime-PrepareTime;
-update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemoryStore, 
+update_and_clean([{Key, Value}|Rest], TxId, TxCommitTime, InMemoryStore, 
                 PreparedTxs, SpeculaDep, CommittedTxs, _) ->
     case ets:lookup(PreparedTxs, Key) of
-        [{Key, {TxId, PrepareTime, _Type, _Op, PendingReaders}}] ->
+        [{Key, {TxId, PrepareTime, Value, PendingReaders}}] ->
             Values = case ets:lookup(InMemoryStore, Key) of
                         [] ->
-                            Init = Type:new(),
-                            {ok, NewSnapshot} = Type:update(Param, Actor, Init),
-                            true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}]}),
-                            [Init, NewSnapshot];
+                            true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]}),
+                            [nil, Value];
                         [{Key, ValueList}] ->
                             {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
                             [{_CommitTime, First}|_] = RemainList,
-                            {ok, NewSnapshot} = Type:update(Param, Actor, First),
-                            true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}|RemainList]}),
-                            {_, FirstValue} = hd(ValueList),
-                            [FirstValue, NewSnapshot]
+                            true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}|RemainList]}),
+                            [First, Value]
                     end,
             lists:foreach(fun({SnapshotTime, Sender}) ->
                     case SnapshotTime >= TxCommitTime of
@@ -611,7 +587,7 @@ update_and_clean([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemor
             true = ets:insert(CommittedTxs, {Key, TxCommitTime}),
             update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, 
                     PreparedTxs, SpeculaDep, CommittedTxs, PrepareTime);
-        [{Key, {TxId, PrepareTime, SpeculaValue, PendingReaders}}] ->
+        [{Key, {specula, TxId, PrepareTime, SpeculaValue, PendingReaders}}] ->
             specula_utilities:finalize_version_and_reply(Key, TxCommitTime, SpeculaValue, 
                             InMemoryStore, PendingReaders),
             true = ets:delete(PreparedTxs, Key),

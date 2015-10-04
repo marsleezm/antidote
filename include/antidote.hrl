@@ -2,6 +2,7 @@
 -define(MASTER, antidote_vnode_master).
 -define(LOGGING_MASTER, logging_vnode_master).
 -define(CLOCKSI_MASTER, clocksi_vnode_master).
+-define(SPECULA_MASTER, specula_vnode_master).
 -define(CLOCKSI_GENERATOR_MASTER,
         clocksi_downstream_generator_vnode_master).
 -define(CLOCKSI, clocksi).
@@ -15,7 +16,7 @@
 -define(TABLE_CONCURRENCY, {read_concurrency,true}).
 -define(READ_CONCURRENCY, 20).
 -define(OLD_SS_MICROSEC,0).
--define(NUM_SUP, 20).
+-define(NUM_SUP, 2).
 -define(SPIN_WAIT, 10).
 -record (payload, {key:: key(), type :: type(), op_param, actor}).
 
