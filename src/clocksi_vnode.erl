@@ -445,11 +445,26 @@ commit(TxId, TxCommitTime, Updates, CommittedTxs,
 %% @doc clean_and_notify:
 %%      This function is used for cleanning the state a transaction
 %%      stores in the vnode while it is being procesed. Once a
-%%      transaction commits or aborts, it is necessary to:
-%%      1. notify all read_fsms that are waiting for this transaction to finish
-%%      2. clean the state of the transaction. Namely:
-%%      a. ActiteTxsPerKey,
-%%      b. PreparedTxs
+%%      transaction commits or aborts, it is necessary to clean the 
+%%      prepared record of a transaction T. There are three possibility
+%%      when trying to clean a record:
+%%      1. The record is prepared by T (with T's TxId).
+%%          If T is being committed, this is the normal. If T is being 
+%%          aborted, it means T successfully prepared here, but got 
+%%          aborted somewhere else.
+%%          In both cases, we should remove the record.
+%%      2. The record is empty.
+%%          This can only happen when T is being aborted. What can only
+%%          only happen is as follows: when T tried to prepare, someone
+%%          else has already prepared, which caused T to abort. Then 
+%%          before the partition receives the abort message of T, the
+%%          prepared transaction gets processed and the prepared record
+%%          is removed.
+%%          In this case, we don't need to do anything.
+%%      3. The record is prepared by another transaction M.
+%%          This can only happen when T is being aborted. We can not
+%%          remove M's prepare record, so we should not do anything
+%%          either. 
 %%
 clean_abort_prepared(_PreparedTxs,[],_TxId,_InMemoryStore) ->
     ok;

@@ -23,6 +23,7 @@
 
 -export([append/3,
          read/1,
+         read/3,
          clocksi_execute_tx/2,
          clocksi_execute_tx/1,
          execute_g_tx/1,
@@ -58,6 +59,10 @@ read(Key) ->
 -spec prepare(TxId::txid(), Updates::[{key(), []}]) -> {ok, val()} | {error, reason()}.
 prepare(TxId, Updates) ->
     tx_cert_sup:certify(TxId, Updates).
+
+-spec read(Node::preflist(), Key::key(), TxId::txid()) -> {ok, val()} | {error, reason()}.
+read(Node, Key, TxId) ->
+    clocksi_vnode:read_data_item(Node, Key, TxId).
 
 %% Clock SI API
 

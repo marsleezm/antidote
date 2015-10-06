@@ -92,8 +92,8 @@ process(#fpbpreptxnreq{txid=TxId, ops = Ops}, State) ->
             {reply, #fpbpreptxnresp{success=false}, State}
     end;
 process(#fpbreadreq{txid=TxId, key=Key}, State) ->
-    {ok, Value} = antidote:clocksi_iread(TxId, Key),
-    {reply, #fpbvalue{key=Key, value=Value}, State}. 
+    {ok, Value} = antidote:clocksi_iread(TxId, binary_to_term(Key)),
+    {reply, #fpbvalue{value=Value}, State}. 
 
 %% @doc process_stream/3 callback. This service does not create any
 %% streaming responses and so ignores all incoming messages.
@@ -122,8 +122,8 @@ encode_general_txn_response(Zipped) ->
                       encode_general_txn_read_resp(Resp)
               end, Zipped).
 
-encode_general_txn_read_resp({{read, Key, _Type}, Result}) ->
-    #fpbvalue{key=Key, value=term_to_binary(Result)}.
+encode_general_txn_read_resp({{read, _Key, _Type}, Result}) ->
+    #fpbvalue{value=term_to_binary(Result)}.
 
 get_op_by_id(0) ->
     increment;
