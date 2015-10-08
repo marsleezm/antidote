@@ -54,11 +54,11 @@
 %%%===================================================================
 
 start_link(Name) ->
-    gen_server:start_link({global, Name},
+    gen_server:start_link({local, Name},
              ?MODULE, [], []).
 
 certify(ICertServer, TxId, LocalUpdates, RemoteUpdates) ->
-    gen_server:call({global, ICertServer}, {certify, TxId, LocalUpdates, RemoteUpdates}).
+    gen_server:call({local, ICertServer}, {certify, TxId, LocalUpdates, RemoteUpdates}).
 %%%===================================================================
 %%% Internal
 %%%===================================================================
