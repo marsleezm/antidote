@@ -98,12 +98,6 @@ process(#fpbpreptxnreq{txid=TxId, local_updates=LocalUpdates, remote_updates=Rem
 process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
     {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), TxId, binary_to_term(Key)),
     {reply, #fpbvalue{value=Value}, State};
-process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
-    {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), TxId, binary_to_term(Key)),
-    {reply, #fpbvalue{value=Value}, State};
-process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
-    {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), TxId, binary_to_term(Key)),
-    {reply, #fpbvalue{value=Value}, State};
 process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) ->
     {ok, {committed, CommitTime}} = antidote:single_update(hash_fun:get_local_vnode_by_id(PartitionId), 
                 binary_to_term(Key), Value),
