@@ -46,9 +46,12 @@ init() ->
 %% @doc decode/2 callback. Decodes an incoming message.
 decode(Code, Bin) ->
     Msg = riak_pb_codec:decode(Code, Bin),
+    lager:info("Code is ~w, Bin is ~w", [Code, Bin]),
     case Msg of
         #fpbtxnreq{} ->
             {ok, Msg, {"antidote.generaltxn",<<>>}};
+        #fpbpartlistreq{} ->
+            {ok, Msg, {"antidote.partlistreq",<<>>}};
         #fpbstarttxnreq{} ->
             {ok, Msg, {"antidote.starttxn",<<>>}};
         #fpbpreptxnreq{} ->
@@ -79,10 +82,11 @@ process(#fpbtxnreq{ops = Ops}, State) ->
 process(#fpbstarttxnreq{clock=Clock}, State) ->
     TxId = antidote:clocksi_istart_tx(Clock),
     {reply, #fpbtxid{snapshot=TxId#tx_id.snapshot_time, pid=TxId#tx_id.server_pid}, State};
-process(#fpbpreptxnreq{txid=TxId, ops = Ops}, State) ->
+process(#fpbpreptxnreq{txid=TxId, local_updates=LocalUpdates, remote_updates=RemoteUpdates}, State) ->
     RealId= decode_txid(TxId),
-    Updates = decode_updates(Ops),
-    case antidote:prepare(RealId, Updates) of
+    DeLocalUpdates = decode_update_list(LocalUpdates),
+    DeRemoteUpdates = decode_update_list(RemoteUpdates),
+    case antidote:prepare(RealId, DeLocalUpdates, DeRemoteUpdates) of
         {ok, {committed, CommitTime}} ->
             {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
         {aborted, RealId} ->
@@ -91,9 +95,23 @@ process(#fpbpreptxnreq{txid=TxId, ops = Ops}, State) ->
             lager:warning("Error reason: ~w", [Reason]),
             {reply, #fpbpreptxnresp{success=false}, State}
     end;
-process(#fpbreadreq{txid=TxId, key=Key}, State) ->
-    {ok, Value} = antidote:clocksi_iread(TxId, binary_to_term(Key)),
-    {reply, #fpbvalue{value=Value}, State}. 
+process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
+    {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), TxId, binary_to_term(Key)),
+    {reply, #fpbvalue{value=Value}, State};
+process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
+    {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), TxId, binary_to_term(Key)),
+    {reply, #fpbvalue{value=Value}, State};
+process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
+    {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), TxId, binary_to_term(Key)),
+    {reply, #fpbvalue{value=Value}, State};
+process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) ->
+    {ok, {committed, CommitTime}} = antidote:single_update(hash_fun:get_local_vnode_by_id(PartitionId), 
+                binary_to_term(Key), Value),
+    {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
+process(#fpbpartlistreq{noop=_}, State) ->
+    PartList = hash_fun:get_hash_fun(),
+    lager:info("Hash fun is ~w", [PartList]),
+    {reply, #fpbpartlist{node_parts=encode_part_list(PartList)}, State}.
 
 %% @doc process_stream/3 callback. This service does not create any
 %% streaming responses and so ignores all incoming messages.
@@ -103,8 +121,11 @@ process_stream(_,_,State) ->
 decode_general_txn(Ops) ->
     lists:map(fun(Op) -> decode_general_txn_op(Op) end, Ops). 
 
-decode_updates(Ops) ->
-    lists:map(fun(Op) -> decode_update(Op) end, Ops).
+decode_update_list(Ops) ->
+    lists:map(fun(Op) -> decode_node_updates(Op) end, Ops).
+
+decode_node_updates(#fpbpernodeup{node=Node, partition_id=PartitionId, ups=Updates}) ->
+    {hash_fun:get_vnode_by_id(PartitionId, binary_to_term(Node)), lists:map(fun(Up) -> decode_update(Up) end, Updates)}.
 
 decode_update(#fpbupdate{key=Key, value=Value}) ->
     {Key, binary_to_term(Value)}.
@@ -124,6 +145,10 @@ encode_general_txn_response(Zipped) ->
 
 encode_general_txn_read_resp({{read, _Key, _Type}, Result}) ->
     #fpbvalue{value=term_to_binary(Result)}.
+
+encode_part_list(List) ->
+    lists:map(fun({Ip, NumPartitions}) -> 
+         #fpbnodepart{ip=term_to_binary(Ip), num_partitions=NumPartitions} end , List).
 
 get_op_by_id(0) ->
     increment;

@@ -41,7 +41,7 @@
         terminate/2]).
 
 %% States
--export([certify/3]).
+-export([certify/4]).
 
 %% Spawn
 
@@ -57,8 +57,8 @@ start_link(Name) ->
     gen_server:start_link({global, Name},
              ?MODULE, [], []).
 
-certify(ICertServer, TxId, Updates) ->
-    gen_server:call({global, ICertServer}, {certify, TxId, Updates}).
+certify(ICertServer, TxId, LocalUpdates, RemoteUpdates) ->
+    gen_server:call({global, ICertServer}, {certify, TxId, LocalUpdates, RemoteUpdates}).
 %%%===================================================================
 %%% Internal
 %%%===================================================================
@@ -68,7 +68,7 @@ init([]) ->
     {ok, #state{
                 pending_metadata=PendingMetadata}}.
 
-handle_call({certify, TxId, Updates},  Sender,
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender,
 	    SD0=#state{pending_metadata=PendingMetadata, local_servers=LocalServers}) ->
     LocalServers1 = case LocalServers of
                         undefined ->
@@ -76,15 +76,14 @@ handle_call({certify, TxId, Updates},  Sender,
                         _ ->
                             LocalServers
                     end,
-    {LocalUpdates, RemoteUpdates} = sort_updates(LocalServers1, Updates),
-    case dict:size(LocalUpdates) of
+    case length(LocalUpdates) of
         0 ->
             clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
-            ets:insert(PendingMetadata, {TxId, {dict:size(RemoteUpdates), 0, LocalUpdates, RemoteUpdates, Sender}});
+            ets:insert(PendingMetadata, {TxId, {length(RemoteUpdates), 0, LocalUpdates, RemoteUpdates, Sender}});
         _ ->
             %lager:info("Preparing for ~w of ~w", [LocalUpdates, TxId]),
             clocksi_vnode:prepare(LocalUpdates, TxId, local),
-            ets:insert(PendingMetadata, {TxId, {dict:size(LocalUpdates), 0, LocalUpdates, RemoteUpdates, Sender}})
+            ets:insert(PendingMetadata, {TxId, {length(LocalUpdates), 0, LocalUpdates, RemoteUpdates, Sender}})
     end,
     {noreply, SD0#state{local_servers=LocalServers1}};
 
@@ -95,7 +94,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
 	    SD0=#state{pending_metadata=PendingMetadata}) ->
     case ets:lookup(PendingMetadata, TxId) of
         [{TxId, {1, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
-            case dict:size(RemoteUpdates) of
+            case length(RemoteUpdates) of
                 0 ->
                     CommitTime = max(PrepareTime, MaxPrepTime),
                     %lager:info("~w done", [TxId]),
@@ -104,7 +103,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
                     gen_server:reply(Sender, {ok, {committed, CommitTime}});
                 _ ->
                     clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
-                    ets:insert(PendingMetadata, {TxId, {dict:size(RemoteUpdates), MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}})
+                    ets:insert(PendingMetadata, {TxId, {length(RemoteUpdates), MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}})
                 end;
         [{TxId, {N, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
             %lager:info("~w, needs ~w", [TxId, N-1]),
@@ -176,24 +175,3 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 terminate(_Reason, _SD) ->
     ok.
 
-sort_updates(LocalParts, Updates) ->
-    SortUpdates = fun({K, V}, {LUpdates, RUpdates}) ->
-                    [Part] = hash_fun:get_preflist_from_key(K),
-                    case dict:find(Part, LUpdates) of
-                        {ok, L} ->
-                            {dict:store(Part, [{K,V}|L], LUpdates), RUpdates};
-                        error ->
-                            case sets:is_element(Part, LocalParts) of
-                                true ->
-                                    {dict:store(Part, [{K, V}], LUpdates), RUpdates};
-                                false ->
-                                    case dict:find(Part, RUpdates) of
-                                        {ok, R} ->
-                                            {LUpdates, dict:store(Part, [{K, V}|R], RUpdates)};
-                                        error ->
-                                            {LUpdates, dict:store(Part, [{K, V}], RUpdates)}
-                                    end
-                            end
-                    end end,
-    lists:foldl(SortUpdates, {dict:new(), dict:new()}, Updates).
-    

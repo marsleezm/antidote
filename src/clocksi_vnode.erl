@@ -98,12 +98,12 @@ read_data_item(Node, Key, TxId) ->
 
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
 prepare(ListofNodes, TxId, Type) ->
-    dict:fold(fun(Node,WriteSet, _) ->
+    lists:foreach(fun({Node,WriteSet}) ->
 			riak_core_vnode_master:command(Node,
 						       {prepare, TxId, WriteSet, Type},
                                self(),
 						       ?CLOCKSI_MASTER)
-		end, ok, ListofNodes).
+		end, ListofNodes).
 
 %% @doc Sends prepare+commit to a single partition
 %%      Called by a Tx coordinator when the tx only

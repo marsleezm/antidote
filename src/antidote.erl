@@ -24,6 +24,7 @@
 -export([append/3,
          read/1,
          read/3,
+         single_commit/3,
          clocksi_execute_tx/2,
          clocksi_execute_tx/1,
          execute_g_tx/1,
@@ -60,9 +61,23 @@ read(Key) ->
 prepare(TxId, Updates) ->
     tx_cert_sup:certify(TxId, Updates).
 
+single_commit(Node, Key, Value) ->
+    case ets:lookup(meta_info, do_specula) of
+        [{_, true}] ->
+            specula_vnode:single_commit([{Node, [{Key, Value}]}], tx_utilities:create_transaction_record(0));
+        [{_, false}] ->
+            clocksi_vnode:single_commit([{Node, [{Key, Value}]}], tx_utilities:create_transaction_record(0))
+    end.
+    
+
 -spec read(Node::preflist(), Key::key(), TxId::txid()) -> {ok, val()} | {error, reason()}.
 read(Node, Key, TxId) ->
-    clocksi_vnode:read_data_item(Node, Key, TxId).
+    case ets:lookup(meta_info, do_specula) of
+        [{_, true}] ->
+            specula_vnode:read_data_item(Node, Key, TxId);
+        [{_, false}] ->
+            clocksi_vnode:read_data_item(Node, Key, TxId)
+    end.
 
 %% Clock SI API
 

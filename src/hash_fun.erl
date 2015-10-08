@@ -28,10 +28,13 @@
 
 -export([get_preflist_from_key/1,
          get_my_next/2,
+         get_local_vnode_by_id/1,
+         get_vnode_by_id/2,
          get_my_previous/2,
          get_logid_from_key/1,
-         get_local_server_set/0,
+         get_local_servers/0,
          remove_node_from_preflist/1,
+         get_hash_fun/0,
          get_my_node/1
         ]).
 
@@ -64,12 +67,29 @@ get_primaries_preflist(Key)->
     Pos = Key rem length(PartitionList) + 1,
     [lists:nth(Pos, PartitionList)].
 
--spec get_local_server_set() -> dict().
-get_local_server_set() ->
-    PartitionList = get_partitions(),
-    MyNode = node(),
-    L = [{Part,Node} || {Part, Node}  <- PartitionList, Node == MyNode],
-    sets:from_list(L).
+get_local_vnode_by_id(Index) ->
+    lists:nth(Index, get_local_servers()).
+
+get_vnode_by_id(Index, Node) ->
+    lists:nth(Index, get_node_parts(Node)).
+
+-spec get_node_parts(term()) -> [term()].
+get_node_parts(Node) ->
+    case ets:lookup(meta_info, Node) of
+        [{Node, PartList}] ->
+            PartList;
+        [] ->
+            lager:warning("Something is wrong!!!")
+    end.
+
+-spec get_local_servers() -> [term()].
+get_local_servers() ->
+    case ets:lookup(meta_info, local_parts) of
+        [{local_parts, PartList}] ->
+            PartList;
+        [] ->
+            lager:warning("Something is wrong!!!")
+    end.
 
 -spec get_my_previous(chash:index_as_int(), non_neg_integer()) -> preflist().
 get_my_previous(Partition, N) ->
@@ -134,6 +154,36 @@ get_partitions() ->
         [{partitions, PartitionList}] ->
             PartitionList
     end.
+
+get_hash_fun() ->
+    case ets:lookup(meta_info, node_list) of
+        [{node_list, List}] ->
+            [{Node, length(PartList)} || {Node, PartList} <- List];
+        [] ->
+            List = init_hash_fun(),
+            [{Node, length(PartList)} || {Node, PartList} <- List]
+    end.
+
+init_hash_fun() ->
+    Partitions = get_partitions(),
+    Dict1 = lists:foldl(fun({Index, Node}, Dict) ->
+                    case dict:find(Node, Dict) of   
+                        error ->
+                            dict:store(Node, [{Index,Node}], Dict);
+                        {ok, List} ->
+                            dict:store(Node, List++[{Index, Node}], Dict)
+                    end 
+                end, dict:new(), Partitions),
+    PartitionListByNode = dict:to_list(Dict1),
+    ets:insert(meta_info, {node_list, PartitionListByNode}),
+    lists:foreach(fun({Node, PartList}) ->
+        case node() of
+            Node ->
+                 ets:insert(meta_info, {local_parts, PartList});
+            _ ->
+                 ets:insert(meta_info, {Node, PartList})
+        end end, PartitionListByNode),
+    PartitionListByNode.
 
 -ifdef(TEST).
 %% @doc Testing remove_node_from_preflist

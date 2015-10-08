@@ -323,36 +323,25 @@ handle_command({single_commit, TxId, WriteSet}, Sender,
                               inmemory_store=InMemoryStore,
                               num_cert_fail=NumCertFail,
                               num_committed=NumCommitted,
-                              specula_dep=SpeculaDep,
-                              num_read_invalid=NumInvalid
+                              specula_dep=SpeculaDep
                               }) ->
-    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, IfCertify), 
+    Result = prepare_and_commit(TxId, WriteSet, CommittedTxs, PreparedTxs, InMemoryStore, SpeculaDep, IfCertify),
     case Result of
-        {ok, PrepareTime} ->
-            ResultCommit = commit(TxId, PrepareTime, WriteSet, CommittedTxs, 
-                        InMemoryStore, PreparedTxs, SpeculaDep),
-            case ResultCommit of
-                {ok, {committed, _}} ->
-                    NewInvalid = specula_utilities:finalize_dependency(NumInvalid, TxId, 
-                            PrepareTime, SpeculaDep, commit),
-                    case IfReplicate of
-                        true ->
-                            PendingRecord = {commit, Sender, 
-                                {committed, PrepareTime}, {TxId, WriteSet}},
-                            repl_fsm:replicate(Partition, {TxId, PendingRecord}),
-                            {noreply, State#state{num_committed=NumCommitted+1, 
-                                num_read_invalid=NewInvalid}};
-                        false ->
-                            gen_server:cast(Sender, {committed, PrepareTime}),
-                            {reply, {committed, PrepareTime}, State#state{
-                                    num_committed=NumCommitted+1, num_read_invalid=NewInvalid}}
-                        end;
-                {error, no_updates} ->
-                    gen_server:cast(Sender, no_tx_record),
-                    {noreply, State}
+        {ok, {committed, CommitTime}} ->
+            case IfReplicate of
+                true ->
+                    PendingRecord = {commit, Sender,
+                        {committed, CommitTime}, {TxId, WriteSet}},
+                    repl_fsm:replicate(Partition, {TxId, PendingRecord}),
+                    {noreply, State#state{
+                            num_committed=NumCommitted+1}};
+                false ->
+                    gen_server:cast(Sender, {committed, CommitTime}),
+                    {noreply, State#state{
+                            num_committed=NumCommitted+1}}
             end;
         {error, write_conflict} ->
-            gen_server:cast(Sender, abort),
+            gen_server:cast(Sender, {abort, TxId}),
             {noreply, State#state{num_cert_fail=NumCertFail+1}}
     end;
 
@@ -597,5 +586,17 @@ update_and_clean([{Key, Value}|Rest], TxId, TxCommitTime, InMemoryStore,
         Record ->
             lager:warning("My prepared record disappeard! Record is ~w", [Record]),
             0
+    end.
+
+prepare_and_commit(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InMemoryStore, SpeculaDep, IfCertify)->
+    case certification_check(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify) of
+        true ->
+            CommitTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
+            update_and_clean(TxWriteSet, TxId, CommitTime, InMemoryStore, PreparedTxs, SpeculaDep, CommittedTxs, 0),
+            {ok, {committed, CommitTime}};
+        false ->
+            {error, write_conflict};
+        wait ->
+            {error,  wait_more}
     end.
 
