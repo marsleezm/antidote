@@ -53,7 +53,7 @@ decode(Code, Bin) ->
         #fpbpartlistreq{} ->
             {ok, Msg, {"antidote.partlistreq",<<>>}};
         #fpbsingleupreq{} ->
-            {ok, Msg, {"antidote.fpbsingleupreq",<<>>}};
+            {ok, Msg, {"antidote.singleupreq",<<>>}};
         #fpbstarttxnreq{} ->
             {ok, Msg, {"antidote.starttxn",<<>>}};
         #fpbpreptxnreq{} ->
@@ -98,12 +98,12 @@ process(#fpbpreptxnreq{txid=TxId, local_updates=LocalUpdates, remote_updates=Rem
             {reply, #fpbpreptxnresp{success=false}, State}
     end;
 process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
-    {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), TxId, binary_to_term(Key)),
+    {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), TxId, Key),
     {reply, #fpbvalue{value=Value}, State};
 process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) ->
-    lager:info("Befor singe req"),
+    lager:info("Before singe req"),
     {ok, {committed, CommitTime}} = antidote:single_update(hash_fun:get_local_vnode_by_id(PartitionId), 
-                binary_to_term(Key), Value),
+                Key, Value),
     lager:info("After singe req"),
     {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
 process(#fpbpartlistreq{noop=_}, State) ->
