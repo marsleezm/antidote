@@ -67,8 +67,11 @@ single_commit(Node, Key, Value) ->
             specula_vnode:single_commit([{Node, [{Key, Value}]}], tx_utilities:create_transaction_record(0));
         [{_, false}] ->
             clocksi_vnode:single_commit([{Node, [{Key, Value}]}], tx_utilities:create_transaction_record(0))
+    end,
+    receive
+        EndOfTx ->
+            EndOfTx
     end.
-    
 
 -spec read(Node::preflist(), Key::key(), TxId::txid()) -> {ok, val()} | {error, reason()}.
 read(Node, Key, TxId) ->
