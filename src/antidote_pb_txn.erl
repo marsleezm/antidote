@@ -52,6 +52,8 @@ decode(Code, Bin) ->
             {ok, Msg, {"antidote.generaltxn",<<>>}};
         #fpbpartlistreq{} ->
             {ok, Msg, {"antidote.partlistreq",<<>>}};
+        #fpbsingleupreq{} ->
+            {ok, Msg, {"antidote.fpbsingleupreq",<<>>}};
         #fpbstarttxnreq{} ->
             {ok, Msg, {"antidote.starttxn",<<>>}};
         #fpbpreptxnreq{} ->
