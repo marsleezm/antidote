@@ -101,10 +101,8 @@ process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
     {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), TxId, Key),
     {reply, #fpbvalue{value=Value}, State};
 process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) ->
-    lager:info("Before singe req"),
-    {ok, {committed, CommitTime}} = antidote:single_commit(hash_fun:get_local_vnode_by_id(PartitionId), 
+    {committed, CommitTime} = antidote:single_commit(hash_fun:get_local_vnode_by_id(PartitionId), 
                 Key, Value),
-    lager:info("After singe req"),
     {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
 process(#fpbpartlistreq{noop=_}, State) ->
     PartList = hash_fun:get_hash_fun(),
