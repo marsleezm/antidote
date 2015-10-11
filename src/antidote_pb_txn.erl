@@ -82,8 +82,8 @@ process(#fpbtxnreq{ops = Ops}, State) ->
                                             results=Reply}, State}
     end;
 process(#fpbstarttxnreq{clock=Clock}, State) ->
-    TxId = antidote:clocksi_istart_tx(Clock),
-    {reply, #fpbtxid{snapshot=TxId#tx_id.snapshot_time, pid=TxId#tx_id.server_pid}, State};
+    TxId = tx_utilities:create_transaction_record(Clock),
+    {reply, #fpbtxid{snapshot=TxId#tx_id.snapshot_time, pid=term_to_binary(TxId#tx_id.server_pid)}, State};
 process(#fpbpreptxnreq{txid=TxId, local_updates=LocalUpdates, remote_updates=RemoteUpdates}, State) ->
     RealId= decode_txid(TxId),
     DeLocalUpdates = decode_update_list(LocalUpdates),
@@ -98,9 +98,11 @@ process(#fpbpreptxnreq{txid=TxId, local_updates=LocalUpdates, remote_updates=Rem
             {reply, #fpbpreptxnresp{success=false}, State}
     end;
 process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
-    {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), TxId, Key),
+    RealTxId = decode_txid(TxId),
+    {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), Key, RealTxId),
     {reply, #fpbvalue{value=Value}, State};
 process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) ->
+    lager:info("Key is ~w, value is ~w, partition id is ~w", [Key, Value, PartitionId]),
     {committed, CommitTime} = antidote:single_commit(hash_fun:get_local_vnode_by_id(PartitionId), 
                 Key, Value),
     {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};

@@ -88,7 +88,13 @@ get_local_servers() ->
         [{local_parts, PartList}] ->
             PartList;
         [] ->
-            lager:warning("Something is wrong!!!")
+            init_hash_fun(),
+            case ets:lookup(meta_info, local_parts) of
+                [{local_parts, PartList}] ->
+                    PartList;
+                [] ->
+                    lager:info("Something is wrong!!")
+            end
     end.
 
 -spec get_my_previous(chash:index_as_int(), non_neg_integer()) -> preflist().

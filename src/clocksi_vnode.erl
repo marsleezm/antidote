@@ -311,7 +311,8 @@ handle_command({single_commit, TxId, WriteSet}, Sender,
                     {noreply, State#state{ 
                             num_committed=NumCommitted+1}};
                 false ->
-                    gen_server:cast(Sender, {committed, CommitTime}),
+                    %gen_server:cast(Sender, {committed, CommitTime}),
+                    Sender ! {committed, CommitTime},
                     {noreply, State#state{
                             num_committed=NumCommitted+1}}
             end;
