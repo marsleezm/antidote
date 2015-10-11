@@ -98,7 +98,13 @@ process(#fpbpreptxnreq{txid=TxId, local_updates=LocalUpdates, remote_updates=Rem
             {reply, #fpbpreptxnresp{success=false}, State}
     end;
 process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
-    RealTxId = decode_txid(TxId),
+    lager:info("TxId is ~w", [TxId]),
+    RealTxId = case TxId of
+                    undefined ->
+                        tx_utilities:create_transaction_record(0);
+                    _ ->
+                        decode_txid(TxId)
+                end,
     {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), Key, RealTxId),
     {reply, #fpbvalue{value=Value}, State};
 process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) ->
