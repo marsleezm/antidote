@@ -28,7 +28,7 @@
          clocksi_execute_tx/2,
          clocksi_execute_tx/1,
          execute_g_tx/1,
-         prepare/2,
+         prepare/3,
          clocksi_istart_tx/1,
          clocksi_istart_tx/0,
          clocksi_iread/2,
@@ -57,9 +57,9 @@ append(Key, Type, {OpParam, Actor}) ->
 read(Key) ->
     clocksi_interactive_tx_coord_fsm:perform_singleitem_read(Key).
 
--spec prepare(TxId::txid(), Updates::[{key(), []}]) -> {ok, val()} | {error, reason()}.
-prepare(TxId, Updates) ->
-    tx_cert_sup:certify(TxId, Updates).
+-spec prepare(TxId::txid(), Updates::[{key(), []}], Updates::[{key(), []}]) -> {ok, val()} | {error, reason()}.
+prepare(TxId, LocalUpdates, RemoteUpdates) ->
+    tx_cert_sup:certify(TxId, LocalUpdates, RemoteUpdates).
 
 single_commit(Node, Key, Value) ->
     case ets:lookup(meta_info, do_specula) of

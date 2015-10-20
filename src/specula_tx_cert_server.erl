@@ -46,8 +46,7 @@
 %% Spawn
 
 -record(state, {partition :: non_neg_integer(),
-        pending_metadata :: cache_id(), 
-        local_servers :: set()}).
+        pending_metadata :: cache_id()}).
 
 %%%===================================================================
 %%% API
@@ -58,7 +57,7 @@ start_link(Name) ->
              ?MODULE, [], []).
 
 certify(SpeculaCertServer, TxId, LocalUpdates, RemoteUpdates) ->
-    gen_server:call({local, SpeculaCertServer}, {certify, TxId, LocalUpdates, RemoteUpdates}).
+    gen_server:call(SpeculaCertServer, {certify, TxId, LocalUpdates, RemoteUpdates}).
 %%%===================================================================
 %%% Internal
 %%%===================================================================
@@ -69,13 +68,7 @@ init([]) ->
                 pending_metadata=PendingMetadata}}.
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender,
-	    SD0=#state{pending_metadata=PendingMetadata, local_servers=LocalServers}) ->
-    LocalServers1 = case LocalServers of
-                        undefined ->
-                            hash_fun:get_local_server_set();
-                        _ ->
-                            LocalServers
-                    end,
+	    SD0=#state{pending_metadata=PendingMetadata}) ->
     case length(LocalUpdates) of
         0 ->
             specula_vnode:prepare(RemoteUpdates, TxId, remote),
@@ -85,7 +78,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender,
             specula_vnode:prepare(LocalUpdates, TxId, local),
             ets:insert(PendingMetadata, {TxId, {length(LocalUpdates), 0, LocalUpdates, RemoteUpdates, Sender}})
     end,
-    {noreply, SD0#state{local_servers=LocalServers1}};
+    {noreply, SD0};
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.

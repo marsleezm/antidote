@@ -46,7 +46,6 @@ init() ->
 %% @doc decode/2 callback. Decodes an incoming message.
 decode(Code, Bin) ->
     Msg = riak_pb_codec:decode(Code, Bin),
-    lager:info("Code is ~w, Bin is ~w", [Code, Bin]),
     case Msg of
         #fpbtxnreq{} ->
             {ok, Msg, {"antidote.generaltxn",<<>>}};
@@ -92,13 +91,14 @@ process(#fpbpreptxnreq{txid=TxId, local_updates=LocalUpdates, remote_updates=Rem
         {ok, {committed, CommitTime}} ->
             {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
         {aborted, RealId} ->
+            lager:warning("~w: aborted!", [RealId]),
             {reply, #fpbpreptxnresp{success=false}, State};
         Reason ->
             lager:warning("Error reason: ~w", [Reason]),
             {reply, #fpbpreptxnresp{success=false}, State}
     end;
 process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
-    lager:info("TxId is ~w", [TxId]),
+    %lager:info("Trying to read, TxId is ~s, key is ~t", [TxId, binary_to_list(Key)]),
     RealTxId = case TxId of
                     undefined ->
                         tx_utilities:create_transaction_record(0);
@@ -106,9 +106,14 @@ process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
                         decode_txid(TxId)
                 end,
     {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), Key, RealTxId),
-    {reply, #fpbvalue{value=Value}, State};
+    case Value of
+        [] ->
+            {reply, #fpbvalue{field=0}, State};
+        _ ->
+            {reply, Value, State}
+    end;
 process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) ->
-    lager:info("Key is ~w, value is ~w, partition id is ~w", [Key, Value, PartitionId]),
+    %lager:info("Key is ~s, value is ~w, partition id is ~w", [binary_to_list(Key), Value, PartitionId]),
     {committed, CommitTime} = antidote:single_commit(hash_fun:get_local_vnode_by_id(PartitionId), 
                 Key, Value),
     {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
@@ -125,14 +130,15 @@ process_stream(_,_,State) ->
 decode_general_txn(Ops) ->
     lists:map(fun(Op) -> decode_general_txn_op(Op) end, Ops). 
 
-decode_update_list(Ops) ->
+decode_update_list(#fpbnodeups{per_nodeup=Ops}) ->
     lists:map(fun(Op) -> decode_node_updates(Op) end, Ops).
 
 decode_node_updates(#fpbpernodeup{node=Node, partition_id=PartitionId, ups=Updates}) ->
-    {hash_fun:get_vnode_by_id(PartitionId, binary_to_term(Node)), lists:map(fun(Up) -> decode_update(Up) end, Updates)}.
+    {hash_fun:get_vnode_by_id(PartitionId, list_to_atom(Node)), 
+        lists:map(fun(Up) ->  decode_update(Up) end, Updates)}.
 
 decode_update(#fpbupdate{key=Key, value=Value}) ->
-    {Key, binary_to_term(Value)}.
+    {Key, Value}.
     
 decode_general_txn_op(#fpbtxnop{type=0, key=Key, operation=Op, parameter=Param}) ->
     {update, Key, get_type_by_id(Op), {{get_op_by_id(Op), binary_to_term(Param)}, haha}};
@@ -148,11 +154,11 @@ encode_general_txn_response(Zipped) ->
               end, Zipped).
 
 encode_general_txn_read_resp({{read, _Key, _Type}, Result}) ->
-    #fpbvalue{value=term_to_binary(Result)}.
+    #fpbvalue{str_value=term_to_binary(Result)}.
 
 encode_part_list(List) ->
     lists:map(fun({Ip, NumPartitions}) -> 
-         #fpbnodepart{ip=term_to_binary(Ip), num_partitions=NumPartitions} end , List).
+         #fpbnodepart{ip=atom_to_list(Ip), num_partitions=NumPartitions} end , List).
 
 get_op_by_id(0) ->
     increment;

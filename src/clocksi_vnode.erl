@@ -115,22 +115,22 @@ single_commit([{Node,WriteSet}], TxId) ->
                                    ?CLOCKSI_MASTER).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
-commit(ListofNodes, TxId, CommitTime) ->
-    dict:fold(fun(Node,WriteSet,_) ->
+commit(Updates, TxId, CommitTime) ->
+    lists:foreach(fun({Node, WriteSet}) ->
 			riak_core_vnode_master:command(Node,
 						       {commit, TxId, CommitTime, WriteSet},
 						       self(),
 						       ?CLOCKSI_MASTER)
-		end, ok, ListofNodes).
+		end, Updates).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
 abort(ListofNodes, TxId) ->
-    dict:fold(fun(Node,WriteSet,_) ->
+    lists:foreach(fun(Node,WriteSet,_) ->
 			riak_core_vnode_master:command(Node,
 						       {abort, TxId, WriteSet},
 						       {server, undefined, self()},
 						       ?CLOCKSI_MASTER)
-		end, ok, ListofNodes).
+		end, ListofNodes).
 
 %% @doc Initializes all data structures that vnode needs to track information
 %%      the transactions it participates on.
@@ -266,7 +266,6 @@ handle_command({prepare, TxId, WriteSet, Type}, Sender,
                               num_cert_fail=NumCertFail,
                               prepared_txs=PreparedTxs
                               }) ->
-    %lager:info("Got prep req for ~w", [TxId]),
     Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, IfCertify),
     case Result of
         {ok, PrepareTime} ->
@@ -279,7 +278,6 @@ handle_command({prepare, TxId, WriteSet, Type}, Sender,
                     {noreply, State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}};
                 false ->
                     %riak_core_vnode:reply(OriginalSender, {prepared, TxId, PrepareTime, Type}),
-                    %lager:info("~w done, reply", [TxId]),
                     gen_server:cast(Sender, {prepared, TxId, PrepareTime, Type}),
                     {noreply,  
                     State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}} 

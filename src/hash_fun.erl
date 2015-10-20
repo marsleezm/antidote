@@ -185,6 +185,7 @@ init_hash_fun() ->
     lists:foreach(fun({Node, PartList}) ->
         case node() of
             Node ->
+                 ets:insert(meta_info, {Node, PartList}),
                  ets:insert(meta_info, {local_parts, PartList});
             _ ->
                  ets:insert(meta_info, {Node, PartList})

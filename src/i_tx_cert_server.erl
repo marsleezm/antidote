@@ -46,8 +46,7 @@
 %% Spawn
 
 -record(state, {partition :: non_neg_integer(),
-        pending_metadata :: cache_id(), 
-        local_servers :: set()}).
+        pending_metadata :: cache_id()}).
 
 %%%===================================================================
 %%% API
@@ -58,7 +57,7 @@ start_link(Name) ->
              ?MODULE, [], []).
 
 certify(ICertServer, TxId, LocalUpdates, RemoteUpdates) ->
-    gen_server:call({local, ICertServer}, {certify, TxId, LocalUpdates, RemoteUpdates}).
+    gen_server:call(ICertServer, {certify, TxId, LocalUpdates, RemoteUpdates}).
 %%%===================================================================
 %%% Internal
 %%%===================================================================
@@ -69,23 +68,17 @@ init([]) ->
                 pending_metadata=PendingMetadata}}.
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender,
-	    SD0=#state{pending_metadata=PendingMetadata, local_servers=LocalServers}) ->
-    LocalServers1 = case LocalServers of
-                        undefined ->
-                            hash_fun:get_local_server_set();
-                        _ ->
-                            LocalServers
-                    end,
+	    SD0=#state{pending_metadata=PendingMetadata}) ->
     case length(LocalUpdates) of
         0 ->
             clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
             ets:insert(PendingMetadata, {TxId, {length(RemoteUpdates), 0, LocalUpdates, RemoteUpdates, Sender}});
         _ ->
-            %lager:info("Preparing for ~w of ~w", [LocalUpdates, TxId]),
+            lager:info("Preparing for ~w of ~w", [LocalUpdates, TxId]),
             clocksi_vnode:prepare(LocalUpdates, TxId, local),
             ets:insert(PendingMetadata, {TxId, {length(LocalUpdates), 0, LocalUpdates, RemoteUpdates, Sender}})
     end,
-    {noreply, SD0#state{local_servers=LocalServers1}};
+    {noreply, SD0};
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
@@ -97,9 +90,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
             case length(RemoteUpdates) of
                 0 ->
                     CommitTime = max(PrepareTime, MaxPrepTime),
-                    %lager:info("~w done", [TxId]),
                     clocksi_vnode:commit(LocalUpdates, TxId, CommitTime),
-                    %lager:info("Done for ~w", [TxId]),
                     gen_server:reply(Sender, {ok, {committed, CommitTime}});
                 _ ->
                     clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
@@ -108,7 +99,8 @@ handle_cast({prepared, TxId, PrepareTime, local},
         [{TxId, {N, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
             %lager:info("~w, needs ~w", [TxId, N-1]),
             %lager:info("Not done for ~w", [TxId]),
-            ets:insert(PendingMetadata, {TxId, {N-1, max(MaxPrepTime, PrepareTime), LocalUpdates, 
+            MaxPrepTime1 = max(MaxPrepTime, PrepareTime),
+            ets:insert(PendingMetadata, {TxId, {N-1, MaxPrepTime1, LocalUpdates, 
                     RemoteUpdates, Sender}});
         [] ->
             ok;
@@ -131,6 +123,7 @@ handle_cast({abort, TxId, local},
 
 handle_cast({prepared, TxId, PrepareTime, remote}, 
 	    SD0=#state{pending_metadata=PendingMetadata}) ->
+    lager:info("Received remote prepare"),
     case ets:lookup(PendingMetadata, TxId) of
         [{TxId, {1, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
             CommitTime = max(MaxPrepTime, PrepareTime),
@@ -172,6 +165,7 @@ handle_sync_event(_Event, _From, _StateName, StateData) ->
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
-terminate(_Reason, _SD) ->
+terminate(Reason, _SD) ->
+    lager:info("Cert server terminated with ~w", [Reason]),
     ok.
 

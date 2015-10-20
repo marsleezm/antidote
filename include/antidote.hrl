@@ -16,7 +16,7 @@
 -define(TABLE_CONCURRENCY, {read_concurrency,true}).
 -define(READ_CONCURRENCY, 20).
 -define(OLD_SS_MICROSEC,0).
--define(NUM_SUP, 2).
+-define(NUM_SUP, 8).
 -define(SPIN_WAIT, 10).
 -record (payload, {key:: key(), type :: type(), op_param, actor}).
 

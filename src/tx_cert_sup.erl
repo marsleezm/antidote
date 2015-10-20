@@ -26,18 +26,20 @@
 
 -export([start_link/0]).
 
--export([init/1, certify/2]).
+-export([init/1, certify/3]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-certify(TxId, Updates) ->
+certify(TxId, LocalUpdates, RemoteUpdates) ->
     random:seed(now()),
     case ets:lookup(meta_info, do_specula) of
         [{do_specula, true}] ->
-            specula_tx_cert_server:certify(generate_module_name(random:uniform(?NUM_SUP)), TxId, Updates);
+            specula_tx_cert_server:certify(
+                generate_module_name(random:uniform(?NUM_SUP)), TxId, LocalUpdates, RemoteUpdates);
         [{do_specula, false}] ->
-            i_tx_cert_server:certify(generate_module_name(random:uniform(?NUM_SUP)), TxId, Updates)
+            i_tx_cert_server:certify(generate_module_name(random:uniform(?NUM_SUP)), TxId, 
+                LocalUpdates, RemoteUpdates)
     end.
 
 generate_module_name(N) ->
