@@ -83,11 +83,12 @@ process(#fpbtxnreq{ops = Ops}, State) ->
 process(#fpbstarttxnreq{clock=Clock}, State) ->
     TxId = tx_utilities:create_transaction_record(Clock),
     {reply, #fpbtxid{snapshot=TxId#tx_id.snapshot_time, pid=term_to_binary(TxId#tx_id.server_pid)}, State};
-process(#fpbpreptxnreq{txid=TxId, local_updates=LocalUpdates, remote_updates=RemoteUpdates}, State) ->
+process(#fpbpreptxnreq{txid=TxId, threadid=ThreadId, 
+            local_updates=LocalUpdates, remote_updates=RemoteUpdates}, State) ->
     RealId= decode_txid(TxId),
     DeLocalUpdates = decode_update_list(LocalUpdates),
     DeRemoteUpdates = decode_update_list(RemoteUpdates),
-    case antidote:prepare(RealId, DeLocalUpdates, DeRemoteUpdates) of
+    case antidote:prepare(ThreadId, RealId, DeLocalUpdates, DeRemoteUpdates) of
         {ok, {committed, CommitTime}} ->
             {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
         {aborted, RealId} ->

@@ -46,6 +46,12 @@
 %% Spawn
 
 -record(state, {partition :: non_neg_integer(),
+        tx_id :: txid(),
+        prepare_time = 0 :: non_neg_integer(),
+        local_updates :: [],
+        remote_updates :: [],
+        sender :: term(),
+        to_ack :: non_neg_integer(),
         pending_metadata :: cache_id()}).
 
 %%%===================================================================
@@ -63,62 +69,57 @@ certify(ICertServer, TxId, LocalUpdates, RemoteUpdates) ->
 %%%===================================================================
 
 init([]) ->
-    PendingMetadata = tx_utilities:open_private_table(pending_metadata),
-    {ok, #state{
-                pending_metadata=PendingMetadata}}.
+    %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
+    {ok, #state{}}.
 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender,
-	    SD0=#state{pending_metadata=PendingMetadata}) ->
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     case length(LocalUpdates) of
         0 ->
             clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
-            ets:insert(PendingMetadata, {TxId, {length(RemoteUpdates), 0, LocalUpdates, RemoteUpdates, Sender}});
+            {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates), local_updates=LocalUpdates, remote_updates=
+                RemoteUpdates, sender=Sender}};
         _ ->
-            lager:info("Preparing for ~w of ~w", [LocalUpdates, TxId]),
             clocksi_vnode:prepare(LocalUpdates, TxId, local),
-            ets:insert(PendingMetadata, {TxId, {length(LocalUpdates), 0, LocalUpdates, RemoteUpdates, Sender}})
-    end,
-    {noreply, SD0};
+            {noreply, SD0#state{tx_id=TxId, to_ack=length(LocalUpdates), local_updates=LocalUpdates, remote_updates=
+                RemoteUpdates, sender=Sender}}
+    end;
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
 handle_cast({prepared, TxId, PrepareTime, local}, 
-	    SD0=#state{pending_metadata=PendingMetadata}) ->
-    case ets:lookup(PendingMetadata, TxId) of
-        [{TxId, {1, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
+	    SD0=#state{to_ack=N, tx_id=TxId, local_updates=LocalUpdates,
+            remote_updates=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime}) ->
+    case N of
+        1 -> 
             case length(RemoteUpdates) of
                 0 ->
-                    CommitTime = max(PrepareTime, MaxPrepTime),
+                    CommitTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:commit(LocalUpdates, TxId, CommitTime),
-                    gen_server:reply(Sender, {ok, {committed, CommitTime}});
+                    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+                    {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
                 _ ->
+                    MaxPrepTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
-                    ets:insert(PendingMetadata, {TxId, {length(RemoteUpdates), MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}})
+                    {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=length(RemoteUpdates)}}
                 end;
-        [{TxId, {N, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
+        _ ->
             %lager:info("~w, needs ~w", [TxId, N-1]),
             %lager:info("Not done for ~w", [TxId]),
-            MaxPrepTime1 = max(MaxPrepTime, PrepareTime),
-            ets:insert(PendingMetadata, {TxId, {N-1, MaxPrepTime1, LocalUpdates, 
-                    RemoteUpdates, Sender}});
-        [] ->
-            ok;
-        _ ->
-            lager:info("Something is wrong!!")
-    end,
+            MaxPrepTime = max(OldPrepTime, PrepareTime),
+            {noreply, SD0#state{to_ack=N-1, prepare_time=MaxPrepTime}}
+    end;
+handle_cast({prepared, _, _, local}, 
+	    SD0) ->
+    %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
     {noreply, SD0};
 
-handle_cast({abort, TxId, local}, 
-	    SD0=#state{pending_metadata=PendingMetadata}) ->
-    case ets:lookup(PendingMetadata, TxId) of
-        [] ->
-            ok;
-        [{TxId, {_, _, LocalUpdates, _, Sender}}] ->
-            ets:delete(PendingMetadata, TxId),
-            clocksi_vnode:abort(LocalUpdates, TxId),
-            gen_server:reply(Sender, {aborted, TxId})
-    end,
+handle_cast({abort, TxId, local}, SD0=#state{tx_id=TxId, local_updates=LocalUpdates, sender=Sender}) ->
+    clocksi_vnode:abort(LocalUpdates, TxId),
+    gen_server:reply(Sender, {aborted, TxId}),
+    {noreply, SD0#state{tx_id={}}};
+handle_cast({abort, _, local}, SD0) ->
+    %lager:info("Received abort for previous txn ~w", [OtherTxId]),
     {noreply, SD0};
 
 handle_cast({prepared, TxId, PrepareTime, remote}, 

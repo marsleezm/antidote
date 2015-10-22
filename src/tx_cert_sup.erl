@@ -26,19 +26,19 @@
 
 -export([start_link/0]).
 
--export([init/1, certify/3]).
+-export([init/1, certify/4]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-certify(TxId, LocalUpdates, RemoteUpdates) ->
+certify(ThreadId, TxId, LocalUpdates, RemoteUpdates) ->
     random:seed(now()),
     case ets:lookup(meta_info, do_specula) of
         [{do_specula, true}] ->
             specula_tx_cert_server:certify(
-                generate_module_name(random:uniform(?NUM_SUP)), TxId, LocalUpdates, RemoteUpdates);
+                generate_module_name(ThreadId rem ?NUM_SUP), TxId, LocalUpdates, RemoteUpdates);
         [{do_specula, false}] ->
-            i_tx_cert_server:certify(generate_module_name(random:uniform(?NUM_SUP)), TxId, 
+            i_tx_cert_server:certify(generate_module_name(ThreadId rem ?NUM_SUP), TxId, 
                 LocalUpdates, RemoteUpdates)
     end.
 
@@ -60,5 +60,5 @@ generate_supervisor_spec(N) ->
 
 %% @doc Starts the coordinator of a ClockSI interactive transaction.
 init([]) ->
-    Pool = [generate_supervisor_spec(N) || N <- lists:seq(1, ?NUM_SUP)],
+    Pool = [generate_supervisor_spec(N) || N <- lists:seq(0, ?NUM_SUP-1)],
     {ok, {{one_for_one, 5, 10}, Pool}}.

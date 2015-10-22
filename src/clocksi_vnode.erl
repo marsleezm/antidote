@@ -97,13 +97,13 @@ read_data_item(Node, Key, TxId) ->
                                    ?CLOCKSI_MASTER, infinity).
 
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
-prepare(ListofNodes, TxId, Type) ->
-    lists:foreach(fun({Node,WriteSet}) ->
+prepare(Updates, TxId, Type) ->
+    lists:foreach(fun({Node, WriteSet}) ->
 			riak_core_vnode_master:command(Node,
 						       {prepare, TxId, WriteSet, Type},
                                self(),
 						       ?CLOCKSI_MASTER)
-		end, ListofNodes).
+		end, Updates).
 
 %% @doc Sends prepare+commit to a single partition
 %%      Called by a Tx coordinator when the tx only
@@ -124,13 +124,13 @@ commit(Updates, TxId, CommitTime) ->
 		end, Updates).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
-abort(ListofNodes, TxId) ->
-    lists:foreach(fun(Node,WriteSet,_) ->
+abort(Updates, TxId) ->
+    lists:foreach(fun({Node, WriteSet}) ->
 			riak_core_vnode_master:command(Node,
 						       {abort, TxId, WriteSet},
 						       {server, undefined, self()},
 						       ?CLOCKSI_MASTER)
-		end, ListofNodes).
+		end, Updates).
 
 %% @doc Initializes all data structures that vnode needs to track information
 %%      the transactions it participates on.
