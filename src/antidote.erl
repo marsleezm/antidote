@@ -65,9 +65,9 @@ prepare(ThreadId, TxId, LocalUpdates, RemoteUpdates) ->
 single_commit(Node, Key, Value) ->
     case ets:lookup(meta_info, do_specula) of
         [{_, true}] ->
-            specula_vnode:single_commit([{Node, [{Key, Value}]}], tx_utilities:create_transaction_record(0));
+            specula_vnode:single_commit([{Node, [{Key, Value}]}]);
         [{_, false}] ->
-            clocksi_vnode:single_commit([{Node, [{Key, Value}]}], tx_utilities:create_transaction_record(0))
+            clocksi_vnode:single_commit([{Node, [{Key, Value}]}])
     end,
     receive
         EndOfTx ->

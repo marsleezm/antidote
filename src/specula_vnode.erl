@@ -30,7 +30,7 @@
 
         prepare/3,
         commit/3,
-        single_commit/2,
+        single_commit/1,
         abort/2,
 
         init/1,
@@ -114,9 +114,9 @@ prepare(ListofNodes, TxId, Type) ->
 %% @doc Sends prepare+commit to a single partition
 %%      Called by a Tx coordinator when the tx only
 %%      affects one partition
-single_commit([{Node,WriteSet}], TxId) ->
+single_commit([{Node,WriteSet}]) ->
     riak_core_vnode_master:command(Node,
-                                   {single_commit, TxId,WriteSet},
+                                   {single_commit, WriteSet},
                                    self(),
                                    ?SPECULA_MASTER).
 
@@ -314,7 +314,7 @@ handle_command({prepare, TxId, WriteSet, Type}, Sender,
             {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1}}
     end;
 
-handle_command({single_commit, TxId, WriteSet}, Sender,
+handle_command({single_commit, WriteSet}, Sender,
                State = #state{partition=Partition,
                               if_replicate=IfReplicate,
                               if_certify=IfCertify,
@@ -325,6 +325,7 @@ handle_command({single_commit, TxId, WriteSet}, Sender,
                               num_committed=NumCommitted,
                               specula_dep=SpeculaDep
                               }) ->
+    TxId = tx_utilities:create_transaction_record(0),
     Result = prepare_and_commit(TxId, WriteSet, CommittedTxs, PreparedTxs, InMemoryStore, SpeculaDep, IfCertify),
     case Result of
         {ok, {committed, CommitTime}} ->
