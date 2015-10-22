@@ -305,13 +305,13 @@ handle_command({single_commit, WriteSet}, Sender,
             case IfReplicate of
                 true ->
                     PendingRecord = {commit, Sender, 
-                        {committed, CommitTime}, {TxId, WriteSet}},
+                        {ok, {committed, CommitTime}}, {TxId, WriteSet}},
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                     {noreply, State#state{ 
                             num_committed=NumCommitted+1}};
                 false ->
                     %gen_server:cast(Sender, {committed, CommitTime}),
-                    Sender ! {committed, CommitTime},
+                    Sender ! {ok, {committed, CommitTime}},
                     {noreply, State#state{
                             num_committed=NumCommitted+1}}
             end;
@@ -497,14 +497,14 @@ certification_check(TxId, [H|T], CommittedTxs, PreparedTxs, true) ->
         [{Key, CommitTime}] ->
             case CommitTime > SnapshotTime of
                 true ->
-                    lager:info("False because there is committed"),
+                    lager:info("~w: False because there is committed", [TxId]),
                     false;
                 false ->
                     case check_prepared(TxId, PreparedTxs, Key) of
                         true ->
                             certification_check(TxId, T, CommittedTxs, PreparedTxs, true);
                         false ->
-                            lager:info("False of prepared"),
+                            lager:info("~w: False of prepared", [TxId]),
                             false
                     end
             end;
