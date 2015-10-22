@@ -298,6 +298,7 @@ handle_command({single_commit, TxId, WriteSet}, Sender,
                               num_cert_fail=NumCertFail,
                               num_committed=NumCommitted
                               }) ->
+    lager:info("Single committing for ~w, ~w", [TxId, WriteSet]),
     Result = prepare_and_commit(TxId, WriteSet, CommittedTxs, PreparedTxs, InMemoryStore, IfCertify), 
     case Result of
         {ok, {committed, CommitTime}} ->
@@ -496,12 +497,14 @@ certification_check(TxId, [H|T], CommittedTxs, PreparedTxs, true) ->
         [{Key, CommitTime}] ->
             case CommitTime > SnapshotTime of
                 true ->
+                    lager:info("False because there is committed"),
                     false;
                 false ->
                     case check_prepared(TxId, PreparedTxs, Key) of
                         true ->
                             certification_check(TxId, T, CommittedTxs, PreparedTxs, true);
                         false ->
+                            lager:info("False of prepared"),
                             false
                     end
             end;
@@ -510,6 +513,7 @@ certification_check(TxId, [H|T], CommittedTxs, PreparedTxs, true) ->
                 true ->
                     certification_check(TxId, T, CommittedTxs, PreparedTxs, true); 
                 false ->
+                    lager:info("False of prepared"),
                     false
             end
     end.

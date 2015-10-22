@@ -115,9 +115,18 @@ process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
     end;
 process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) ->
     %lager:info("Key is ~s, value is ~w, partition id is ~w", [binary_to_list(Key), Value, PartitionId]),
-    {committed, CommitTime} = antidote:single_commit(hash_fun:get_local_vnode_by_id(PartitionId), 
+    Result = antidote:single_commit(hash_fun:get_local_vnode_by_id(PartitionId), 
                 Key, Value),
-    {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
+    case Result of
+        {ok, {committed, CommitTime}} ->
+            {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
+        {aborted, RealId} ->
+            lager:warning("~w: aborted!", [RealId]),
+            {reply, #fpbpreptxnresp{success=false}, State};
+        Reason ->
+            lager:warning("Error reason: ~w", [Reason]),
+            {reply, #fpbpreptxnresp{success=false}, State}
+    end;
 process(#fpbpartlistreq{noop=_}, State) ->
     PartList = hash_fun:get_hash_fun(),
     lager:info("Hash fun is ~w", [PartList]),
