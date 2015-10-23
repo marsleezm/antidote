@@ -90,6 +90,7 @@ process(#fpbpreptxnreq{txid=TxId, threadid=ThreadId,
     DeRemoteUpdates = decode_update_list(RemoteUpdates),
     case antidote:prepare(ThreadId, RealId, DeLocalUpdates, DeRemoteUpdates) of
         {ok, {committed, CommitTime}} ->
+            lager:info("~w committed", [RealId]),
             {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
         {aborted, RealId} ->
             lager:warning("~w: aborted!", [RealId]),
