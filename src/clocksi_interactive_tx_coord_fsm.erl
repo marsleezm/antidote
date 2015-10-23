@@ -135,9 +135,8 @@ perform_singleitem_read(Key) ->
 	    {error, unknown};
 	{error, Reason} ->
 	    {error, Reason};
-	{ok, {Type, Snapshot}} ->
-	    ReadResult = Type:value(Snapshot),
-	    {ok, ReadResult}
+	{ok, Value} ->
+	    {ok, Value}
     end.
 
 
