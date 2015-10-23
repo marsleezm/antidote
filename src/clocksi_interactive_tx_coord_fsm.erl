@@ -67,7 +67,7 @@
          committing_2pc/3,
          committing/2,
          abort/2,
-	     perform_singleitem_read/2,
+	     perform_singleitem_read/1,
          reply_to_client/1]).
 
 %%---------------------------------------------------------------------
@@ -125,12 +125,12 @@ init([From, ClientClock]) ->
     From ! {ok, TxId},
     {ok, execute_op, SD}.
 
--spec perform_singleitem_read(key(),type()) -> {ok,val()} | {error,reason()}.
-perform_singleitem_read(Key,Type) ->
+-spec perform_singleitem_read(key()) -> {ok,val()} | {error,reason()}.
+perform_singleitem_read(Key) ->
     TxId = tx_utilities:create_transaction_record(0),
     Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
     IndexNode = hd(Preflist),
-    case ?CLOCKSI_VNODE:read_data_item(IndexNode, Key, Type, TxId) of
+    case ?CLOCKSI_VNODE:read_data_item(IndexNode, Key, TxId) of
 	error ->
 	    {error, unknown};
 	{error, Reason} ->
