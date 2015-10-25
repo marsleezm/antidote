@@ -48,11 +48,10 @@
 -record(state, {partition :: non_neg_integer(),
         tx_id :: txid(),
         prepare_time = 0 :: non_neg_integer(),
-        local_updates :: [],
-        remote_updates :: [],
+        local_parts :: [],
+        remote_parts :: [],
         sender :: term(),
-        to_ack :: non_neg_integer(),
-        pending_metadata :: cache_id()}).
+        to_ack :: non_neg_integer()}).
 
 %%%===================================================================
 %%% API
@@ -73,14 +72,16 @@ init([]) ->
     {ok, #state{}}.
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
+    LocalParts = [Part || {Part, _} <- LocalUpdates],
     case length(LocalUpdates) of
         0 ->
             clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
-            {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates), local_updates=LocalUpdates, remote_updates=
+            {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates), local_parts=LocalParts, remote_parts=
                 RemoteUpdates, sender=Sender}};
         _ ->
+            lager:info("Local updates are ~w", [LocalUpdates]),
             clocksi_vnode:prepare(LocalUpdates, TxId, local),
-            {noreply, SD0#state{tx_id=TxId, to_ack=length(LocalUpdates), local_updates=LocalUpdates, remote_updates=
+            {noreply, SD0#state{tx_id=TxId, to_ack=length(LocalUpdates), local_parts=LocalParts, remote_parts=
                 RemoteUpdates, sender=Sender}}
     end;
 
@@ -88,20 +89,22 @@ handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
 handle_cast({prepared, TxId, PrepareTime, local}, 
-	    SD0=#state{to_ack=N, tx_id=TxId, local_updates=LocalUpdates,
-            remote_updates=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime}) ->
+	    SD0=#state{to_ack=N, tx_id=TxId, local_parts=LocalParts,
+            remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime}) ->
     case N of
         1 -> 
-            case length(RemoteUpdates) of
+            RemoteParts = [Part || {Part, _} <- RemoteUpdates],
+            case length(RemoteParts) of
                 0 ->
                     CommitTime = max(PrepareTime, OldPrepTime),
-                    clocksi_vnode:commit(LocalUpdates, TxId, CommitTime),
+                    clocksi_vnode:commit(LocalParts, TxId, CommitTime),
                     gen_server:reply(Sender, {ok, {committed, CommitTime}}),
                     {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
                 _ ->
                     MaxPrepTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
-                    {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=length(RemoteUpdates)}}
+                    {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=length(RemoteParts),
+                        remote_parts=RemoteParts}}
                 end;
         _ ->
             %lager:info("~w, needs ~w", [TxId, N-1]),
@@ -114,8 +117,8 @@ handle_cast({prepared, _, _, local},
     %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
     {noreply, SD0};
 
-handle_cast({abort, TxId, local}, SD0=#state{tx_id=TxId, local_updates=LocalUpdates, sender=Sender}) ->
-    clocksi_vnode:abort(LocalUpdates, TxId),
+handle_cast({abort, TxId, local}, SD0=#state{tx_id=TxId, local_parts=LocalParts, sender=Sender}) ->
+    clocksi_vnode:abort(LocalParts, TxId),
     gen_server:reply(Sender, {aborted, TxId}),
     {noreply, SD0#state{tx_id={}}};
 handle_cast({abort, _, local}, SD0) ->
@@ -123,34 +126,33 @@ handle_cast({abort, _, local}, SD0) ->
     {noreply, SD0};
 
 handle_cast({prepared, TxId, PrepareTime, remote}, 
-	    SD0=#state{pending_metadata=PendingMetadata}) ->
-    lager:info("Received remote prepare"),
-    case ets:lookup(PendingMetadata, TxId) of
-        [{TxId, {1, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
+	    SD0=#state{remote_parts=RemoteParts, sender=Sender, 
+            prepare_time=MaxPrepTime, to_ack=N, local_parts=LocalParts}) ->
+    %lager:info("Received remote prepare"),
+    case N of
+        1 ->
             CommitTime = max(MaxPrepTime, PrepareTime),
-            ets:delete(PendingMetadata, TxId),
-            clocksi_vnode:commmit(LocalUpdates, TxId, CommitTime),
-            clocksi_vnode:commmit(RemoteUpdates, TxId, CommitTime),
-            gen_server:reply(Sender, {ok, {committed, CommitTime}});
-        [{TxId, {N, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
-            ets:insert(PendingMetadata, {TxId, {N-1, max(MaxPrepTime, PrepareTime), LocalUpdates, RemoteUpdates, Sender}});
-        Record ->
-            lager:info("Something is right: ~w", [Record])
-    end,
+            clocksi_vnode:commit(LocalParts, TxId, CommitTime),
+            clocksi_vnode:commit(RemoteParts, TxId, CommitTime),
+            gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
+        N ->
+            {noreply, SD0#state{to_ack=N-1, prepare_time=max(MaxPrepTime, PrepareTime)}}
+    end;
+handle_cast({prepared, _, _, remote}, 
+	    SD0) ->
     {noreply, SD0};
 
 handle_cast({abort, TxId, remote}, 
-	    SD0=#state{pending_metadata=PendingMetadata}) ->
-    case ets:lookup(PendingMetadata, TxId) of
-        [] ->
-            {noreply, SD0};
-        [{TxId, {_, _, LocalUpdates, RemoteUpdates, Sender}}] ->
-            ets:delete(PendingMetadata, TxId),
-            clocksi_vnode:abort(LocalUpdates, TxId),
-            clocksi_vnode:abort(RemoteUpdates, TxId),
-            gen_server:reply(Sender, {aborted, TxId}),
-            {noreply, SD0}
-    end;
+	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, local_parts=LocalParts}) ->
+    clocksi_vnode:abort(LocalParts, TxId),
+    clocksi_vnode:abort(RemoteParts, TxId),
+    gen_server:reply(Sender, {aborted, TxId}),
+    {noreply, SD0#state{tx_id={}}};
+
+handle_cast({abort, _, remote}, 
+	    SD0) ->
+    {noreply, SD0};
 
 handle_cast(_Info, StateData) ->
     {noreply,StateData}.

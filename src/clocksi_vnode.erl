@@ -25,7 +25,7 @@
 
 -export([start_vnode/1,
 	    read_data_item/3,
-        set_prepared/4,
+        set_prepared/5,
         async_send_msg/3,
 
         prepare/3,
@@ -98,6 +98,7 @@ read_data_item(Node, Key, TxId) ->
 
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
 prepare(Updates, TxId, Type) ->
+    lager:info("Before preparing.. Updates are ~w", [Updates]),
     lists:foreach(fun({Node, WriteSet}) ->
 			riak_core_vnode_master:command(Node,
 						       {prepare, TxId, WriteSet, Type},
@@ -115,22 +116,22 @@ single_commit([{Node,WriteSet}]) ->
                                    ?CLOCKSI_MASTER).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
-commit(Updates, TxId, CommitTime) ->
-    lists:foreach(fun({Node, WriteSet}) ->
+commit(UpdatedParts, TxId, CommitTime) ->
+    lists:foreach(fun(Node) ->
 			riak_core_vnode_master:command(Node,
-						       {commit, TxId, CommitTime, WriteSet},
+						       {commit, TxId, CommitTime},
 						       self(),
 						       ?CLOCKSI_MASTER)
-		end, Updates).
+		end, UpdatedParts).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
-abort(Updates, TxId) ->
-    lists:foreach(fun({Node, WriteSet}) ->
+abort(UpdatedParts, TxId) ->
+    lists:foreach(fun(Node) ->
 			riak_core_vnode_master:command(Node,
-						       {abort, TxId, WriteSet},
+						       {abort, TxId},
 						       {server, undefined, self()},
 						       ?CLOCKSI_MASTER)
-		end, Updates).
+		end, UpdatedParts).
 
 %% @doc Initializes all data structures that vnode needs to track information
 %%      the transactions it participates on.
@@ -320,7 +321,7 @@ handle_command({single_commit, WriteSet}, Sender,
             {noreply, State#state{num_cert_fail=NumCertFail+1}}
     end;
 
-handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
+handle_command({commit, TxId, TxCommitTime}, Sender,
                #state{partition=Partition,
                       committed_txs=CommittedTxs,
                       if_replicate=IfReplicate,
@@ -329,13 +330,13 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                       num_committed=NumCommitted
                       } = State) ->
     %lager:info("Got commit req for ~w", [TxId]),
-    Result = commit(TxId, TxCommitTime, Updates, CommittedTxs, PreparedTxs, InMemoryStore),
+    Result = commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore),
     case Result of
         {ok, committed} ->
             case IfReplicate of
                 true ->
                     PendingRecord = {commit, Sender, 
-                        false, {TxId, TxCommitTime, Updates}},
+                        false, {TxId, TxCommitTime}},
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                     {noreply, State#state{
                             num_committed=NumCommitted+1}};
@@ -347,16 +348,17 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
             {reply, no_tx_record, State}
     end;
 
-handle_command({abort, TxId, Updates}, _Sender,
+handle_command({abort, TxId}, _Sender,
                #state{partition=_Partition, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore,
                 num_aborted=NumAborted} = State) ->
-    case Updates of
+    case ets:lookup(PreparedTxs, TxId) of
+        [{TxId, Keys}] ->
+            true = ets:delete(PreparedTxs, TxId),
+            clean_abort_prepared(PreparedTxs, Keys, TxId, InMemoryStore);
         [] ->
-            {reply, {error, no_tx_record}, State};
-        _ -> 
-            clean_abort_prepared(PreparedTxs,Updates,TxId,InMemoryStore),
-            {noreply, State#state{num_aborted=NumAborted+1}}
-    end;
+            ok
+    end,
+    {noreply, State#state{num_aborted=NumAborted+1}};
 
 handle_command({start_read_servers}, _Sender, State) ->
     {reply, ok, State};
@@ -411,7 +413,8 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify)->
     case certification_check(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify) of
         true ->
             PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
-		    set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime),
+		    KeySet = set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
+            true = ets:insert(PreparedTxs, {TxId, KeySet}),
 		    {ok, PrepareTime};
 	    false ->
 	        {error, write_conflict};
@@ -423,7 +426,15 @@ prepare_and_commit(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InMemoryStore, I
     case certification_check(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify) of
         true ->
             CommitTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
-            update_store(TxWriteSet, TxId, CommitTime, InMemoryStore, CommittedTxs, PreparedTxs),
+            InsertToStore = fun({Key, Value}) -> 
+                            case ets:lookup(InMemoryStore, Key) of
+                                [] ->
+                                    true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}]});
+                                [{Key, ValueList}] ->
+                                    {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
+                                    true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}|RemainList]})
+                            end end,
+            lists:foreach(InsertToStore, InMemoryStore),
             {ok, {committed, CommitTime}};
 	    false ->
 	        {error, write_conflict};
@@ -431,15 +442,17 @@ prepare_and_commit(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InMemoryStore, I
             {error,  wait_more}
     end.
 
-set_prepared(_PreparedTxs,[],_TxId,_Time) ->
-    ok;
-set_prepared(PreparedTxs,[{Key, _Value} | Rest],TxId,Time) ->
-    true = ets:insert(PreparedTxs, {Key, {TxId, Time, []}}),
-    set_prepared(PreparedTxs,Rest,TxId,Time).
+set_prepared(_PreparedTxs,[],_TxId,_Time, KeySet) ->
+    KeySet;
+set_prepared(PreparedTxs,[{Key, Value} | Rest],TxId,Time, KeySet) ->
+    true = ets:insert(PreparedTxs, {Key, {TxId, Time, Value, []}}),
+    set_prepared(PreparedTxs,Rest,TxId,Time, [Key|KeySet]).
 
-commit(TxId, TxCommitTime, Updates, CommittedTxs, 
+commit(TxId, TxCommitTime, CommittedTxs, 
                                 PreparedTxs, InMemoryStore)->
-    update_store(Updates, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs),
+    [{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
+    update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs),
+    true = ets:delete(PreparedTxs, TxId),
     {ok, committed}.
 
 %% @doc clean_and_notify:
@@ -466,17 +479,20 @@ commit(TxId, TxCommitTime, Updates, CommittedTxs,
 %%          remove M's prepare record, so we should not do anything
 %%          either. 
 %%
-clean_abort_prepared(_PreparedTxs,[],_TxId,_InMemoryStore) ->
+clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore) ->
     ok;
-clean_abort_prepared(PreparedTxs,[{Key, _Value} | Rest],TxId, InMemoryStore) ->
+clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore) ->
     case ets:lookup(PreparedTxs, Key) of
-        [{Key, {TxId, _Time, PendingReaders}}] ->
+        [{Key, {TxId, _, _, []}}] ->
+            true = ets:delete(PreparedTxs, Key);
+        [{Key, {TxId, _Time, Value, PendingReaders}}] ->
+            lager:info("Replying to ~w", [PendingReaders]),
             case ets:lookup(InMemoryStore, Key) of
                 [{Key, ValueList}] ->
                     {_, Value} = hd(ValueList),
                     lists:foreach(fun(Sender) -> riak_core_vnode:reply(Sender, {ok,Value}) end, PendingReaders);
                 [] ->
-                    lists:foreach(fun(Sender) -> riak_core_vnode:reply(Sender, {ok,nil}) end, PendingReaders)
+                    lists:foreach(fun(Sender) -> riak_core_vnode:reply(Sender, {ok, []}) end, PendingReaders)
             end,
             true = ets:delete(PreparedTxs, Key);
         _ ->
@@ -527,25 +543,38 @@ check_prepared(TxId, PreparedTxs, Key) ->
             false
     end.
 
--spec update_store(KeyValues :: [{key(), term()}],
+-spec update_store(Keys :: [{key()}],
                           TxId::txid(),TxCommitTime:: {term(), term()},
                                 InMemoryStore :: cache_id(), CommittedTxs :: cache_id(),
                                 PreparedTxs :: cache_id()) -> ok.
 update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs) ->
     ok;
-update_store([{Key, Value}|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs) ->
-    Values= case ets:lookup(InMemoryStore, Key) of
+update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs) ->
+    case ets:lookup(PreparedTxs, Key) of
+        [{Key, {TxId, _Time, Value, []}}] ->
+            case ets:lookup(InMemoryStore, Key) of
                 [] ->
-                    true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]}),
-                    [[], Value];
+                    true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]});
                 [{Key, ValueList}] ->
                     {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
-                    [{_CommitTime, First}|_] = RemainList,
-                    true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}|RemainList]}),
-                    [First, Value]
+                    [{_CommitTime, _}|_] = RemainList,
+                    true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}|RemainList]})
             end,
-    case ets:lookup(PreparedTxs, Key) of
-        [{Key, {TxId, _Time, PendingReaders}}] ->
+            ets:insert(CommittedTxs, {Key, TxCommitTime}),
+            true = ets:delete(PreparedTxs, Key);
+        [{Key, {TxId, _Time, Value, PendingReaders}}] ->
+            Values = case ets:lookup(InMemoryStore, Key) of
+                        [] ->
+                            true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]}),
+                            [[], Value];
+                        [{Key, ValueList}] ->
+                            {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
+                            [{_CommitTime, First}|_] = RemainList,
+                            true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}|RemainList]}),
+                            [First, Value]
+                    end,
+            ets:insert(CommittedTxs, {Key, TxCommitTime}),
+            lager:info("Replying to ~w", [PendingReaders]),
             lists:foreach(fun({SnapshotTime, Sender}) ->
                     case SnapshotTime >= TxCommitTime of
                         true ->
@@ -556,9 +585,9 @@ update_store([{Key, Value}|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTx
                 PendingReaders),
             true = ets:delete(PreparedTxs, Key);
          [] ->
-            ok
+            %[{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
+            lager:warning("Something is wrong!!!!")
     end,
-    ets:insert(CommittedTxs, {Key, TxCommitTime}),
     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs).
 
 ready_or_block(TxId, Key, PreparedTxs, Sender) ->
@@ -566,10 +595,10 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             ready;
-        [{Key, {PreparedTxId, PrepareTime, PendingReader}}] ->
+        [{Key, {PreparedTxId, PrepareTime, Value, PendingReader}}] ->
             case PrepareTime =< SnapshotTime of
                 true ->
-                    ets:insert(PreparedTxs, {Key, {PreparedTxId, PrepareTime,
+                    ets:insert(PreparedTxs, {Key, {PreparedTxId, PrepareTime, Value,
                         [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}}),
                     not_ready;
                 false ->

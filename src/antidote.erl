@@ -23,6 +23,7 @@
 
 -export([append/3,
          read/1,
+         read/2,
          read/3,
          single_commit/3,
          clocksi_execute_tx/2,
@@ -56,6 +57,11 @@ append(Key, Type, {OpParam, Actor}) ->
 -spec read(Key::key()) -> {ok, val()} | {error, reason()}.
 read(Key) ->
     clocksi_interactive_tx_coord_fsm:perform_singleitem_read(Key).
+
+-spec read(Node::preflist(), Key::key()) -> {ok, val()} | {error, reason()}.
+read(Node, Key) ->
+    TxId = tx_utitilities:create_transaction_record(0),
+    clocksi_vnode:read_data_item(Node, Key, TxId).
 
 -spec prepare(ThreadId::non_neg_integer(), TxId::txid(), 
         Updates::[{key(), []}], Updates::[{key(), []}]) -> {ok, val()} | {error, reason()}.

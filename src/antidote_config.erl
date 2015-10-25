@@ -19,7 +19,7 @@ load(File) ->
               {ok, Terms} ->
                   Terms;
               {error, Reason} ->
-                  io:format("Failed to parse config file ~s: ~p\n", [FileName, Reason])
+                  lager:info("Failed to parse config file ~s: ~p\n", [FileName, Reason])
           end,
     load_config(TermsList),
     case antidote_config:get(do_repl) of

@@ -26,8 +26,9 @@
 
 -behaviour(riak_api_pb_service).
 
+-include_lib("antidote.hrl").
 -include_lib("riak_pb/include/antidote_pb.hrl").
--include_lib("include/antidote.hrl").
+
 
 -export([init/0,
          decode/2,
@@ -90,7 +91,6 @@ process(#fpbpreptxnreq{txid=TxId, threadid=ThreadId,
     DeRemoteUpdates = decode_update_list(RemoteUpdates),
     case antidote:prepare(ThreadId, RealId, DeLocalUpdates, DeRemoteUpdates) of
         {ok, {committed, CommitTime}} ->
-            lager:info("~w committed", [RealId]),
             {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
         {aborted, RealId} ->
             lager:warning("~w: aborted!", [RealId]),
@@ -112,7 +112,7 @@ process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
         [] ->
             {reply, #fpbvalue{field=0}, State};
         _ ->
-            {reply, Value, State}
+            {reply, encode_value(Value), State}
     end;
 process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) ->
     %lager:info("Key is ~s, value is ~w, partition id is ~w", [binary_to_list(Key), Value, PartitionId]),
@@ -149,8 +149,36 @@ decode_node_updates(#fpbpernodeup{node=Node, partition_id=PartitionId, ups=Updat
         lists:map(fun(Up) ->  decode_update(Up) end, Updates)}.
 
 decode_update(#fpbupdate{key=Key, value=Value}) ->
-    {Key, Value}.
-    
+    {Key, decode_value(Value)}.
+
+decode_value(#fpbvalue{field=2, customer=Value}) ->
+    {2, Value}; 
+decode_value(#fpbvalue{field=3, clookup=Value}) ->
+    {3, Value}; 
+decode_value(#fpbvalue{field=4, district=Value}) ->
+    {4, Value}; 
+decode_value(#fpbvalue{field=5, history=Value}) ->
+    {5, Value}; 
+decode_value(#fpbvalue{field=6, item=Value}) ->
+    {6, Value}; 
+decode_value(#fpbvalue{field=7, neworder=Value}) ->
+    {7, Value}; 
+decode_value(#fpbvalue{field=8, order=Value}) ->
+    {8, Value}; 
+decode_value(#fpbvalue{field=9, orderline=Value}) ->
+    {9, Value}; 
+decode_value(#fpbvalue{field=10, stock=Value}) ->
+    {10, Value}; 
+decode_value(#fpbvalue{field=11, warehouse=Value}) ->
+    {11, Value}; 
+decode_value(#fpbvalue{field=12, str_value=Value}) ->
+    {12, Value}; 
+decode_value(#fpbvalue{field=13, long_value=Value}) ->
+    {13, Value}; 
+decode_value(#fpbvalue{field=14, double_value=Value}) ->
+    {14, Value}.
+
+
 decode_general_txn_op(#fpbtxnop{type=0, key=Key, operation=Op, parameter=Param}) ->
     {update, Key, get_type_by_id(Op), {{get_op_by_id(Op), binary_to_term(Param)}, haha}};
 decode_general_txn_op(#fpbtxnop{type=1, key=Key}) ->
@@ -170,6 +198,33 @@ encode_general_txn_read_resp({{read, _Key, _Type}, Result}) ->
 encode_part_list(List) ->
     lists:map(fun({Ip, NumPartitions}) -> 
          #fpbnodepart{ip=atom_to_list(Ip), num_partitions=NumPartitions} end , List).
+
+encode_value({2, Value}) ->
+    #fpbvalue{field=2, customer=Value};
+encode_value({3, Value}) ->
+    #fpbvalue{field=3, clookup=Value}; 
+encode_value({4, Value}) ->
+    #fpbvalue{field=4, district=Value}; 
+encode_value({5, Value}) ->
+    #fpbvalue{field=5, history=Value}; 
+encode_value({6, Value}) ->
+    #fpbvalue{field=6, item=Value}; 
+encode_value({7, Value}) ->
+    #fpbvalue{field=7, neworder=Value}; 
+encode_value({8, Value}) ->
+    #fpbvalue{field=8, order=Value}; 
+encode_value({9, Value}) ->
+    #fpbvalue{field=9, orderline=Value}; 
+encode_value({10, Value}) ->
+    #fpbvalue{field=10, stock=Value}; 
+encode_value({11, Value}) ->
+    #fpbvalue{field=11, warehouse=Value}; 
+encode_value({12, Value}) ->
+    #fpbvalue{field=12, str_value=Value}; 
+encode_value({13, Value}) ->
+    #fpbvalue{field=13, long_value=Value}; 
+encode_value({14, Value}) ->
+    #fpbvalue{field=14, double_value=Value}.
 
 get_op_by_id(0) ->
     increment;
