@@ -72,6 +72,7 @@ init([]) ->
     {ok, #state{}}.
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
+    %lager:info("Got req: local ~w, remote ~w", [LocalUpdates, RemoteUpdates]),
     LocalParts = [Part || {Part, _} <- LocalUpdates],
     case length(LocalUpdates) of
         0 ->
@@ -79,7 +80,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
             {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates), local_parts=LocalParts, remote_parts=
                 RemoteUpdates, sender=Sender}};
         _ ->
-            lager:info("Local updates are ~w", [LocalUpdates]),
+            %lager:info("Local updates are ~w", [LocalUpdates]),
             clocksi_vnode:prepare(LocalUpdates, TxId, local),
             {noreply, SD0#state{tx_id=TxId, to_ack=length(LocalUpdates), local_parts=LocalParts, remote_parts=
                 RemoteUpdates, sender=Sender}}

@@ -98,7 +98,6 @@ read_data_item(Node, Key, TxId) ->
 
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
 prepare(Updates, TxId, Type) ->
-    lager:info("Before preparing.. Updates are ~w", [Updates]),
     lists:foreach(fun({Node, WriteSet}) ->
 			riak_core_vnode_master:command(Node,
 						       {prepare, TxId, WriteSet, Type},
@@ -434,7 +433,7 @@ prepare_and_commit(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InMemoryStore, I
                                     {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
                                     true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}|RemainList]})
                             end end,
-            lists:foreach(InsertToStore, InMemoryStore),
+            lists:foreach(InsertToStore, TxWriteSet),
             {ok, {committed, CommitTime}};
 	    false ->
 	        {error, write_conflict};
