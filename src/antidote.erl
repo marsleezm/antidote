@@ -24,6 +24,7 @@
 -export([append/3,
          read/1,
          read/2,
+         debug_read/2,
          read/3,
          single_commit/3,
          clocksi_execute_tx/2,
@@ -60,7 +61,13 @@ read(Key) ->
 
 -spec read(Node::preflist(), Key::key()) -> {ok, val()} | {error, reason()}.
 read(Node, Key) ->
-    TxId = tx_utitilities:create_transaction_record(0),
+    TxId = tx_utilities:create_transaction_record(0),
+    clocksi_vnode:read_data_item(Node, Key, TxId).
+
+-spec debug_read(Part::integer(), Key::key()) -> {ok, val()} | {error, reason()}.
+debug_read(PartIndex, Key) ->
+    Node = hash_fun:get_local_vnode_by_id(PartIndex),
+    TxId = tx_utilities:create_transaction_record(0),
     clocksi_vnode:read_data_item(Node, Key, TxId).
 
 -spec prepare(ThreadId::non_neg_integer(), TxId::txid(), 
