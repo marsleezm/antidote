@@ -73,7 +73,8 @@ init([]) ->
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     LocalParts = [Part || {Part, _} <- LocalUpdates],
-    lager:info("Got req: localup ~w, localparts ~w", [LocalUpdates, LocalParts]),
+    LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
+    lager:info("Got req: localKeys ~p", [LocalKeys]),
     case length(LocalUpdates) of
         0 ->
             clocksi_vnode:prepare(RemoteUpdates, TxId, remote),

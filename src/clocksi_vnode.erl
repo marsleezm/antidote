@@ -452,7 +452,7 @@ commit(TxId, TxCommitTime, CommittedTxs,
                                 PreparedTxs, InMemoryStore)->
     [{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
     update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs),
-    lager:info("Updated for ~w", [TxId]),
+    lager:info("Updated for ~w, ~p", [TxId, Keys]),
     true = ets:delete(PreparedTxs, TxId),
     {ok, committed}.
 
