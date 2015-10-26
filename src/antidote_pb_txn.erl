@@ -88,20 +88,20 @@ process(#fpbstarttxnreq{clock=Clock}, State) ->
 process(#fpbpreptxnreq{txid=TxId, threadid=ThreadId, 
             local_updates=LocalUpdates, remote_updates=RemoteUpdates}, State) ->
     %lager:info("Prep txn req"),
-    T1 = tx_utilities:now_microsec(),
+    %T1 = tx_utilities:now_microsec(),
     RealId= decode_txid(TxId),
     DeLocalUpdates = decode_update_list(LocalUpdates),
     DeRemoteUpdates = decode_update_list(RemoteUpdates),
-    T2 = tx_utilities:now_microsec(),
-    lager:info("Decode takes ~w", [T2-T1]),
+    %T2 = tx_utilities:now_microsec(),
+    %lager:info("Decode takes ~w", [T2-T1]),
     case antidote:prepare(ThreadId, RealId, DeLocalUpdates, DeRemoteUpdates) of
         {ok, {committed, CommitTime}} ->
-            T3 = tx_utilities:now_microsec(),
-            lager:info("Commit takes ~w", [T3-T2]),
+            %T3 = tx_utilities:now_microsec(),
+            %lager:info("Commit takes ~w", [T3-T2]),
             {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
         {aborted, RealId} ->
-            T3 = tx_utilities:now_microsec(),
-            lager:warning("~w: aborted, takes ~w!", [RealId, T3-T2]),
+            %T3 = tx_utilities:now_microsec(),
+            %lager:warning("~w: aborted, takes ~w!", [RealId, T3-T2]),
             {reply, #fpbpreptxnresp{success=false}, State};
         Reason ->
             lager:warning("Error reason: ~w", [Reason]),
@@ -153,10 +153,12 @@ decode_update_list(#fpbnodeups{per_nodeup=Ops}) ->
     lists:map(fun(Op) -> decode_node_updates(Op) end, Ops).
 
 decode_node_updates(#fpbpernodeup{node_id=NodeId, partition_id=PartitionId, ups=Updates}) ->
+    lager:info("Node is ~w, Key is ~w", [NodeId, PartitionId]),
     {hash_fun:get_vnode_by_id(PartitionId, NodeId), 
         lists:map(fun(Up) ->  decode_update(Up) end, Updates)}.
 
 decode_update(#fpbupdate{key=Key, value=Value}) ->
+    lager:info("Key is ~t", [Key]),
     {Key, decode_value(Value)}.
 
 decode_value(#fpbvalue{field=2, customer=Value}) ->
