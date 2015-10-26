@@ -73,8 +73,8 @@ init([]) ->
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     LocalParts = [Part || {Part, _} <- LocalUpdates],
-    LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
-    lager:info("Got req: localKeys ~p", [LocalKeys]),
+    %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
+    %lager:info("Got req: localKeys ~p", [LocalKeys]),
     case length(LocalUpdates) of
         0 ->
             clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
@@ -98,7 +98,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
             RemoteParts = [Part || {Part, _} <- RemoteUpdates],
             case length(RemoteParts) of
                 0 ->
-                    lager:info("Trying to prepare!!"),
+                    %lager:info("Trying to prepare!!"),
                     CommitTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:commit(LocalParts, TxId, CommitTime),
                     gen_server:reply(Sender, {ok, {committed, CommitTime}}),

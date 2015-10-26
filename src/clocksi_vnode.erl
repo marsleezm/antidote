@@ -266,7 +266,7 @@ handle_command({prepare, TxId, WriteSet, Type}, Sender,
                               num_cert_fail=NumCertFail,
                               prepared_txs=PreparedTxs
                               }) ->
-    lager:info("~w: Got prepare of ~w, ~w: ~w", [Partition, TxId, Type, length(WriteSet)]),
+    %lager:info("~w: Got prepare of ~w, ~w: ~w", [Partition, TxId, Type, length(WriteSet)]),
     Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, IfCertify),
     case Result of
         {ok, PrepareTime} ->
@@ -329,7 +329,7 @@ handle_command({commit, TxId, TxCommitTime}, Sender,
                       inmemory_store=InMemoryStore,
                       num_committed=NumCommitted
                       } = State) ->
-    lager:info("~w: Got commit req for ~w", [Partition, TxId]),
+    %lager:info("~w: Got commit req for ~w", [Partition, TxId]),
     Result = commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore),
     case Result of
         {ok, committed} ->
@@ -452,7 +452,7 @@ commit(TxId, TxCommitTime, CommittedTxs,
                                 PreparedTxs, InMemoryStore)->
     [{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
     update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs),
-    lager:info("Updated for ~w, ~p", [TxId, Keys]),
+    %lager:info("Updated for ~w, ~p", [TxId, Keys]),
     true = ets:delete(PreparedTxs, TxId),
     {ok, committed}.
 
