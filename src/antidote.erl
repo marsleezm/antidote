@@ -67,6 +67,7 @@ read(Node, Key) ->
 -spec debug_read(Part::integer(), Key::key()) -> {ok, val()} | {error, reason()}.
 debug_read(PartIndex, Key) ->
     Node = hash_fun:get_local_vnode_by_id(PartIndex),
+    lager:info("Node is ~w", [Node]),
     TxId = tx_utilities:create_transaction_record(0),
     clocksi_vnode:read_data_item(Node, Key, TxId).
 
