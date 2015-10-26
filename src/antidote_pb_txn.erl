@@ -152,8 +152,8 @@ decode_general_txn(Ops) ->
 decode_update_list(#fpbnodeups{per_nodeup=Ops}) ->
     lists:map(fun(Op) -> decode_node_updates(Op) end, Ops).
 
-decode_node_updates(#fpbpernodeup{node=Node, partition_id=PartitionId, ups=Updates}) ->
-    {hash_fun:get_vnode_by_id(PartitionId, list_to_atom(Node)), 
+decode_node_updates(#fpbpernodeup{node_id=NodeId, partition_id=PartitionId, ups=Updates}) ->
+    {hash_fun:get_vnode_by_id(PartitionId, NodeId), 
         lists:map(fun(Up) ->  decode_update(Up) end, Updates)}.
 
 decode_update(#fpbupdate{key=Key, value=Value}) ->

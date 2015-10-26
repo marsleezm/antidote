@@ -70,13 +70,13 @@ get_primaries_preflist(Key)->
 get_local_vnode_by_id(Index) ->
     lists:nth(Index, get_local_servers()).
 
-get_vnode_by_id(Index, Node) ->
-    lists:nth(Index, get_node_parts(Node)).
+get_vnode_by_id(Index, NodeIndex) ->
+    lists:nth(Index, get_node_parts(NodeIndex)).
 
--spec get_node_parts(term()) -> [term()].
-get_node_parts(Node) ->
-    case ets:lookup(meta_info, Node) of
-        [{Node, PartList}] ->
+-spec get_node_parts(integer()) -> [term()].
+get_node_parts(NodeIndex) ->
+    case ets:lookup(meta_info, NodeIndex) of
+        [{NodeIndex, PartList}] ->
             PartList;
         [] ->
             lager:warning("Something is wrong!!!")
@@ -182,14 +182,16 @@ init_hash_fun() ->
                 end, dict:new(), Partitions),
     PartitionListByNode = dict:to_list(Dict1),
     ets:insert(meta_info, {node_list, PartitionListByNode}),
-    lists:foreach(fun({Node, PartList}) ->
+    lists:foldl(fun({Node, PartList}, Acc) ->
         case node() of
             Node ->
-                 ets:insert(meta_info, {Node, PartList}),
-                 ets:insert(meta_info, {local_parts, PartList});
+                 ets:insert(meta_info, {Acc, PartList}),
+                 ets:insert(meta_info, {local_parts, PartList}),
+                 Acc+1;
             _ ->
-                 ets:insert(meta_info, {Node, PartList})
-        end end, PartitionListByNode),
+                 ets:insert(meta_info, {Acc, PartList}),
+                 Acc+1
+        end end, 0, PartitionListByNode),
     PartitionListByNode.
 
 -ifdef(TEST).
