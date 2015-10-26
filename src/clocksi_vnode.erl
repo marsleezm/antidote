@@ -514,14 +514,14 @@ certification_check(TxId, [H|T], CommittedTxs, PreparedTxs, true) ->
         [{Key, CommitTime}] ->
             case CommitTime > SnapshotTime of
                 true ->
-                    lager:info("~w: False because there is committed", [TxId]),
+                    %lager:info("~w: False because there is committed", [TxId]),
                     false;
                 false ->
                     case check_prepared(TxId, PreparedTxs, Key) of
                         true ->
                             certification_check(TxId, T, CommittedTxs, PreparedTxs, true);
                         false ->
-                            lager:info("~w: False of prepared", [TxId]),
+                            %lager:info("~w: False of prepared", [TxId]),
                             false
                     end
             end;
@@ -530,7 +530,7 @@ certification_check(TxId, [H|T], CommittedTxs, PreparedTxs, true) ->
                 true ->
                     certification_check(TxId, T, CommittedTxs, PreparedTxs, true); 
                 false ->
-                    lager:info("False of prepared"),
+                    %lager:info("False of prepared"),
                     false
             end
     end.
