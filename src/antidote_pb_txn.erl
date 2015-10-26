@@ -88,14 +88,20 @@ process(#fpbstarttxnreq{clock=Clock}, State) ->
 process(#fpbpreptxnreq{txid=TxId, threadid=ThreadId, 
             local_updates=LocalUpdates, remote_updates=RemoteUpdates}, State) ->
     %lager:info("Prep txn req"),
+    T1 = tx_utilities:now_microsec(),
     RealId= decode_txid(TxId),
     DeLocalUpdates = decode_update_list(LocalUpdates),
     DeRemoteUpdates = decode_update_list(RemoteUpdates),
+    T2 = tx_utilities:now_microsec(),
+    lager:info("Decode takes ~w", [T2-T1]),
     case antidote:prepare(ThreadId, RealId, DeLocalUpdates, DeRemoteUpdates) of
         {ok, {committed, CommitTime}} ->
+            T3 = tx_utilities:now_microsec(),
+            lager:info("Commit takes ~w", [T3-T2]),
             {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
         {aborted, RealId} ->
-            lager:warning("~w: aborted!", [RealId]),
+            T3 = tx_utilities:now_microsec(),
+            lager:warning("~w: aborted, takes ~w!", [RealId, T3-T2]),
             {reply, #fpbpreptxnresp{success=false}, State};
         Reason ->
             lager:warning("Error reason: ~w", [Reason]),
