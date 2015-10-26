@@ -72,8 +72,8 @@ init([]) ->
     {ok, #state{}}.
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
-    %lager:info("Got req: local ~w, remote ~w", [LocalUpdates, RemoteUpdates]),
     LocalParts = [Part || {Part, _} <- LocalUpdates],
+    lager:info("Got req: localup ~w, localparts ~w", [LocalUpdates, LocalParts]),
     case length(LocalUpdates) of
         0 ->
             clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
@@ -97,6 +97,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
             RemoteParts = [Part || {Part, _} <- RemoteUpdates],
             case length(RemoteParts) of
                 0 ->
+                    lager:info("Trying to prepare!!"),
                     CommitTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:commit(LocalParts, TxId, CommitTime),
                     gen_server:reply(Sender, {ok, {committed, CommitTime}}),

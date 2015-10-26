@@ -153,12 +153,12 @@ decode_update_list(#fpbnodeups{per_nodeup=Ops}) ->
     lists:map(fun(Op) -> decode_node_updates(Op) end, Ops).
 
 decode_node_updates(#fpbpernodeup{node_id=NodeId, partition_id=PartitionId, ups=Updates}) ->
-    lager:info("Node is ~w, Key is ~w", [NodeId, PartitionId]),
+    %lager:info("Node is ~w, Key is ~w", [NodeId, PartitionId]),
     {hash_fun:get_vnode_by_id(PartitionId, NodeId), 
         lists:map(fun(Up) ->  decode_update(Up) end, Updates)}.
 
 decode_update(#fpbupdate{key=Key, value=Value}) ->
-    lager:info("Key is ~t", [Key]),
+    %lager:info("Key is ~t", [Key]),
     {Key, decode_value(Value)}.
 
 decode_value(#fpbvalue{field=2, customer=Value}) ->
