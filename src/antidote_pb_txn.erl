@@ -109,7 +109,7 @@ process(#fpbpreptxnreq{txid=TxId, threadid=ThreadId,
     end;
 process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
     %lager:info("Trying to read, TxId is ~s, key is ~t", [TxId, binary_to_list(Key)]),
-    T1 = tx_utilities:get_nowmicrosec(),
+    T1 = tx_utilities:now_microsec(),
     RealTxId = case TxId of
                     undefined ->
                         tx_utilities:create_transaction_record(0);
