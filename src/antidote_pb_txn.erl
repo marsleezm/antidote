@@ -116,17 +116,17 @@ process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
                     _ ->
                         decode_txid(TxId)
                 end,
-    T2 = tx_utilities:get_nowmicrosec(),
+    T2 = tx_utilities:now_microsec(),
     lager:info("Decode tx id takes ~w", [T2-T1]),
     {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), Key, RealTxId),
     case Value of
         [] ->
-            T3 = tx_utilities:get_nowmicrosec(),
+            T3 = tx_utilities:now_microsec(),
             lager:info("read takes ~w", [T3-T2]),
             {reply, #fpbvalue{field=0}, State};
         _ ->
             EV = encode_value(Value),
-            T3 = tx_utilities:get_nowmicrosec(),
+            T3 = tx_utilities:now_microsec(),
             lager:info("read and encode takes ~w", [T3-T2]),
             {reply, EV, State}
     end;
