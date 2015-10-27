@@ -109,26 +109,26 @@ process(#fpbpreptxnreq{txid=TxId, threadid=ThreadId,
     end;
 process(#fpbreadreq{txid=TxId, key=Key, partition_id=PartitionId}, State) ->
     %lager:info("Trying to read, TxId is ~s, key is ~t", [TxId, binary_to_list(Key)]),
-    T1 = tx_utilities:now_microsec(),
+    %T1 = tx_utilities:now_microsec(),
     RealTxId = case TxId of
                     undefined ->
                         tx_utilities:create_transaction_record(0);
                     _ ->
                         decode_txid(TxId)
                 end,
-    T2 = tx_utilities:now_microsec(),
-    lager:info("Decode tx id takes ~w", [T2-T1]),
+    %T2 = tx_utilities:now_microsec(),
+    %lager:info("Decode tx id takes ~w", [T2-T1]),
     {ok, Value} = antidote:read(hash_fun:get_local_vnode_by_id(PartitionId), Key, RealTxId),
     case Value of
         [] ->
-            T3 = tx_utilities:now_microsec(),
-            lager:info("read takes ~w", [T3-T2]),
+            %T3 = tx_utilities:now_microsec(),
+            %lager:info("read takes ~w", [T3-T2]),
             {reply, #fpbvalue{field=0}, State};
         _ ->
-            EV = encode_value(Value),
-            T3 = tx_utilities:now_microsec(),
-            lager:info("read and encode takes ~w", [T3-T2]),
-            {reply, EV, State}
+            %EV = encode_value(Value),
+            %T3 = tx_utilities:now_microsec(),
+            %lager:info("read and encode takes ~w", [T3-T2]),
+            {reply, encode_value(Value), State}
     end;
 process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) ->
     %lager:info("Key is ~s, value is ~w, partition id is ~w", [Key, Value, PartitionId]),
