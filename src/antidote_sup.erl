@@ -81,7 +81,6 @@ init(_Args) ->
                             permanent, 5000, supervisor, [clockSI_general_tx_coord_sup]}
                 }
           end,
-            
 
     ClockSIsTxCoordSup =  { clocksi_static_tx_coord_sup,
                            {clocksi_static_tx_coord_sup, start_link, []},

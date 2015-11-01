@@ -273,9 +273,9 @@ handle_command({prepare, TxId, WriteSet, Type}, Sender,
             UsedTime = tx_utilities:now_microsec() - PrepareTime,
             case IfReplicate of
                 true ->
-                    PendingRecord = {prepare, Sender, 
-                            {prepared, TxId, PrepareTime, Type}, {TxId, WriteSet}},
-                    repl_fsm:replicate(Partition, {TxId, PendingRecord}),
+                    PendingRecord = {TxId, Sender, 
+                            {prepared, TxId, PrepareTime, Type}, WriteSet, PrepareTime},
+                    repl_fsm:repl_prepare(Partition, TxId, prepare, PendingRecord),
                     {noreply, State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}};
                 false ->
                     %riak_core_vnode:reply(OriginalSender, {prepared, TxId, PrepareTime, Type}),
@@ -306,8 +306,8 @@ handle_command({single_commit, WriteSet}, Sender,
             case IfReplicate of
                 true ->
                     PendingRecord = {commit, Sender, 
-                        {ok, {committed, CommitTime}}, {TxId, WriteSet}},
-                    repl_fsm:replicate(Partition, {TxId, PendingRecord}),
+                        {ok, {committed, CommitTime}}, {TxId, WriteSet}, CommitTime},
+                    repl_fsm:repl_prepare(Partition, TxId, single_commit, PendingRecord),
                     {noreply, State#state{ 
                             num_committed=NumCommitted+1}};
                 false ->
@@ -321,10 +321,10 @@ handle_command({single_commit, WriteSet}, Sender,
             {noreply, State#state{num_cert_fail=NumCertFail+1}}
     end;
 
-handle_command({commit, TxId, TxCommitTime}, Sender,
-               #state{partition=Partition,
+handle_command({commit, TxId, TxCommitTime}, _Sender,
+               #state{%partition=Partition,
                       committed_txs=CommittedTxs,
-                      if_replicate=IfReplicate,
+                      %if_replicate=IfReplicate,
                       prepared_txs=PreparedTxs,
                       inmemory_store=InMemoryStore,
                       num_committed=NumCommitted
@@ -333,17 +333,17 @@ handle_command({commit, TxId, TxCommitTime}, Sender,
     Result = commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore),
     case Result of
         {ok, committed} ->
-            case IfReplicate of
-                true ->
-                    PendingRecord = {commit, Sender, 
-                        false, {TxId, TxCommitTime}},
-                    repl_fsm:replicate(Partition, {TxId, PendingRecord}),
+            %case IfReplicate of
+            %    true ->
+            %        PendingRecord = {commit, Sender, 
+            %            false, {TxId, TxCommitTime}},
+                    %repl_fsm:replicate(Partition, {TxId, PendingRecord}),
+            %        {noreply, State#state{
+            %                num_committed=NumCommitted+1}};
+            %    false ->
                     {noreply, State#state{
                             num_committed=NumCommitted+1}};
-                false ->
-                    {noreply, State#state{
-                            num_committed=NumCommitted+1}}
-            end;
+            %end;
         {error, no_updates} ->
             {reply, no_tx_record, State}
     end;

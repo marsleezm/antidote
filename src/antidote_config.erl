@@ -22,24 +22,7 @@ load(File) ->
                   lager:info("Failed to parse config file ~s: ~p\n", [FileName, Reason])
           end,
     load_config(TermsList),
-    case antidote_config:get(do_repl) of
-        true ->
-            lager:info("Will do replication");
-        false ->
-            lager:info("No replication")
-    end,
-    case antidote_config:get(do_specula) of
-        true ->
-            lager:info("Will do speculation");
-        false ->
-            lager:info("No speculation")
-    end,
-    case antidote_config:get(do_cert) of
-        true ->
-            lager:info("Will do certification");
-        false ->
-            lager:info("No certification")
-    end.
+    notice_info().
 
 set(Key, Value) ->
     ok = application:set_env(antidote, Key, Value).
@@ -60,7 +43,6 @@ get(Key, Default) ->
             Default
     end.
 
-
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
@@ -73,3 +55,23 @@ load_config([{Key, Value} | Rest]) ->
 load_config([ Other | Rest]) ->
     io:format("Ignoring non-tuple config value: ~p\n", [Other]),
     load_config(Rest).
+
+notice_info() ->
+    case antidote_config:get(do_repl) of
+        true ->
+            lager:info("Will do replication");
+        false ->
+            lager:info("No replication")
+    end,
+    case antidote_config:get(do_specula) of
+        true ->
+            lager:info("Will do speculation");
+        false ->
+            lager:info("No speculation")
+    end,
+    case antidote_config:get(do_cert) of
+        true ->
+            lager:info("Will do certification");
+        false ->
+            lager:info("No certification")
+    end.

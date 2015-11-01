@@ -27,7 +27,7 @@
 
 
 %% States
--export([ready_or_block/5, return/4]).
+-export([ready_or_block/5, return/3]).
 
 ready_or_block(Key, MyTxId, Tables, SpeculaTimeout, Sender) ->
     SnapshotTime = MyTxId#tx_id.snapshot_time,
@@ -63,22 +63,22 @@ ready_or_block(Key, MyTxId, Tables, SpeculaTimeout, Sender) ->
 
 %% @doc return:
 %%  - Reads and returns the log of specified Key using replication layer.
-return(Key, Type, TxId, InMemoryStore) ->
+return(Key, TxId, InMemoryStore) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(InMemoryStore, Key) of
         [] ->
-            {ok, Type:new()};
+            {ok, []};
         [{Key, ValueList}] ->
-            {ok, find_version(ValueList, SnapshotTime, Type)}
+            {ok, find_version(ValueList, SnapshotTime)}
     end.
 
 %%%%%%%%%Intenal%%%%%%%%%%%%%%%%%%
-find_version([], _SnapshotTime, Type) ->
-    Type:new();
-find_version([{TS, Snapshot}|Rest], SnapshotTime, Type) ->
+find_version([], _SnapshotTime) ->
+    [];
+find_version([{TS, Snapshot}|Rest], SnapshotTime) ->
     case SnapshotTime >= TS of
         true ->
             Snapshot; 
         false ->
-            find_version(Rest, SnapshotTime, Type)
+            find_version(Rest, SnapshotTime)
     end.

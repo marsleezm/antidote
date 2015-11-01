@@ -40,13 +40,17 @@
         handle_sync_event/4,
         terminate/2]).
 
-%% States
--export([certify/4]).
-
 %% Spawn
 
 -record(state, {partition :: non_neg_integer(),
-        pending_metadata :: cache_id()}).
+        tx_id :: txid(),
+        prepare_time = 0 :: non_neg_integer(),
+        local_parts :: [],
+        remote_parts :: [],
+        pending_txs :: cache_id(),
+        is_specula = false :: boolean(),
+        sender :: term(),
+        to_ack :: non_neg_integer()}).
 
 %%%===================================================================
 %%% API
@@ -56,100 +60,100 @@ start_link(Name) ->
     gen_server:start_link({local, Name},
              ?MODULE, [], []).
 
-certify(SpeculaCertServer, TxId, LocalUpdates, RemoteUpdates) ->
-    gen_server:call(SpeculaCertServer, {certify, TxId, LocalUpdates, RemoteUpdates}).
 %%%===================================================================
 %%% Internal
 %%%===================================================================
 
 init([]) ->
-    PendingMetadata = tx_utilities:open_private_table(pending_metadata),
-    {ok, #state{
-                pending_metadata=PendingMetadata}}.
+    %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
+    PendingTxs = tx_utilities:open_private_table(pending_txs), 
+    {ok, #state{pending_txs=PendingTxs}}.
 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender,
-	    SD0=#state{pending_metadata=PendingMetadata}) ->
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
+    LocalParts = [Part || {Part, _} <- LocalUpdates],
+    %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
+    %lager:info("Got req: localKeys ~p", [LocalKeys]),
     case length(LocalUpdates) of
         0 ->
             specula_vnode:prepare(RemoteUpdates, TxId, remote),
-            ets:insert(PendingMetadata, {TxId, {length(RemoteUpdates), 0, LocalUpdates, RemoteUpdates, Sender}});
+            {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates), local_parts=LocalParts, remote_parts=
+                RemoteUpdates, sender=Sender}};
         _ ->
-            %lager:info("Preparing for ~w of ~w", [LocalUpdates, TxId]),
+            %lager:info("Local updates are ~w", [LocalUpdates]),
             specula_vnode:prepare(LocalUpdates, TxId, local),
-            ets:insert(PendingMetadata, {TxId, {length(LocalUpdates), 0, LocalUpdates, RemoteUpdates, Sender}})
-    end,
-    {noreply, SD0};
+            {noreply, SD0#state{tx_id=TxId, to_ack=length(LocalUpdates), local_parts=LocalParts, remote_parts=
+                RemoteUpdates, sender=Sender}}
+    end;
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
 handle_cast({prepared, TxId, PrepareTime, local}, 
-	    SD0=#state{pending_metadata=PendingMetadata}) ->
-    case ets:lookup(PendingMetadata, TxId) of
-        [{TxId, {1, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
-            case length(RemoteUpdates) of
+	    SD0=#state{to_ack=N, tx_id=TxId, local_parts=LocalParts,
+            remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime}) ->
+    case N of
+        1 -> 
+            RemoteParts = [Part || {Part, _} <- RemoteUpdates],
+            case length(RemoteParts) of
                 0 ->
-                    CommitTime = max(PrepareTime, MaxPrepTime),
-                    %lager:info("~w done", [TxId]),
-                    specula_vnode:commit(LocalUpdates, TxId, CommitTime),
-                    %lager:info("Done for ~w", [TxId]),
-                    gen_server:reply(Sender, {ok, {committed, CommitTime}});
+                    %lager:info("Trying to prepare!!"),
+                    CommitTime = max(PrepareTime, OldPrepTime),
+                    specula_vnode:commit(LocalParts, TxId, CommitTime),
+                    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+                    {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
                 _ ->
+                    MaxPrepTime = max(PrepareTime, OldPrepTime),
                     specula_vnode:prepare(RemoteUpdates, TxId, remote),
-                    ets:insert(PendingMetadata, {TxId, {length(RemoteUpdates), MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}})
+                    {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=length(RemoteParts),
+                        remote_parts=RemoteParts}}
                 end;
-        [{TxId, {N, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
-            %lager:info("~w, needs ~w", [TxId, N-1]),
-            %lager:info("Not done for ~w", [TxId]),
-            ets:insert(PendingMetadata, {TxId, {N-1, max(MaxPrepTime, PrepareTime), LocalUpdates, 
-                    RemoteUpdates, Sender}});
-        [] ->
-            ok;
         _ ->
-            lager:info("Something is wrong!!")
-    end,
+            %lager:info("Not done for ~w", [TxId]),
+            MaxPrepTime = max(OldPrepTime, PrepareTime),
+            {noreply, SD0#state{to_ack=N-1, prepare_time=MaxPrepTime}}
+    end;
+
+handle_cast({prepared, _, _, local}, 
+	    SD0) ->
+    %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
     {noreply, SD0};
 
-handle_cast({abort, TxId, local}, 
-	    SD0=#state{pending_metadata=PendingMetadata}) ->
-    case ets:lookup(PendingMetadata, TxId) of
-        [] ->
-            ok;
-        [{TxId, {_, _, LocalUpdates, _, Sender}}] ->
-            ets:delete(PendingMetadata, TxId),
-            specula_vnode:abort(LocalUpdates, TxId),
-            gen_server:reply(Sender, {aborted, TxId})
-    end,
+handle_cast({abort, TxId, local}, SD0=#state{tx_id=TxId, local_parts=LocalParts, sender=Sender}) ->
+    specula_vnode:abort(LocalParts, TxId),
+    gen_server:reply(Sender, {aborted, TxId}),
+    {noreply, SD0#state{tx_id={}}};
+handle_cast({abort, _, local}, SD0) ->
+    %lager:info("Received abort for previous txn ~w", [OtherTxId]),
     {noreply, SD0};
 
 handle_cast({prepared, TxId, PrepareTime, remote}, 
-	    SD0=#state{pending_metadata=PendingMetadata}) ->
-    case ets:lookup(PendingMetadata, TxId) of
-        [{TxId, {1, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
+	    SD0=#state{remote_parts=RemoteParts, sender=Sender, 
+            prepare_time=MaxPrepTime, to_ack=N, local_parts=LocalParts}) ->
+    %lager:info("Received remote prepare"),
+    case N of
+        1 ->
             CommitTime = max(MaxPrepTime, PrepareTime),
-            ets:delete(PendingMetadata, TxId),
-            specula_vnode:commmit(LocalUpdates, TxId, CommitTime),
-            specula_vnode:commmit(RemoteUpdates, TxId, CommitTime),
-            gen_server:reply(Sender, {ok, {committed, CommitTime}});
-        [{TxId, {N, MaxPrepTime, LocalUpdates, RemoteUpdates, Sender}}] ->
-            ets:insert(PendingMetadata, {TxId, {N-1, max(MaxPrepTime, PrepareTime), LocalUpdates, RemoteUpdates, Sender}});
-        Record ->
-            lager:info("Something is right: ~w", [Record])
-    end,
+            specula_vnode:commit(LocalParts, TxId, CommitTime),
+            specula_vnode:commit(RemoteParts, TxId, CommitTime),
+            gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
+        N ->
+            {noreply, SD0#state{to_ack=N-1, prepare_time=max(MaxPrepTime, PrepareTime)}}
+    end;
+handle_cast({prepared, _, _, remote}, 
+	    SD0) ->
     {noreply, SD0};
 
 handle_cast({abort, TxId, remote}, 
-	    SD0=#state{pending_metadata=PendingMetadata}) ->
-    case ets:lookup(PendingMetadata, TxId) of
-        [] ->
-            {noreply, SD0};
-        [{TxId, {_, _, LocalUpdates, RemoteUpdates, Sender}}] ->
-            ets:delete(PendingMetadata, TxId),
-            specula_vnode:abort(LocalUpdates, TxId),
-            specula_vnode:abort(RemoteUpdates, TxId),
-            gen_server:reply(Sender, {aborted, TxId}),
-            {noreply, SD0}
-    end;
+	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, local_parts=LocalParts}) ->
+    specula_vnode:abort(LocalParts, TxId),
+    specula_vnode:abort(RemoteParts, TxId),
+    gen_server:reply(Sender, {aborted, TxId}),
+    {noreply, SD0#state{tx_id={}}};
+
+handle_cast({abort, _, remote}, 
+	    SD0) ->
+    {noreply, SD0};
 
 handle_cast(_Info, StateData) ->
     {noreply,StateData}.
@@ -165,6 +169,7 @@ handle_sync_event(_Event, _From, _StateName, StateData) ->
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
-terminate(_Reason, _SD) ->
+terminate(Reason, _SD) ->
+    lager:info("Cert server terminated with ~w", [Reason]),
     ok.
 

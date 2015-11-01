@@ -25,7 +25,7 @@
 
 -export([start_vnode/1,
 	    read_data_item/3,
-        set_prepared/4,
+        set_prepared/5,
         async_send_msg/3,
 
         prepare/3,
@@ -102,14 +102,13 @@ read_data_item(Node, Key, TxId) ->
                                    ?SPECULA_MASTER, infinity).
 
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
-prepare(ListofNodes, TxId, Type) ->
-    dict:fold(fun(Node,WriteSet,_Acc) ->
+prepare(Updates, TxId, Type) ->
+    lists:foreach(fun({Node,WriteSet}) ->
 			riak_core_vnode_master:command(Node,
 						       {prepare, TxId, WriteSet, Type},
                                self(),
 						       ?SPECULA_MASTER)
-		end, ok, ListofNodes).
-
+		end, Updates).
 
 %% @doc Sends prepare+commit to a single partition
 %%      Called by a Tx coordinator when the tx only
@@ -121,22 +120,22 @@ single_commit([{Node,WriteSet}]) ->
                                    ?SPECULA_MASTER).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
-commit(ListofNodes, TxId, CommitTime) ->
-    dict:fold(fun(Node,WriteSet,_Acc) ->
+commit(UpdatedParts, TxId, CommitTime) ->
+    lists:foreach(fun(Node) ->
 			riak_core_vnode_master:command(Node,
-						       {commit, TxId, CommitTime, WriteSet},
+						       {commit, TxId, CommitTime},
 						       self(),
 						       ?SPECULA_MASTER)
-		end, ok, ListofNodes).
+		end, UpdatedParts).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
-abort(ListofNodes, TxId) ->
-    dict:fold(fun(Node,WriteSet,_Acc) ->
+abort(UpdatedParts, TxId) ->
+    lists:foreach(fun(Node) ->
 			riak_core_vnode_master:command(Node,
-						       {abort, TxId, WriteSet},
+						       {abort, TxId},
 						       self(),
 						       ?SPECULA_MASTER)
-		end, ok, ListofNodes).
+		end, UpdatedParts).
 
 %% @doc Initializes all data structures that vnode needs to track information
 %%      the transactions it participates on.
@@ -346,7 +345,7 @@ handle_command({single_commit, WriteSet}, Sender,
             {noreply, State#state{num_cert_fail=NumCertFail+1}}
     end;
 
-handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
+handle_command({commit, TxId, TxCommitTime}, Sender,
                #state{partition=Partition,
                       committed_txs=CommittedTxs,
                       if_replicate=IfReplicate,
@@ -357,14 +356,14 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                       specula_dep=SpeculaDep,
                       num_read_invalid=NumInvalid
                       } = State) ->
-    Result = commit(TxId, TxCommitTime, Updates, CommittedTxs, InMemoryStore, PreparedTxs, SpeculaDep),
+    Result = commit(TxId, TxCommitTime, CommittedTxs, InMemoryStore, PreparedTxs, SpeculaDep),
     case Result of
         {ok, {committed, Diff}} ->
             NewInvalid = specula_utilities:finalize_dependency(NumInvalid, TxId, 
                     TxCommitTime, SpeculaDep, commit),
             case IfReplicate of
                 true ->
-                    PendingRecord = {commit, Sender, false, {TxId, TxCommitTime, Updates}},
+                    PendingRecord = {commit, Sender, false, {TxId, TxCommitTime}},
                     repl_fsm:replicate(Partition, {TxId, PendingRecord}),
                     {noreply, State#state{committed_diff=CommittedDiff+Diff, 
                                 num_committed=NumCommitted+1, num_read_invalid=NewInvalid}};
@@ -376,15 +375,16 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
             {reply, no_tx_record, State}
     end;
 
-handle_command({abort, TxId, Updates}, _Sender, State=#state{prepared_txs=PreparedTxs, num_read_abort=NumRAbort,
+handle_command({abort, TxId}, _Sender, State=#state{prepared_txs=PreparedTxs, num_read_abort=NumRAbort,
                     num_aborted=NumAborted, specula_dep=SpeculaDep, inmemory_store=InMemoryStore}) ->
-    case Updates of
-        [] ->
-            {reply, {error, no_tx_record}, State};
-        _ -> 
-            clean_abort_prepared(PreparedTxs, TxId, Updates, InMemoryStore),
+    case ets:lookup(PreparedTxs, TxId) of
+        [{TxId, Keys}] ->
+            true = ets:delete(PreparedTxs, TxId),
+            clean_abort_prepared(PreparedTxs, TxId, Keys, InMemoryStore),
             NewRAbort = specula_utilities:finalize_dependency(NumRAbort,TxId, ignore, SpeculaDep, abort),
-            {noreply, State#state{num_aborted=NumAborted+1, num_read_abort=NewRAbort}}
+            {noreply, State#state{num_aborted=NumAborted+1, num_read_abort=NewRAbort}};
+        [] ->
+            {noreply, State#state{num_aborted=NumAborted+1, num_read_abort=NumRAbort}}
     end;
 
 %% @doc Return active transactions in prepare state with their preparetime
@@ -446,15 +446,16 @@ async_send_msg(Delay, Msg, To) ->
 prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify)->
     case certification_check(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify) of
         true ->
-            %PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
             PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
-		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
+		    KeySet = set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime, []),
+            true = ets:insert(PreparedTxs, {TxId, KeySet}),
 		    {ok, PrepareTime};
         specula_prepared ->
             %%lager:info("~w: Certification check returns specula_prepared", [TxId]),
             %PrepareTime = tx_utilities:increment_ts(TxId#tx_id.snapshot_time),
             PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
-		    set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime),
+		    KeySet = set_prepared(PreparedTxs, TxWriteSet, TxId, PrepareTime, []),
+            true = ets:insert(PreparedTxs, {TxId, KeySet}),
 		    {specula_prepared, PrepareTime};
 	    false ->
             %%lager:info("~w: write conflcit", [TxId]),
@@ -463,14 +464,15 @@ prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify)->
             {error,  wait_more}
     end.
 
-set_prepared(_PreparedTxs, [], _TxId, _Time) ->
-    ok;
-set_prepared(PreparedTxs,[{Key, Value}|Rest], TxId, Time) ->
+set_prepared(_PreparedTxs, [], _TxId, _Time, KeySet) ->
+    KeySet;
+set_prepared(PreparedTxs,[{Key, Value}|Rest], TxId, Time, KeySet) ->
     true = ets:insert(PreparedTxs, {Key, {TxId, Time, Value, []}}),
-    set_prepared(PreparedTxs,Rest,TxId, Time).
+    set_prepared(PreparedTxs,Rest,TxId, Time, [Key|KeySet]).
 
-commit(TxId, TxCommitTime, Updates, CommittedTxs, InMemoryStore, PreparedTxs, SpeculaDep)->
-    Diff = update_and_clean(Updates, TxId, TxCommitTime, InMemoryStore, 
+commit(TxId, TxCommitTime, CommittedTxs, InMemoryStore, PreparedTxs, SpeculaDep)->
+    [{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
+    Diff = update_and_clean(Keys, TxId, TxCommitTime, InMemoryStore, 
                 PreparedTxs, SpeculaDep, CommittedTxs, 0),
     {ok, {committed, Diff}}.
 
@@ -484,7 +486,7 @@ commit(TxId, TxCommitTime, Updates, CommittedTxs, InMemoryStore, PreparedTxs, Sp
 %%      b. PreparedTxs
 clean_abort_prepared(_PreparedTxs, _TxId, [], _InMemoryStore) ->
     ok;
-clean_abort_prepared(PreparedTxs, TxId, [{Key, _}|Rest], InMemoryStore) ->
+clean_abort_prepared(PreparedTxs, TxId, [Key|Rest], InMemoryStore) ->
     ToReply = case ets:lookup(PreparedTxs, Key) of
                 [{Key, {TxId, _Time, _Value, PendingReaders}}] ->
                     ets:delete(PreparedTxs, Key),
@@ -545,13 +547,13 @@ check_prepared(TxId, Key, PreparedTxs) ->
             false
     end.
 
--spec update_and_clean(KeyValues :: [{key(), atom(), term()}],
+-spec update_and_clean(KeyValues :: [key()],
                           TxId::txid(),TxCommitTime:: {term(), term()}, InMemoryStore :: cache_id(), 
                             PreparedTxs :: cache_id(), SpeculaDep :: cache_id(), 
                             CommittedTxs :: cache_id(), PrepareTime :: non_neg_integer()) -> ok.
 update_and_clean([], _TxId, TxCommitTime, _, _, _, _, PrepareTime) ->
     TxCommitTime-PrepareTime;
-update_and_clean([{Key, Value}|Rest], TxId, TxCommitTime, InMemoryStore, 
+update_and_clean([Key|Rest], TxId, TxCommitTime, InMemoryStore, 
                 PreparedTxs, SpeculaDep, CommittedTxs, _) ->
     case ets:lookup(PreparedTxs, Key) of
         [{Key, {TxId, PrepareTime, Value, PendingReaders}}] ->

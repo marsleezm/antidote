@@ -33,9 +33,20 @@ start_link() ->
 start_fsm(Partition) ->
     supervisor:start_child(?MODULE, [Partition]).
 
+generate_data_repl_serv() ->
+    ToReplicate = find_to_repl(),
+    Names = [ list_to_atom(atom_to_list(node())++"repl"++atom_to_list(Node))  || Node<- ToReplicate],
+    [{Name, {data_repl_serv, start_link, [Name]},
+        permanent, 5000, worker, [data_repl_serv]}
+            || Name <- Names ].
+
+find_to_repl() ->
+    List = antidote_config:get(to_repl),
+    [{_, ToRepl}] = lists:filter(fun({Node, _}) -> Node == node() end, List),
+    ToRepl. 
+
 init([]) ->
-    {ok, {{simple_one_for_one, 5, 10},
-	  [{repl_fsm,
-	    {repl_fsm, start_link, []},
-	    transient, 5000, worker, [repl_fsm]}]
-	 }}.
+    MyRepFsm = {repl_fsm, {repl_fsm, start_link, []}, transient, 5000, worker, [repl_fsm]},
+    DataReplFsms = generate_data_repl_serv(), 
+    lager:info("After generating data repl fsm"),
+    {ok, {{one_for_one, 5, 10}, [MyRepFsm|DataReplFsms]}}.

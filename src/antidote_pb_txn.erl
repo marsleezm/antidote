@@ -145,9 +145,9 @@ process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) 
             {reply, #fpbpreptxnresp{success=false}, State}
     end;
 process(#fpbpartlistreq{noop=_}, State) ->
-    PartList = hash_fun:get_hash_fun(),
+    {PartList, ReplList} = hash_fun:get_hash_fun(),
     lager:info("Hash fun is ~w", [PartList]),
-    {reply, #fpbpartlist{node_parts=encode_part_list(PartList)}, State}.
+    {reply, #fpbpartlist{node_parts=encode_part_list(PartList), repl_list=encode_repl_list(ReplList)}, State}.
 
 %% @doc process_stream/3 callback. This service does not create any
 %% streaming responses and so ignores all incoming messages.
@@ -161,7 +161,6 @@ decode_update_list(#fpbnodeups{per_nodeup=Ops}) ->
     lists:map(fun(Op) -> decode_node_updates(Op) end, Ops).
 
 decode_node_updates(#fpbpernodeup{node_id=NodeId, partition_id=PartitionId, ups=Updates}) ->
-    %lager:info("Node is ~w, Key is ~w", [NodeId, PartitionId]),
     {hash_fun:get_vnode_by_id(PartitionId, NodeId), 
         lists:map(fun(Up) ->  decode_update(Up) end, Updates)}.
 
@@ -216,6 +215,10 @@ encode_general_txn_read_resp({{read, _Key, _Type}, Result}) ->
 encode_part_list(List) ->
     lists:map(fun({Ip, NumPartitions}) -> 
          #fpbnodepart{ip=atom_to_list(Ip), num_partitions=NumPartitions} end , List).
+
+encode_repl_list(List) ->
+    lists:map(fun({Ip, ListIps}) -> 
+         #fpbrepllist{ip=atom_to_list(Ip), to_repls=[atom_to_list(Node) || Node <- ListIps]} end, List).
 
 encode_value({2, Value}) ->
     #fpbvalue{field=2, customer=Value};

@@ -28,6 +28,7 @@
 
 -export([get_preflist_from_key/1,
          get_my_next/2,
+         build_rev_replicas/0,
          get_local_vnode_by_id/1,
          get_vnode_by_id/2,
          get_my_previous/2,
@@ -35,6 +36,7 @@
          get_local_servers/0,
          remove_node_from_preflist/1,
          get_hash_fun/0,
+         init_hash_fun/0,
          get_my_node/1
         ]).
 
@@ -79,22 +81,16 @@ get_node_parts(NodeIndex) ->
         [{NodeIndex, PartList}] ->
             PartList;
         [] ->
-            lager:warning("Something is wrong!!!")
+            lager:warning("Geting part node.. Something is wrong!!!")
     end.
 
 -spec get_local_servers() -> [term()].
 get_local_servers() ->
-    case ets:lookup(meta_info, local_parts) of
-        [{local_parts, PartList}] ->
+    case ets:lookup(meta_info, local_node) of
+        [{_, PartList}] ->
             PartList;
         [] ->
-            init_hash_fun(),
-            case ets:lookup(meta_info, local_parts) of
-                [{local_parts, PartList}] ->
-                    PartList;
-                [] ->
-                    lager:info("Something is wrong!!")
-            end
+            lager:info("Something is wrong!!")
     end.
 
 -spec get_my_previous(chash:index_as_int(), non_neg_integer()) -> preflist().
@@ -164,10 +160,13 @@ get_partitions() ->
 get_hash_fun() ->
     case ets:lookup(meta_info, node_list) of
         [{node_list, List}] ->
-            [{Node, length(PartList)} || {Node, PartList} <- List];
+            {[{Node, length(PartList)} || {Node, PartList} <- List], antidote_config:get(to_repl)};
         [] ->
-            List = init_hash_fun(),
-            [{Node, length(PartList)} || {Node, PartList} <- List]
+            init_hash_fun(),
+            case ets:lookup(meta_info, node_list) of
+                [{node_list, List}] ->
+                    {[{Node, length(PartList)} || {Node, PartList} <- List], antidote_config:get(to_repl)}
+            end
     end.
 
 init_hash_fun() ->
@@ -186,13 +185,29 @@ init_hash_fun() ->
         case node() of
             Node ->
                  ets:insert(meta_info, {Acc, PartList}),
-                 ets:insert(meta_info, {local_parts, PartList}),
+                 ets:insert(meta_info, {local_node, PartList}),
                  Acc+1;
             _ ->
                  ets:insert(meta_info, {Acc, PartList}),
                  Acc+1
         end end, 0, PartitionListByNode),
     PartitionListByNode.
+
+build_rev_replicas() ->
+    Lists = antidote_config:get(to_repl),
+    AllNodes = [Node  || {Node, _} <- Lists],
+    lists:foreach(fun(N) ->
+            ReplList = {N, [list_to_atom(atom_to_list(Node)++"repl"++atom_to_list(N)) 
+                            ||  {Node, ToRepl} <- Lists, if_repl_myself(ToRepl, N)]},
+            ets:insert(meta_info, ReplList)
+        end, AllNodes).
+
+if_repl_myself([], _) ->
+    false;
+if_repl_myself([N|_], N) ->
+    true;
+if_repl_myself([_|Rest], N) ->
+    if_repl_myself(Rest, N).
 
 -ifdef(TEST).
 %% @doc Testing remove_node_from_preflist

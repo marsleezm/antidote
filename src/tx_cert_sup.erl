@@ -32,15 +32,7 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 certify(ThreadId, TxId, LocalUpdates, RemoteUpdates) ->
-    random:seed(now()),
-    case ets:lookup(meta_info, do_specula) of
-        [{do_specula, true}] ->
-            specula_tx_cert_server:certify(
-                generate_module_name(ThreadId rem ?NUM_SUP), TxId, LocalUpdates, RemoteUpdates);
-        [{do_specula, false}] ->
-            i_tx_cert_server:certify(generate_module_name(ThreadId rem ?NUM_SUP), TxId, 
-                LocalUpdates, RemoteUpdates)
-    end.
+    gen_server:call(generate_module_name(ThreadId rem ?NUM_SUP), {certify, TxId, LocalUpdates, RemoteUpdates}).
 
 generate_module_name(N) ->
     list_to_atom(atom_to_list(?MODULE) ++ "-" ++ integer_to_list(N)).

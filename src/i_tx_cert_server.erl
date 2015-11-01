@@ -41,9 +41,6 @@
         terminate/2]).
 
 %% States
--export([certify/4]).
-
-%% Spawn
 
 -record(state, {partition :: non_neg_integer(),
         tx_id :: txid(),
@@ -61,8 +58,6 @@ start_link(Name) ->
     gen_server:start_link({local, Name},
              ?MODULE, [], []).
 
-certify(ICertServer, TxId, LocalUpdates, RemoteUpdates) ->
-    gen_server:call(ICertServer, {certify, TxId, LocalUpdates, RemoteUpdates}).
 %%%===================================================================
 %%% Internal
 %%%===================================================================
@@ -74,7 +69,7 @@ init([]) ->
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     LocalParts = [Part || {Part, _} <- LocalUpdates],
     %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
-    %lager:info("Got req: localKeys ~p", [LocalKeys]),
+    lager:info("Got req: localUps ~p, remoteUps ~p", [LocalUpdates, RemoteUpdates]),
     case length(LocalUpdates) of
         0 ->
             clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
@@ -101,6 +96,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
                     %lager:info("Trying to prepare!!"),
                     CommitTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:commit(LocalParts, TxId, CommitTime),
+                    repl_fsm:repl_commit(LocalParts, TxId, CommitTime),
                     gen_server:reply(Sender, {ok, {committed, CommitTime}}),
                     {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
                 _ ->
@@ -137,6 +133,8 @@ handle_cast({prepared, TxId, PrepareTime, remote},
             CommitTime = max(MaxPrepTime, PrepareTime),
             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
             clocksi_vnode:commit(RemoteParts, TxId, CommitTime),
+            repl_fsm:repl_commit(LocalParts, TxId, CommitTime),
+            repl_fsm:repl_commit(RemoteParts, TxId, CommitTime),
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
             {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
         N ->
