@@ -111,7 +111,7 @@ handle_cast({repl_prepare, Partition, Type, TxId, LogContent},
     case Mode of
         quorum ->
      %       lager:info("I am ~w, txid is {~w, ~w}", [MyName, TxId, Partition]),
-            ets:insert(PendingLog, {{TxId, Partition}, {Type, Sender, ToReply, WriteSet, ReplFactor}}),
+            ets:insert(PendingLog, {{TxId, Partition}, {{Type, Sender, ToReply, WriteSet}, ReplFactor}}),
             quorum_replicate(Replicas, Type, TxId, Partition, WriteSet, TimeStamp, MyName);
         chain ->
             chain_replicate(Replicas, Type, TxId, WriteSet, TimeStamp, {Sender, ToReply})
@@ -146,7 +146,8 @@ handle_cast({repl_abort, TxId, UpdatedParts},
 
 handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
     case ets:lookup(PendingLog, {TxId, Partition}) of
-        [{{TxId, Partition}, {Type, Sender, ToReply, _WriteSet, 1}}] ->
+        [{{TxId, Partition}, {R, 1}}] ->
+            {Type, Sender, ToReply, _} = R,
             true = ets:delete(PendingLog, {TxId, Partition}),
             case ToReply of
                 false ->
@@ -159,9 +160,9 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                             Sender ! ToReply
                     end
             end;
-        [{{TxId, Partition}, {Sender, ToReply, WriteSet, N}}] ->
+        [{{TxId, Partition}, {R, N}}] ->
             %lager:info("Accumulating"),
-            ets:insert(PendingLog, {{TxId, Partition}, {Sender, ToReply, WriteSet, N-1}});
+            ets:insert(PendingLog, {{TxId, Partition}, {R, N-1}});
         [] -> %%The record is appended already, do nothing
             lager:warning("Prepare repl has disappeared!!!!"),
             ok
