@@ -112,7 +112,7 @@ handle_call({go_down},_Sender,SD0) ->
 
 handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog}) ->
-    lager:info("Got repl prepare for {~w, ~w}, write set is ~w", [TxId, Partition, WriteSet]),
+    %lager:info("Got repl prepare for {~w, ~w}, write set is ~w", [TxId, Partition, WriteSet]),
     case Type of
         prepare ->
             ets:insert(PendingLog, {{TxId, Partition}, {WriteSet, TimeStamp}}),
@@ -136,7 +136,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
 	    SD0=#state{replicated_log=ReplicatedLog,
             pending_log=PendingLog}) ->
-    lager:info("Got repl commit for ~w", [TxId]),
+    %lager:info("Got repl commit for ~w", [TxId]),
     append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, Partitions),
     {noreply, SD0};
 
@@ -173,7 +173,7 @@ append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
     case ets:lookup(PendingLog, {TxId, Part}) of
         [{{TxId, Part}, {WriteSet, _}}] ->
             AppendFun = fun({Key, Value}) ->
-                            lager:info("Adding ~w, ~w into log", [Key, Value]),
+                            %lager:info("Adding ~w, ~w into log", [Key, Value]),
                             case ets:lookup(ReplicatedLog, Key) of
                                 [] ->
                                     true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
@@ -181,7 +181,6 @@ append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
                                     {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
                                     true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}|RemainList]})
                             end end,
-            lager:info("Adding ~w", [WriteSet]),
             lists:foreach(AppendFun, WriteSet),
             ets:delete(PendingLog, {TxId, Part});
         [] ->

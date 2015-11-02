@@ -69,7 +69,8 @@ init([]) ->
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     LocalParts = [Part || {Part, _} <- LocalUpdates],
     %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
-    lager:info("Got req: localUps ~p, remoteUps ~p", [LocalUpdates, RemoteUpdates]),
+    %lager:info("TxId ~w: localUps ~p, remoteUps ~p", [TxId, LocalUpdates, RemoteUpdates]),
+    %lager:info("TxId ~w", [TxId]),
     case length(LocalUpdates) of
         0 ->
             clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
@@ -102,6 +103,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
                 _ ->
                     MaxPrepTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
+                    %lager:info("~w: to ack is ~w, parts are ~w", [TxId, length(RemoteParts), RemoteParts]),
                     {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=length(RemoteParts),
                         remote_parts=RemoteParts}}
                 end;
@@ -125,11 +127,12 @@ handle_cast({abort, _, local}, SD0) ->
     {noreply, SD0};
 
 handle_cast({prepared, TxId, PrepareTime, remote}, 
-	    SD0=#state{remote_parts=RemoteParts, sender=Sender, 
+	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, 
             prepare_time=MaxPrepTime, to_ack=N, local_parts=LocalParts}) ->
-    %lager:info("Received remote prepare"),
+    %lager:info("Received remote prepare ~w, ~w, N is ~w", [TxId, PrepareTime, N]),
     case N of
         1 ->
+            %lager:info("Decided to commit a txn ~w, prepare time is ~w", [TxId, PrepareTime]),
             CommitTime = max(MaxPrepTime, PrepareTime),
             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
             clocksi_vnode:commit(RemoteParts, TxId, CommitTime),

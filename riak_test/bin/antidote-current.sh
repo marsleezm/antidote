@@ -37,5 +37,5 @@ echo -n $VERSION > $RTEE_DEST_DIR/current/VERSION
 cd $RTEE_DEST_DIR
 
 echo " - Reinitializing git state"
-git add .
-git commit -a -m "riak_test init" --amend > /dev/null 2>&1
+sudo git add .
+sudo git commit -a -m "riak_test init" --amend > /dev/null 2>&1

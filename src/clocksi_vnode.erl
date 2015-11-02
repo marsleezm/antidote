@@ -450,11 +450,15 @@ set_prepared(PreparedTxs,[{Key, Value} | Rest],TxId,Time, KeySet) ->
 
 commit(TxId, TxCommitTime, CommittedTxs, 
                                 PreparedTxs, InMemoryStore)->
-    [{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
-    update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs),
-    %lager:info("Updated for ~w, ~p", [TxId, Keys]),
-    true = ets:delete(PreparedTxs, TxId),
-    {ok, committed}.
+    case ets:lookup(PreparedTxs, TxId) of
+        [{TxId, Keys}] ->
+            update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs),
+            true = ets:delete(PreparedTxs, TxId),
+            {ok, committed};
+        [] ->
+            lager:error("Prepared record of ~w has disappeared!", [TxId]),
+            error
+    end.
 
 %% @doc clean_and_notify:
 %%      This function is used for cleanning the state a transaction
@@ -587,7 +591,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             true = ets:delete(PreparedTxs, Key);
          [] ->
             %[{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
-            lager:warning("Something is wrong!!!!")
+            lager:warning("Something is wrong!!! A txn updated two same keys!")
     end,
     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs).
 
