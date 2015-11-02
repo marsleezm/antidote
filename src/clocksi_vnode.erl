@@ -305,8 +305,8 @@ handle_command({single_commit, WriteSet}, Sender,
         {ok, {committed, CommitTime}} ->
             case IfReplicate of
                 true ->
-                    PendingRecord = {commit, Sender, 
-                        {ok, {committed, CommitTime}}, {TxId, WriteSet}, CommitTime},
+                    PendingRecord = {TxId, Sender, 
+                        {ok, {committed, CommitTime}}, WriteSet, CommitTime},
                     repl_fsm:repl_prepare(Partition, TxId, single_commit, PendingRecord),
                     {noreply, State#state{ 
                             num_committed=NumCommitted+1}};
