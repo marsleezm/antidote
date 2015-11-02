@@ -42,10 +42,11 @@
 
 %% States
 -export([repl_prepare/4,
-        repl_commit/3,
-        quorum_replicate/7,
-        chain_replicate/6,
-        send_after/3]).
+         repl_abort/2,
+         repl_commit/3,
+         quorum_replicate/7,
+         chain_replicate/6,
+         send_after/3]).
 
 %% Spawn
 
@@ -73,6 +74,9 @@ repl_prepare(Partition, TxId, Type, LogContent) ->
 
 repl_commit(UpdatedParts, TxId, CommitTime) ->
     gen_server:cast({global, get_repl_name()}, {repl_commit, TxId, UpdatedParts, CommitTime}).
+
+repl_abort(UpdatedParts, TxId) ->
+    gen_server:cast({global, get_repl_name()}, {repl_abort, TxId, UpdatedParts}).
 
 quorum_replicate(Replicas, Type, TxId, Partition, WriteSet, TimeStamp, MyName) ->
     lists:foreach(fun(Replica) ->
@@ -123,6 +127,19 @@ handle_cast({repl_commit, TxId, UpdatedParts, CommitTime},
         lists:foreach(fun(R) ->
             %lager:info("Sending repl commit to ~w", [R]),
             gen_server:cast({global, R}, {repl_commit, TxId, CommitTime, Partitions}) end,
+        Replicas) end,
+            AllReplicas),
+    {noreply, SD0};
+
+handle_cast({repl_abort, TxId, UpdatedParts}, 
+	    SD0) ->
+    AllReplicas = get_all_replicas(UpdatedParts),
+    %lager:info("Replicas are ~w", [AllReplicas]),
+    lists:foreach(fun({Node, Partitions}) -> 
+        [{_, Replicas}] = ets:lookup(meta_info, Node),
+        lists:foreach(fun(R) ->
+            %lager:info("Sending repl commit to ~w", [R]),
+            gen_server:cast({global, R}, {repl_abort, TxId, Partitions}) end,
         Replicas) end,
             AllReplicas),
     {noreply, SD0};

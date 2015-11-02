@@ -17,6 +17,7 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
+%% TODO: should implement heart-beat for timestamp.
 -module(data_repl_serv).
 
 -behavior(gen_server).
@@ -42,8 +43,7 @@
         terminate/2]).
 
 %% States
--export([repl_prepare/4,
-        repl_commit/3,
+-export([
         read/3]).
 
 %% Spawn
@@ -62,12 +62,6 @@
 start_link(Name) ->
     gen_server:start_link({global, Name},
              ?MODULE, [Name], []).
-
-repl_prepare(Name, TxId, WriteSet, Sender) ->
-    gen_server:cast({global, Name}, {repl_prepare, TxId, WriteSet, Sender}).
-
-repl_commit(Name, TxId, CommitTime) ->
-    gen_server:cast({global, Name}, {repl_commit, TxId, CommitTime}).
 
 read(Name, TxId, Key) ->
     gen_server:call({global, Name}, {read, TxId, Key}).
@@ -98,10 +92,10 @@ handle_call({read, TxId, Key}, _Sender,
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
-            lager:info("Nothing!"),
+            %lager:info("Nothing!"),
             {reply, {ok, []}, SD0};
         [{Key, ValueList}] ->
-            lager:info("Value list is ~w", [ValueList]),
+            %lager:info("Value list is ~w", [ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
             Value = find_version(ValueList, MyClock),
             {reply, Value, SD0}
@@ -138,6 +132,13 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
             pending_log=PendingLog}) ->
     %lager:info("Got repl commit for ~w", [TxId]),
     append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, Partitions),
+    {noreply, SD0};
+
+handle_cast({repl_abort, TxId, Partitions}, 
+	    SD0=#state{
+            pending_log=PendingLog}) ->
+    %lager:info("Got repl commit for ~w", [TxId]),
+    abort_by_parts(PendingLog, TxId, Partitions),
     {noreply, SD0};
 
 handle_cast(_Info, StateData) ->
@@ -187,3 +188,14 @@ append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
             lager:warning("Something is wrong!!! Remove log for ~w, ~w", [TxId, Part])
     end,
     append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, Rest). 
+
+abort_by_parts(_, _, []) ->
+    ok;
+abort_by_parts(PendingLog, TxId, [Part|Rest]) ->
+    case ets:lookup(PendingLog, {TxId, Part}) of
+        [{{TxId, Part}, {_WriteSet, _}}] ->
+            ets:delete(PendingLog, {TxId, Part});
+        [] ->
+            lager:warning("Something is wrong!!! Remove log for ~w, ~w", [TxId, Part])
+    end,
+    abort_by_parts(PendingLog, TxId, Rest). 
