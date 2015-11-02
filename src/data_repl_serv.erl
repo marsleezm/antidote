@@ -192,10 +192,5 @@ append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
 abort_by_parts(_, _, []) ->
     ok;
 abort_by_parts(PendingLog, TxId, [Part|Rest]) ->
-    case ets:lookup(PendingLog, {TxId, Part}) of
-        [{{TxId, Part}, {_WriteSet, _}}] ->
-            ets:delete(PendingLog, {TxId, Part});
-        [] ->
-            lager:warning("Something is wrong!!! Remove log for ~w, ~w", [TxId, Part])
-    end,
+    ets:delete(PendingLog, {TxId, Part}),
     abort_by_parts(PendingLog, TxId, Rest). 
