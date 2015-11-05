@@ -42,8 +42,8 @@
 
 %% States
 -export([repl_prepare/4,
-         repl_abort/2,
-         repl_commit/3,
+         repl_abort/3,
+         repl_commit/4,
          quorum_replicate/7,
          chain_replicate/6,
          send_after/3]).
@@ -72,11 +72,19 @@ start_link() ->
 repl_prepare(Partition, TxId, Type, LogContent) ->
     gen_server:cast({global, get_repl_name()}, {repl_prepare, Partition, Type, TxId, LogContent}).
 
-repl_commit(UpdatedParts, TxId, CommitTime) ->
-    gen_server:cast({global, get_repl_name()}, {repl_commit, TxId, UpdatedParts, CommitTime}).
-
-repl_abort(UpdatedParts, TxId) ->
+repl_abort(_, _, false) ->
+    ok;
+repl_abort([], _, true) ->
+    ok;
+repl_abort(UpdatedParts, TxId, true) ->
     gen_server:cast({global, get_repl_name()}, {repl_abort, TxId, UpdatedParts}).
+
+repl_commit(_, _, _, false) ->
+    ok;
+repl_commit([], _, _, true) ->
+    ok;
+repl_commit(UpdatedParts, TxId, CommitTime, true) ->
+    gen_server:cast({global, get_repl_name()}, {repl_commit, TxId, UpdatedParts, CommitTime}).
 
 quorum_replicate(Replicas, Type, TxId, Partition, WriteSet, TimeStamp, MyName) ->
     lists:foreach(fun(Replica) ->

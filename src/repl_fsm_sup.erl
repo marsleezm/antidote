@@ -46,7 +46,11 @@ find_to_repl() ->
     ToRepl. 
 
 init([]) ->
-    MyRepFsm = {repl_fsm, {repl_fsm, start_link, []}, transient, 5000, worker, [repl_fsm]},
-    DataReplFsms = generate_data_repl_serv(), 
-    lager:info("After generating data repl fsm"),
-    {ok, {{one_for_one, 5, 10}, [MyRepFsm|DataReplFsms]}}.
+    case antidote_config:get(do_repl) of
+        true ->
+            MyRepFsm = {repl_fsm, {repl_fsm, start_link, []}, transient, 5000, worker, [repl_fsm]},
+            DataReplFsms = generate_data_repl_serv(), 
+            {ok, {{one_for_one, 5, 10}, [MyRepFsm|DataReplFsms]}};
+        false ->
+            {ok, {{one_for_one, 5, 10}, []}}
+    end.

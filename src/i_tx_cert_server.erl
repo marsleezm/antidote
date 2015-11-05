@@ -47,6 +47,7 @@
         prepare_time = 0 :: non_neg_integer(),
         local_parts :: [],
         remote_parts :: [],
+        do_repl :: boolean(),
         sender :: term(),
         to_ack :: non_neg_integer()}).
 
@@ -64,7 +65,7 @@ start_link(Name) ->
 
 init([]) ->
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
-    {ok, #state{}}.
+    {ok, #state{do_repl=antidote_config:get(do_repl)}}.
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     LocalParts = [Part || {Part, _} <- LocalUpdates],
@@ -87,7 +88,7 @@ handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
 handle_cast({prepared, TxId, PrepareTime, local}, 
-	    SD0=#state{to_ack=N, tx_id=TxId, local_parts=LocalParts,
+	    SD0=#state{to_ack=N, tx_id=TxId, local_parts=LocalParts, do_repl=DoRepl,
             remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime}) ->
     case N of
         1 -> 
@@ -97,7 +98,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
                     %lager:info("Trying to prepare!!"),
                     CommitTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:commit(LocalParts, TxId, CommitTime),
-                    repl_fsm:repl_commit(LocalParts, TxId, CommitTime),
+                    repl_fsm:repl_commit(LocalParts, TxId, CommitTime, DoRepl),
                     gen_server:reply(Sender, {ok, {committed, CommitTime}}),
                     {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
                 _ ->
@@ -118,8 +119,10 @@ handle_cast({prepared, _, _, local},
     %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
     {noreply, SD0};
 
-handle_cast({abort, TxId, local}, SD0=#state{tx_id=TxId, local_parts=LocalParts, sender=Sender}) ->
+handle_cast({abort, TxId, local}, SD0=#state{tx_id=TxId, local_parts=LocalParts, 
+            do_repl=DoRepl, sender=Sender}) ->
     clocksi_vnode:abort(LocalParts, TxId),
+    repl_fsm:repl_abort(LocalParts, TxId, DoRepl),
     gen_server:reply(Sender, {aborted, TxId}),
     {noreply, SD0#state{tx_id={}}};
 handle_cast({abort, _, local}, SD0) ->
@@ -127,7 +130,7 @@ handle_cast({abort, _, local}, SD0) ->
     {noreply, SD0};
 
 handle_cast({prepared, TxId, PrepareTime, remote}, 
-	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, 
+	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, do_repl=DoRepl, 
             prepare_time=MaxPrepTime, to_ack=N, local_parts=LocalParts}) ->
     %lager:info("Received remote prepare ~w, ~w, N is ~w", [TxId, PrepareTime, N]),
     case N of
@@ -136,8 +139,8 @@ handle_cast({prepared, TxId, PrepareTime, remote},
             CommitTime = max(MaxPrepTime, PrepareTime),
             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
             clocksi_vnode:commit(RemoteParts, TxId, CommitTime),
-            repl_fsm:repl_commit(LocalParts, TxId, CommitTime),
-            repl_fsm:repl_commit(RemoteParts, TxId, CommitTime),
+            repl_fsm:repl_commit(LocalParts, TxId, CommitTime, DoRepl),
+            repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, DoRepl),
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
             {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
         N ->
@@ -148,9 +151,12 @@ handle_cast({prepared, _, _, remote},
     {noreply, SD0};
 
 handle_cast({abort, TxId, remote}, 
-	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, local_parts=LocalParts}) ->
+	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, 
+        local_parts=LocalParts, do_repl=DoRepl}) ->
     clocksi_vnode:abort(LocalParts, TxId),
     clocksi_vnode:abort(RemoteParts, TxId),
+    repl_fsm:repl_abort(LocalParts, TxId, DoRepl),
+    repl_fsm:repl_abort(RemoteParts, TxId, DoRepl),
     gen_server:reply(Sender, {aborted, TxId}),
     {noreply, SD0#state{tx_id={}}};
 

@@ -93,9 +93,9 @@ init(_Args) ->
                             [clockSI_interactive_tx_coord_sup]},
     
     ReplFsmSup = {repl_fsm_sup,
-    		      {repl_fsm_sup, start_link, []},
-    		      permanent, 5000, supervisor,
-    		      [repl_fsm_sup]},
+                  {repl_fsm_sup, start_link, []},
+                  permanent, 5000, supervisor,
+                  [repl_fsm_sup]},
 
     ClockService = {clock_service,
                     {clock_service,  start_link,

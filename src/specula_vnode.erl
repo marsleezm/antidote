@@ -294,15 +294,16 @@ handle_command({prepare, TxId, WriteSet, Type}, Sender,
                               prepared_txs=PreparedTxs,
                               num_cert_fail=NumCertFail
                               }) ->
+    %lager:info("Got prepare req for ~w", [TxId]),
     Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, IfCertify),
     case Result of
         {ok, PrepareTime} ->
             UsedTime = tx_utilities:now_microsec() - PrepareTime,
             case IfReplicate of
                 true ->
-                    PendingRecord = {prepare, Sender, 
-                            {prepared, TxId, PrepareTime, Type}, {TxId, WriteSet}},
-                    repl_fsm:replicate(Partition, {TxId, PendingRecord}),
+                    PendingRecord = {TxId, Sender, 
+                            {prepared, TxId, PrepareTime, Type}, WriteSet, PrepareTime},
+                    repl_fsm:repl_replicate(Partition, TxId, prepare, PendingRecord),
                     {noreply, State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}};
                 false ->
                     gen_server:cast(Sender, {prepared, TxId, PrepareTime, Type}),
@@ -330,9 +331,9 @@ handle_command({single_commit, WriteSet}, Sender,
         {ok, {committed, CommitTime}} ->
             case IfReplicate of
                 true ->
-                    PendingRecord = {commit, Sender,
-                        {committed, CommitTime}, {TxId, WriteSet}},
-                    repl_fsm:replicate(Partition, {TxId, PendingRecord}),
+                    PendingRecord = {TxId, Sender,
+                        {ok, {committed, CommitTime}}, WriteSet, CommitTime},
+                    repl_fsm:repl_prepare(Partition, TxId, single_commit, PendingRecord),
                     {noreply, State#state{
                             num_committed=NumCommitted+1}};
                 false ->
@@ -345,10 +346,9 @@ handle_command({single_commit, WriteSet}, Sender,
             {noreply, State#state{num_cert_fail=NumCertFail+1}}
     end;
 
-handle_command({commit, TxId, TxCommitTime}, Sender,
-               #state{partition=Partition,
+handle_command({commit, TxId, TxCommitTime}, _Sender,
+               #state{
                       committed_txs=CommittedTxs,
-                      if_replicate=IfReplicate,
                       prepared_txs=PreparedTxs,
                       inmemory_store=InMemoryStore,
                       num_committed=NumCommitted,
@@ -356,21 +356,22 @@ handle_command({commit, TxId, TxCommitTime}, Sender,
                       specula_dep=SpeculaDep,
                       num_read_invalid=NumInvalid
                       } = State) ->
+    %lager:info("Received commit for ~w", [TxId]),
     Result = commit(TxId, TxCommitTime, CommittedTxs, InMemoryStore, PreparedTxs, SpeculaDep),
     case Result of
         {ok, {committed, Diff}} ->
             NewInvalid = specula_utilities:finalize_dependency(NumInvalid, TxId, 
                     TxCommitTime, SpeculaDep, commit),
-            case IfReplicate of
-                true ->
-                    PendingRecord = {commit, Sender, false, {TxId, TxCommitTime}},
-                    repl_fsm:replicate(Partition, {TxId, PendingRecord}),
+            %case IfReplicate of
+            %    true ->
+            %        PendingRecord = {commit, Sender, false, {TxId, TxCommitTime}},
+            %        repl_fsm:replicate(Partition, {TxId, PendingRecord}),
+            %        {noreply, State#state{committed_diff=CommittedDiff+Diff, 
+            %                    num_committed=NumCommitted+1, num_read_invalid=NewInvalid}};
+            %    false ->
                     {noreply, State#state{committed_diff=CommittedDiff+Diff, 
                                 num_committed=NumCommitted+1, num_read_invalid=NewInvalid}};
-                false ->
-                    {noreply, State#state{committed_diff=CommittedDiff+Diff, 
-                                num_committed=NumCommitted+1, num_read_invalid=NewInvalid}}
-            end;
+            %end;
         {error, no_updates} ->
             {reply, no_tx_record, State}
     end;
@@ -458,7 +459,7 @@ prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify)->
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
 		    {specula_prepared, PrepareTime};
 	    false ->
-            %%lager:info("~w: write conflcit", [TxId]),
+            lager:info("~w: write conflcit", [TxId]),
 	        {error, write_conflict};
         wait ->
             {error,  wait_more}
@@ -474,6 +475,7 @@ commit(TxId, TxCommitTime, CommittedTxs, InMemoryStore, PreparedTxs, SpeculaDep)
     [{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
     Diff = update_and_clean(Keys, TxId, TxCommitTime, InMemoryStore, 
                 PreparedTxs, SpeculaDep, CommittedTxs, 0),
+    true = ets:delete(PreparedTxs, TxId),
     {ok, {committed, Diff}}.
 
 %% @doc clean_all_prepared:
@@ -520,12 +522,14 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, true) ->
         [{Key, CommitTime}] ->
             case CommitTime > SnapshotTime of
                 true ->
+                    lager:info("Fail due to committed"),
                     false;
                 false ->
                     case check_prepared(TxId, Key, PreparedTxs) of
                         true ->
                             certification_check(TxId, T, CommittedTx, PreparedTxs, true);
                         false ->
+                            lager:info("Fail due to prepared"),
                             false
                     end
             end;
@@ -534,6 +538,7 @@ certification_check(TxId, [H|T], CommittedTx, PreparedTxs, true) ->
                 true ->
                     certification_check(TxId, T, CommittedTx, PreparedTxs, true); 
                 false ->
+                    lager:info("Fail due to prepared"),
                     false
             end
     end.
@@ -543,7 +548,8 @@ check_prepared(TxId, Key, PreparedTxs) ->
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             true;
-        _ ->
+        [{_, {PId, _, _, _}}] ->
+            lager:info("Still prepared! ~w", [PId]),
             false
     end.
 
@@ -554,7 +560,7 @@ check_prepared(TxId, Key, PreparedTxs) ->
 update_and_clean([], _TxId, TxCommitTime, _, _, _, _, PrepareTime) ->
     TxCommitTime-PrepareTime;
 update_and_clean([Key|Rest], TxId, TxCommitTime, InMemoryStore, 
-                PreparedTxs, SpeculaDep, CommittedTxs, _) ->
+                PreparedTxs, SpeculaDep, CommittedTxs, OldPTime) ->
     case ets:lookup(PreparedTxs, Key) of
         [{Key, {TxId, PrepareTime, Value, PendingReaders}}] ->
             Values = case ets:lookup(InMemoryStore, Key) of
@@ -586,9 +592,11 @@ update_and_clean([Key|Rest], TxId, TxCommitTime, InMemoryStore,
             true = ets:insert(CommittedTxs, {Key, TxCommitTime}),
             update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, 
                     PreparedTxs, SpeculaDep, CommittedTxs, PrepareTime);
-        Record ->
-            lager:warning("My prepared record disappeard! Record is ~w", [Record]),
-            0
+        _ ->
+            [{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
+            lager:warning("My prepared record disappeard! Keys are ~w", [Keys]),
+            update_and_clean(Rest, TxId, TxCommitTime, InMemoryStore, 
+                    PreparedTxs, SpeculaDep, CommittedTxs, OldPTime)
     end.
 
 prepare_and_commit(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InMemoryStore, SpeculaDep, IfCertify)->

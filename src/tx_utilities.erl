@@ -56,9 +56,9 @@ open_table(Partition, Name) ->
 
 open_private_table(Name) ->
     try
-    lager:info("Opented private table ~w", [Name]),
+    lager:info("~w: opening private table ~w", [self(), Name]),
     ets:new(Name,
-        [set,private,?TABLE_CONCURRENCY])
+        [set,private])
     catch
     Ex ->
         lager:warn("Error when opening private table ~w", [Ex]),
