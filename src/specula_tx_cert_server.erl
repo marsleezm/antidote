@@ -86,6 +86,10 @@ init([]) ->
     {ok, #state{pending_txs=PendingTxs, specula_data=SpeculaData,
             dep_dict=dict:new(), dep_num=dict:new(), do_repl=antidote_config:get(do_repl)}}.
 
+handle_call({get_hash_fun}, _Sender, SD0) ->
+    L = hash_fun:get_hash_fun(),
+    {reply, L, SD0};
+
 handle_call({get_stat}, _Sender, SD0=#state{aborted=Aborted, committed=Committed}) ->
     lager:info("Num of aborted is ~w, Num of committed is ~w", [Aborted, Committed]),
     {reply, {Aborted, Committed}, SD0};
