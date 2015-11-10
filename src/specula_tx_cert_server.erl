@@ -90,6 +90,10 @@ handle_call({get_hash_fun}, _Sender, SD0) ->
     L = hash_fun:get_hash_fun(),
     {reply, L, SD0};
 
+handle_call({start_tx}, _Sender, SD0) ->
+    TxId = tx_utilities:create_transaction_record(),
+    {reply, TxId, SD0};
+
 handle_call({get_stat}, _Sender, SD0=#state{aborted=Aborted, committed=Committed}) ->
     lager:info("Num of aborted is ~w, Num of committed is ~w", [Aborted, Committed]),
     {reply, {Aborted, Committed}, SD0};
