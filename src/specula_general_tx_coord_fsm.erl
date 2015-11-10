@@ -489,7 +489,7 @@ get_list_meta([H|T], SpeculaMeta, Acc1, Acc2, Acc3) ->
                     [Tx#txn_metadata.read_stat|Acc3]).
 
 
--ifdef(TEST).
+-ifdef(SKIP).
 process_op_test() ->
     %% Common read
     TxId = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),

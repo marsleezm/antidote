@@ -371,7 +371,7 @@ code_change(_OldVsn, StateName, State, _Extra) -> {ok, StateName, State}.
 terminate(_Reason, _SN, _SD) ->
     ok.
 
--ifdef(TEST).
+-ifdef(SKIP).
 
 main_test_() ->
     {foreach,

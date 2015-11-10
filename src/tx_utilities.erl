@@ -56,7 +56,6 @@ open_table(Partition, Name) ->
 
 open_private_table(Name) ->
     try
-    lager:info("~w: opening private table ~w", [self(), Name]),
     ets:new(Name,
         [set,private])
     catch

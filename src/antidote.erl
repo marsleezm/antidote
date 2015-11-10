@@ -82,12 +82,12 @@ prepare(ThreadId, TxId, LocalUpdates, RemoteUpdates) ->
     tx_cert_sup:certify(ThreadId, TxId, LocalUpdates, RemoteUpdates).
 
 single_commit(Node, Key, Value) ->
-    case ets:lookup(meta_info, do_specula) of
-        [{_, true}] ->
-            specula_vnode:single_commit([{Node, [{Key, Value}]}]);
-        [{_, false}] ->
-            clocksi_vnode:single_commit([{Node, [{Key, Value}]}])
-    end,
+    %case ets:lookup(meta_info, do_specula) of
+    %    [{_, true}] ->
+    %        clocksi_vnode:single_commit([{Node, [{Key, Value}]}]);
+    %    [{_, false}] ->
+            clocksi_vnode:single_commit([{Node, [{Key, Value}]}]),
+    %end,
     receive
         EndOfTx ->
             EndOfTx
@@ -95,12 +95,12 @@ single_commit(Node, Key, Value) ->
 
 -spec read(Node::preflist(), Key::key(), TxId::txid()) -> {ok, val()} | {error, reason()}.
 read(Node, Key, TxId) ->
-    case ets:lookup(meta_info, do_specula) of
-        [{_, true}] ->
-            specula_vnode:read_data_item(Node, Key, TxId);
-        [{_, false}] ->
-            clocksi_vnode:read_data_item(Node, Key, TxId)
-    end.
+    %case ets:lookup(meta_info, do_specula) of
+    %    [{_, true}] ->
+    %        clocksi_vnode:read_data_item(Node, Key, TxId);
+    %    [{_, false}] ->
+            clocksi_vnode:read_data_item(Node, Key, TxId).
+    %end.
 
 %% Clock SI API
 

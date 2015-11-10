@@ -98,7 +98,7 @@ handle_call({update_ts, SnapshotTS}, _,
 handle_call({increment_ts, SnapshotTS}, _,
         SD0=#state{max_ts=TS}) ->
     NewTS = max(SnapshotTS, TS) + 1,
-    {reply, NewTS, SD0#state{max_ts=SnapshotTS}};
+    {reply, NewTS, SD0#state{max_ts=NewTS}};
 
 handle_call({get_ts}, _, SD0=#state{max_ts=TS}) ->
     {reply, max(tx_utilities:now_microsec(), TS), SD0}.

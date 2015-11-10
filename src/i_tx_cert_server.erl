@@ -78,7 +78,31 @@ handle_call({start_tx}, _Sender, SD0) ->
     TxId = tx_utilities:create_transaction_record(),
     {reply, TxId, SD0};
 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
+handle_call({read, Key, TxId, Node0}, _Sender, SD0) ->
+    Node = case Node0 of
+                {raw,  N, P} ->
+                    hash_fun:get_vnode_by_id(P, N);
+                _ ->
+                    Node0
+              end,
+            %lager:info("No Value"),
+    case Node of
+        {_,_} ->
+            %lager:info("Well, from clocksi_vnode"),
+            {reply, clocksi_vnode:read_data_item(Node, Key, TxId), SD0};
+        _ ->
+            {reply, data_repl_serv:read(Node, TxId, Key), SD0}
+    end;
+
+handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0) ->
+    {LocalUpdates, RemoteUpdates} = case LocalUpdates0 of   
+                                        {raw, LList} ->
+                                            {raw, RList} = RemoteUpdates0,
+                                            {[{hash_fun:get_vnode_by_id(P, N), Ups}  || {N, P, Ups} <- LList],
+                                             [{hash_fun:get_vnode_by_id(P, N), Ups}  || {N, P, Ups} <- RList]};
+                                        _ ->
+                                            {LocalUpdates0, RemoteUpdates0}
+                                    end,
     LocalParts = [Part || {Part, _} <- LocalUpdates],
     %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
     %lager:info("TxId ~w: localUps ~p, remoteUps ~p", [TxId, LocalUpdates, RemoteUpdates]),

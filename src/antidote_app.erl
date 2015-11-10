@@ -34,14 +34,14 @@
 start(_StartType, _StartArgs) ->
     case antidote_sup:start_link() of
         {ok, Pid} ->
-            case antidote_config:get(do_specula) of
-                true ->
-                    ok = riak_core:register([{vnode_module, specula_vnode}]),
-                    ok = riak_core_node_watcher:service_up(clocksi, self());
-                false ->
+            %case antidote_config:get(do_specula) of
+            %    true ->
                     ok = riak_core:register([{vnode_module, clocksi_vnode}]),
-                    ok = riak_core_node_watcher:service_up(clocksi, self())
-            end,
+                    ok = riak_core_node_watcher:service_up(clocksi, self()),
+            %    false ->
+            %        ok = riak_core:register([{vnode_module, clocksi_vnode}]),
+            %        ok = riak_core_node_watcher:service_up(clocksi, self())
+            %end,
 
             ok = riak_core_ring_events:add_guarded_handler(antidote_ring_event_handler, []),
             ok = riak_core_node_watcher_events:add_guarded_handler(antidote_node_event_handler, []),

@@ -98,14 +98,16 @@ process(#fpbpreptxnreq{txid=TxId, threadid=ThreadId,
         {ok, {committed, CommitTime}} ->
             %T3 = tx_utilities:now_microsec(),
             %lager:info("Commit takes ~w", [T3-T2]),
-            {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
+            {reply, #fpbpreptxnresp{result=2, commit_time=CommitTime}, State};
+        {ok, {specula_commit, CommitTime}} ->
+            {reply, #fpbpreptxnresp{result=1, commit_time=CommitTime}, State};
         {aborted, RealId} ->
             %T3 = tx_utilities:now_microsec(),
             %lager:warning("~w: aborted, takes ~w!", [RealId, T3-T2]),
-            {reply, #fpbpreptxnresp{success=false}, State};
+            {reply, #fpbpreptxnresp{result=0}, State};
         Reason ->
             lager:warning("Error reason: ~w", [Reason]),
-            {reply, #fpbpreptxnresp{success=false}, State}
+            {reply, #fpbpreptxnresp{result=false}, State}
     end;
 process(#fpbreadreq{txid=TxId, key=Key, replica_ip=ReplicaIp, node_id=NodeId, partition_id=PartitionId}, State) ->
     %lager:info("Trying to read, TxId is ~s, key is ~t", [TxId, binary_to_list(Key)]),
@@ -120,7 +122,8 @@ process(#fpbreadreq{txid=TxId, key=Key, replica_ip=ReplicaIp, node_id=NodeId, pa
     %lager:info("Decode tx id takes ~w", [T2-T1]),
     {ok, Value} = case ReplicaIp of
                     undefined ->
-                        antidote:read(hash_fun:get_vnode_by_id(NodeId, PartitionId), Key, RealTxId);
+                        %lager:info("NodeId is ~w, PartitionId is ~w", [NodeId, PartitionId]),
+                        antidote:read(hash_fun:get_vnode_by_id(PartitionId, NodeId), Key, RealTxId);
                     _ ->
                         antidote:replica_read(ReplicaIp, Key, RealTxId)
                   end,
@@ -141,13 +144,13 @@ process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) 
                 Key, decode_value(Value)),
     case Result of
         {ok, {committed, CommitTime}} ->
-            {reply, #fpbpreptxnresp{success=true, commit_time=CommitTime}, State};
+            {reply, #fpbpreptxnresp{result=1, commit_time=CommitTime}, State};
         {aborted, RealId} ->
             lager:warning("~w: aborted!", [RealId]),
-            {reply, #fpbpreptxnresp{success=false}, State};
+            {reply, #fpbpreptxnresp{result=0}, State};
         Reason ->
             lager:warning("Error reason: ~w", [Reason]),
-            {reply, #fpbpreptxnresp{success=false}, State}
+            {reply, #fpbpreptxnresp{result=0}, State}
     end;
 process(#fpbpartlistreq{noop=_}, State) ->
     {PartList, ReplList} = hash_fun:get_hash_fun(),

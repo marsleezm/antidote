@@ -126,12 +126,20 @@ handle_call({get_internal_data, Type, Param}, _Sender, SD0=#state{pending_list=P
             {reply, {dict:to_list(DepDict), dict:to_list(DepNum)}, SD0}
     end;
 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{dep_num=DepNum, 
+handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0=#state{dep_num=DepNum, 
             dep_dict=DepDict}) ->
     %lager:info("TxId is ~w", [TxId]),
     %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
     %lager:info("Got req: localUpdates ~p, remote updates ~p", [LocalUpdates, RemoteUpdates]),
     %% If there was a legacy ongoing transaction.
+    {LocalUpdates, RemoteUpdates} = case LocalUpdates0 of
+                                        {raw, LList} ->
+                                            {raw, RList} = RemoteUpdates0,
+                                            {[{hash_fun:get_vnode_by_id(P, N), Ups}  || {N, P, Ups} <- LList],
+                                             [{hash_fun:get_vnode_by_id(P, N), Ups}  || {N, P, Ups} <- RList]};
+                                        _ ->
+                                            {LocalUpdates0, RemoteUpdates0}
+                                    end,
     {DepNum1, DepDict1} = case dict:find(TxId, DepNum) of
                             {ok, Deps} ->
                                 DD = lists:foldl(fun(T, Acc) -> dict:append(T, TxId, Acc) end, 
@@ -152,7 +160,13 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{de
                 RemoteUpdates, sender=Sender, dep_num=DepNum1, dep_dict=DepDict1}}
     end;
 
-handle_call({read, Key, TxId, Node}, _Sender, SD0=#state{dep_num=DepNum, specula_data=SpeculaData}) ->
+handle_call({read, Key, TxId, Node0}, _Sender, SD0=#state{dep_num=DepNum, specula_data=SpeculaData}) ->
+    Node = case Node0 of
+                {raw,  N, P} ->
+                    hash_fun:get_vnode_by_id(P, N);
+                _ ->
+                    Node0
+              end,
     lager:info("~w Reading key ~w from ~w", [TxId, Key, Node]),
     case ets:lookup(SpeculaData, Key) of
         [{Key, Value, PendingTxId}] ->
@@ -169,9 +183,9 @@ handle_call({read, Key, TxId, Node}, _Sender, SD0=#state{dep_num=DepNum, specula
             case Node of 
                 {_,_} ->
                     %lager:info("Well, from clocksi_vnode"),
-                    ?CLOCKSI_VNODE:read_data_item(Node, Key, TxId);
+                    {reply, ?CLOCKSI_VNODE:read_data_item(Node, Key, TxId), SD0};
                 _ ->
-                    data_repl_serv:read(Node, TxId, Key)
+                    {reply, data_repl_serv:read(Node, TxId, Key), SD0}
             end
     end;
 

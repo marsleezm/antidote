@@ -79,6 +79,7 @@ get_vnode_by_id(Index, NodeIndex) ->
 get_node_parts(NodeIndex) ->
     case ets:lookup(meta_info, NodeIndex) of
         [{NodeIndex, PartList}] ->
+            %lager:info("NodeIndex is ~w, PartList is ~w", [NodeIndex, PartList]),
             PartList;
         [] ->
             lager:warning("Geting part node.. Something is wrong!!!")
@@ -184,10 +185,12 @@ init_hash_fun() ->
     lists:foldl(fun({Node, PartList}, Acc) ->
         case node() of
             Node ->
+                 lager:info("Inserting Acc ~w, PartList ~w", [Acc, PartList]),
                  ets:insert(meta_info, {Acc, PartList}),
                  ets:insert(meta_info, {local_node, PartList}),
                  Acc+1;
             _ ->
+                 lager:info("Inserting Acc ~w, PartList ~w", [Acc, PartList]),
                  ets:insert(meta_info, {Acc, PartList}),
                  Acc+1
         end end, 0, PartitionListByNode),
