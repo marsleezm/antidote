@@ -56,7 +56,7 @@
 %%%===================================================================
 
 start_link(Name) ->
-    gen_server:start_link({local, Name},
+    gen_server:start_link({global, Name},
              ?MODULE, [], []).
 
 %%%===================================================================
@@ -66,6 +66,9 @@ start_link(Name) ->
 init([]) ->
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
     {ok, #state{do_repl=antidote_config:get(do_repl)}}.
+
+handle_call({get_stat}, _Sender, SD0) ->
+    {reply, {0, 0}, SD0};
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     LocalParts = [Part || {Part, _} <- LocalUpdates],
