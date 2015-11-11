@@ -123,7 +123,7 @@ process(#fpbreadreq{txid=TxId, key=Key, replica_ip=ReplicaIp, node_id=NodeId, pa
     %lager:info("Decode tx id takes ~w", [T2-T1]),
     Node = case ReplicaIp of
                 undefined ->
-                    %lager:info("NodeId is ~w, PartitionId is ~w", [NodeId, PartitionId]),
+                    lager:info("NodeId is ~w, PartitionId is ~w", [NodeId, PartitionId]),
                     hash_fun:get_vnode_by_id(PartitionId, NodeId);
                 _ ->
                     ReplicaIp
