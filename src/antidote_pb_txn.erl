@@ -110,7 +110,8 @@ process(#fpbpreptxnreq{txid=TxId, threadid=ThreadId,
             lager:warning("Error reason: ~w", [Reason]),
             {reply, #fpbpreptxnresp{result=false}, State}
     end;
-process(#fpbreadreq{txid=TxId, key=Key, replica_ip=ReplicaIp, node_id=NodeId, partition_id=PartitionId}, State) ->
+process(#fpbreadreq{txid=TxId, threadid=ThreadId, key=Key, replica_ip=ReplicaIp, 
+            node_id=NodeId, partition_id=PartitionId}, State) ->
     %lager:info("Trying to read, TxId is ~s, key is ~t", [TxId, binary_to_list(Key)]),
     %T1 = tx_utilities:now_microsec(),
     RealTxId = case TxId of
@@ -123,12 +124,16 @@ process(#fpbreadreq{txid=TxId, key=Key, replica_ip=ReplicaIp, node_id=NodeId, pa
     %lager:info("Decode tx id takes ~w", [T2-T1]),
     Node = case ReplicaIp of
                 undefined ->
-                    lager:info("NodeId is ~w, PartitionId is ~w", [NodeId, PartitionId]),
                     hash_fun:get_vnode_by_id(PartitionId, NodeId);
                 _ ->
                     ReplicaIp
             end,
-    {ok, Value} = tx_cert_sup:read(random:uniform(4), RealTxId, Key, Node),
+    {ok, Value} = case ThreadId of
+                        undefined ->
+                            tx_cert_sup:read(random:uniform(4), RealTxId, Key, Node);
+                        _ ->
+                             tx_cert_sup:read(ThreadId, RealTxId, Key, Node)
+    end,
     case Value of
         [] ->
             %T3 = tx_utilities:now_microsec(),
