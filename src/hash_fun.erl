@@ -158,15 +158,26 @@ get_partitions() ->
             PartitionList
     end.
 
+
 get_hash_fun() ->
     case ets:lookup(meta_info, node_list) of
         [{node_list, List}] ->
-            {[{Node, length(PartList)} || {Node, PartList} <- List], antidote_config:get(to_repl)};
+            case antidote_config:get(do_repl) of
+                true ->
+                    {[{Node, length(PartList)} || {Node, PartList} <- List], antidote_config:get(to_repl)};
+                false ->
+                    {[{Node, length(PartList)} || {Node, PartList} <- List], []}
+            end;
         [] ->
             init_hash_fun(),
             case ets:lookup(meta_info, node_list) of
                 [{node_list, List}] ->
-                    {[{Node, length(PartList)} || {Node, PartList} <- List], antidote_config:get(to_repl)}
+                    case antidote_config:get(do_repl) of
+                        true ->
+                            {[{Node, length(PartList)} || {Node, PartList} <- List], antidote_config:get(to_repl)};
+                        false ->
+                            {[{Node, length(PartList)} || {Node, PartList} <- List], []}
+                    end
             end
     end.
 
