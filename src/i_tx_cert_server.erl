@@ -56,6 +56,7 @@
 %%%===================================================================
 
 start_link(Name) ->
+    lager:info("Normal tx cert started wit name ~w", [Name]),
     gen_server:start_link({global, Name},
              ?MODULE, [], []).
 
@@ -68,17 +69,17 @@ init([]) ->
     {ok, #state{do_repl=antidote_config:get(do_repl)}}.
 
 handle_call({get_stat}, _Sender, SD0) ->
-    {reply, {0, 0}, SD0};
+    {reply, {0, 0, 0, 0, 0}, SD0};
 
 handle_call({get_hash_fun}, _Sender, SD0) ->
     L = hash_fun:get_hash_fun(),
     {reply, L, SD0};
 
 handle_call({start_tx}, _Sender, SD0) ->
-    TxId = tx_utilities:create_transaction_record(),
+    TxId = tx_utilities:create_transaction_record(0),
     {reply, TxId, SD0};
 
-handle_call({read, Key, TxId, Node0}, _Sender, SD0) ->
+handle_call({read, Key, TxId, Node0}, Sender, SD0) ->
     Node = case Node0 of
                 {raw,  N, P} ->
                     hash_fun:get_vnode_by_id(P, N);
@@ -88,10 +89,12 @@ handle_call({read, Key, TxId, Node0}, _Sender, SD0) ->
             %lager:info("No Value"),
     case Node of
         {_,_} ->
+            clocksi_vnode:relay_read(Node, Key, TxId, Sender),
             %lager:info("Well, from clocksi_vnode"),
-            {reply, clocksi_vnode:read_data_item(Node, Key, TxId), SD0};
+            {noreply, SD0};
         _ ->
-            {reply, data_repl_serv:read(Node, TxId, Key), SD0}
+            data_repl_serv:relay_read(Node, TxId, Key, Sender),
+            {noreply, SD0}
     end;
 
 handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0) ->

@@ -25,6 +25,7 @@
 
 -export([start_vnode/1,
 	    read_data_item/3,
+	    relay_read/4,
         set_prepared/5,
         async_send_msg/3,
 
@@ -109,6 +110,11 @@ read_data_item(Node, Key, TxId) ->
                                    {read, Key, TxId},
                                    ?CLOCKSI_MASTER, infinity).
 
+relay_read(Node, Key, TxId, Reader) ->
+    riak_core_vnode_master:command(Node,
+                                   {relay_read, Key, TxId, Reader}, self(),
+                                   ?CLOCKSI_MASTER).
+
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
 prepare(Updates, TxId, Type) ->
     lists:foreach(fun({Node, WriteSet}) ->
@@ -154,7 +160,7 @@ init([Partition]) ->
     InMemoryStore = tx_utilities:open_table(Partition, inmemory_store),
 
     IfCertify = antidote_config:get(do_cert),
-    IfReplicate = antidote_config:get(do_repl),
+    IfReplicate = antidote_config:get(do_repl), 
 
     _ = case IfReplicate of
                     true ->
@@ -270,7 +276,6 @@ handle_command({check_servers_ready},_Sender,SD0) ->
 
 handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
-    %lager:info("Trying to read key ~w", [Key]),
     clock_service:update_ts(TxId#tx_id.snapshot_time),
     case ready_or_block(TxId, Key, PreparedTxs, Sender) of
         not_ready->
@@ -278,6 +283,19 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked,
         ready ->
             Result = read_value(Key, TxId, InMemoryStore),
             {reply, Result, SD0}
+    end;
+
+handle_command({relay_read, Key, TxId, Reader}, _Sender, SD0=#state{num_blocked=NumBlocked,
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
+    %lager:info("Got relay read from ~w of Reader ~w", [Sender, Reader]),
+    clock_service:update_ts(TxId#tx_id.snapshot_time),
+    case ready_or_block(TxId, Key, PreparedTxs, {relay, Reader}) of
+        not_ready->
+            {noreply, SD0#state{num_blocked=NumBlocked+1}};
+        ready ->
+            Result = read_value(Key, TxId, InMemoryStore),
+            gen_server:reply(Reader, Result), 
+            {noreply, SD0}
     end;
 
 handle_command({prepare, TxId, WriteSet, Type}, Sender,
@@ -306,6 +324,7 @@ handle_command({prepare, TxId, WriteSet, Type}, Sender,
                     %riak_core_vnode:reply(OriginalSender, {prepared, TxId, PrepareTime, Type}),
                     case Debug of
                         false ->
+                            %lager:info("Replying prepare for tx ~w with time ~w", [TxId, PrepareTime]),
                             gen_server:cast(Sender, {prepared, TxId, PrepareTime, Type}),
                             {noreply,  
                             State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}};
@@ -536,9 +555,9 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore) ->
             case ets:lookup(InMemoryStore, Key) of
                 [{Key, ValueList}] ->
                     {_, Value} = hd(ValueList),
-                    lists:foreach(fun(Sender) -> riak_core_vnode:reply(Sender, {ok,Value}) end, PendingReaders);
+                    lists:foreach(fun(Sender) -> reply(Sender, {ok,Value}) end, PendingReaders);
                 [] ->
-                    lists:foreach(fun(Sender) -> riak_core_vnode:reply(Sender, {ok, []}) end, PendingReaders)
+                    lists:foreach(fun(Sender) -> reply(Sender, {ok, []}) end, PendingReaders)
             end,
             true = ets:delete(PreparedTxs, Key);
         _ ->
@@ -627,9 +646,9 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             lists:foreach(fun({SnapshotTime, Sender}) ->
                     case SnapshotTime >= TxCommitTime of
                         true ->
-                            riak_core_vnode:reply(Sender, {ok, lists:nth(2,Values)});
+                            reply(Sender, {ok, lists:nth(2,Values)});
                         false ->
-                            riak_core_vnode:reply(Sender, {ok, hd(Values)})
+                            reply(Sender, {ok, hd(Values)})
                     end end,
                 PendingReaders),
             true = ets:delete(PreparedTxs, Key);
@@ -678,3 +697,8 @@ find_version([{TS, Value}|Rest], SnapshotTime) ->
         false ->
             find_version(Rest, SnapshotTime)
     end.
+
+reply({relay, Sender}, Result) ->
+    gen_server:reply(Sender, Result);
+reply(Sender, Result) ->
+    riak_core_vnode:reply(Sender, Result).

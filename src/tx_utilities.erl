@@ -33,9 +33,9 @@
 -spec create_transaction_record(snapshot_time() | ignore) -> txid().
 create_transaction_record(ClientClock) ->
     %% Seed the random because you pick a random read server, this is stored in the process state
-    {A1,A2,A3} = now(),
+    %{A1,A2,A3} = now(),
     _A = ClientClock,
-    _ = random:seed(A1, A2, A3),
+    %_ = random:seed(A1, A2, A3),
     TransactionId = #tx_id{snapshot_time=?GET_AND_UPDATE_TS(ClientClock), server_pid=self()},
     TransactionId.
 

@@ -34,7 +34,8 @@
          decode/2,
          encode/1,
          process/2,
-         process_stream/3
+         process_stream/3,
+         random_string/1
         ]).
 
 -record(state, {client}).
@@ -120,18 +121,20 @@ process(#fpbreadreq{txid=TxId, key=Key, replica_ip=ReplicaIp, node_id=NodeId, pa
                 end,
     %T2 = tx_utilities:now_microsec(),
     %lager:info("Decode tx id takes ~w", [T2-T1]),
-    {ok, Value} = case ReplicaIp of
-                    undefined ->
-                        %lager:info("NodeId is ~w, PartitionId is ~w", [NodeId, PartitionId]),
-                        antidote:read(hash_fun:get_vnode_by_id(PartitionId, NodeId), Key, RealTxId);
-                    _ ->
-                        antidote:replica_read(ReplicaIp, Key, RealTxId)
-                  end,
+    Node = case ReplicaIp of
+                undefined ->
+                    %lager:info("NodeId is ~w, PartitionId is ~w", [NodeId, PartitionId]),
+                    hash_fun:get_vnode_by_id(PartitionId, NodeId);
+                _ ->
+                    ReplicaIp
+            end,
+    {ok, Value} = tx_cert_sup:read(random:uniform(4), RealTxId, Key, Node),
     case Value of
         [] ->
             %T3 = tx_utilities:now_microsec(),
             %lager:info("read takes ~w", [T3-T2]),
-            {reply, #fpbvalue{field=0}, State};
+            %{reply, #fpbvalue{field=12, str_value=random_string(500)}, State};
+            {reply, #fpbvalue{field=2}, State};
         _ ->
             %EV = encode_value(Value),
             %T3 = tx_utilities:now_microsec(),
@@ -253,7 +256,9 @@ encode_value({12, Value}) ->
 encode_value({13, Value}) ->
     #fpbvalue{field=13, long_value=Value}; 
 encode_value({14, Value}) ->
-    #fpbvalue{field=14, double_value=Value}.
+    #fpbvalue{field=14, double_value=Value};
+encode_value(Value) ->
+    #fpbvalue{field=12, str_value=Value}.
 
 get_op_by_id(0) ->
     increment;
@@ -276,3 +281,9 @@ get_type_by_id(3) ->
     riak_dt_orset;
 get_type_by_id(4) ->
     riak_dt_orset.
+
+random_string(Len) ->
+    Chrs = list_to_tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"),
+    ChrsSize = size(Chrs),
+    F = fun(_, R) -> [element(random:uniform(ChrsSize), Chrs) | R] end,
+    lists:foldl(F, "", lists:seq(1, Len)).

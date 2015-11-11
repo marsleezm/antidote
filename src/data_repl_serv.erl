@@ -43,7 +43,7 @@
         terminate/2]).
 
 %% States
--export([
+-export([relay_read/4,
         read/3]).
 
 %% Spawn
@@ -65,6 +65,9 @@ start_link(Name) ->
 
 read(Name, TxId, Key) ->
     gen_server:call({global, Name}, {read, TxId, Key}).
+
+relay_read(Name, TxId, Key, Reader) ->
+    gen_server:call({global, Name}, {relay_read, TxId, Key, Reader}).
 
 %%%===================================================================
 %%% Internal
@@ -104,6 +107,20 @@ handle_call({read, TxId, Key}, _Sender,
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
+handle_cast({relay_read, TxId, Key, Reader}, 
+	    SD0=#state{replicated_log=ReplicatedLog}) ->
+    case ets:lookup(ReplicatedLog, Key) of
+        [] ->
+            %lager:info("Nothing!"),
+            gen_server:reply(Reader, {ok, []}),
+            {noreply, SD0};
+        [{Key, ValueList}] ->
+            %lager:info("Value list is ~w", [ValueList]),
+            MyClock = TxId#tx_id.snapshot_time,
+            Value = find_version(ValueList, MyClock),
+            gen_server:reply(Reader, Value),
+            {noreply, SD0}
+    end;
 handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog}) ->
     %lager:info("Got repl prepare for {~w, ~w}, write set is ~w", [TxId, Partition, WriteSet]),

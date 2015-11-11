@@ -61,6 +61,8 @@
         pending_txs :: cache_id(),
         do_repl :: boolean(),
         is_specula = false :: boolean(),
+        read_aborted=0 :: non_neg_integer(),
+        hit_cache=0 :: non_neg_integer(),
         committed=0 :: non_neg_integer(),
         aborted=0 :: non_neg_integer(),
         speculated=0 :: non_neg_integer(),
@@ -72,6 +74,7 @@
 %%%===================================================================
 
 start_link(Name) ->
+    lager:info("Specula tx cert started wit name ~w", [Name]),
     gen_server:start_link({global, Name},
              ?MODULE, [], []).
 
@@ -91,12 +94,14 @@ handle_call({get_hash_fun}, _Sender, SD0) ->
     {reply, L, SD0};
 
 handle_call({start_tx}, _Sender, SD0) ->
-    TxId = tx_utilities:create_transaction_record(),
+    TxId = tx_utilities:create_transaction_record(0),
     {reply, TxId, SD0};
 
-handle_call({get_stat}, _Sender, SD0=#state{aborted=Aborted, committed=Committed}) ->
-    lager:info("Num of aborted is ~w, Num of committed is ~w", [Aborted, Committed]),
-    {reply, {Aborted, Committed}, SD0};
+handle_call({get_stat}, _Sender, SD0=#state{aborted=Aborted, committed=Committed, read_aborted=ReadAborted, hit_cache=HitCache,
+        speculated=Speculated}) ->
+    lager:info("Hit cache is ~w, Num of read aborted ~w, Num of aborted is ~w, Num of committed is ~w, Speculated ~w", 
+                [HitCache, ReadAborted, Aborted, Committed, Speculated]),
+    {reply, {HitCache, ReadAborted, Aborted, Committed, Speculated}, SD0};
 
 handle_call({get_internal_data, Type, Param}, _Sender, SD0=#state{pending_list=PendingList, 
         pending_txs=PendingTxs, specula_data=SpeculaData, dep_dict=DepDict, dep_num=DepNum})->
@@ -118,19 +123,17 @@ handle_call({get_internal_data, Type, Param}, _Sender, SD0=#state{pending_list=P
                     {reply, Content, SD0}
             end;
         all_specula_data ->
-            {reply, ets:to_list(SpeculaData), SD0};
+            {reply, ets:tab2list(SpeculaData), SD0};
         dependency ->
             {Reader, Creator} = Param,
             {reply, {dict:find(Reader, DepNum), dict:find(Creator, DepDict)}, SD0};
-        all_denendency ->
+        all_dependency ->
             {reply, {dict:to_list(DepDict), dict:to_list(DepNum)}, SD0}
     end;
 
 handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0=#state{dep_num=DepNum, 
             dep_dict=DepDict}) ->
-    %lager:info("TxId is ~w", [TxId]),
     %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
-    %lager:info("Got req: localUpdates ~p, remote updates ~p", [LocalUpdates, RemoteUpdates]),
     %% If there was a legacy ongoing transaction.
     {LocalUpdates, RemoteUpdates} = case LocalUpdates0 of
                                         {raw, LList} ->
@@ -140,6 +143,9 @@ handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0=#state{
                                         _ ->
                                             {LocalUpdates0, RemoteUpdates0}
                                     end,
+    %lager:info("Certifying, txId is ~w, local num is ~w, remote num is ~w", 
+    %        [TxId, length(LocalUpdates), length(RemoteUpdates)]),
+    %lager:info("Got req: localUpdates ~p, remote updates ~p", [LocalUpdates0, RemoteUpdates0]),
     {DepNum1, DepDict1} = case dict:find(TxId, DepNum) of
                             {ok, Deps} ->
                                 DD = lists:foldl(fun(T, Acc) -> dict:append(T, TxId, Acc) end, 
@@ -160,138 +166,150 @@ handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0=#state{
                 RemoteUpdates, sender=Sender, dep_num=DepNum1, dep_dict=DepDict1}}
     end;
 
-handle_call({read, Key, TxId, Node0}, _Sender, SD0=#state{dep_num=DepNum, specula_data=SpeculaData}) ->
+handle_call({read, Key, TxId, Node0}, Sender, SD0=#state{dep_num=DepNum, specula_data=SpeculaData, hit_cache=HitCache}) ->
     Node = case Node0 of
                 {raw,  N, P} ->
                     hash_fun:get_vnode_by_id(P, N);
                 _ ->
                     Node0
               end,
-    lager:info("~w Reading key ~w from ~w", [TxId, Key, Node]),
+    %lager:info("~w Reading key ~w from ~w", [TxId, Key, Node]),
     case ets:lookup(SpeculaData, Key) of
         [{Key, Value, PendingTxId}] ->
-            lager:info("Has Value ~w", [Value]),
+            %lager:info("Has Value ~w", [Value]),
             DepNum1 = case dict:find(TxId, DepNum) of
                         {ok, Set} ->
                             dict:store(TxId, sets:add_element(PendingTxId, Set), DepNum);
                         error ->
                             dict:store(TxId, sets:add_element(PendingTxId, sets:new()), DepNum)
                       end,
-            {reply, {ok, Value}, SD0#state{dep_num=DepNum1}};
+            {reply, {ok, Value}, SD0#state{dep_num=DepNum1, hit_cache=HitCache+1}};
         [] ->
             %lager:info("No Value"),
             case Node of 
                 {_,_} ->
+                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender),
                     %lager:info("Well, from clocksi_vnode"),
-                    {reply, ?CLOCKSI_VNODE:read_data_item(Node, Key, TxId), SD0};
+                    {noreply, SD0};
                 _ ->
-                    {reply, data_repl_serv:read(Node, TxId, Key), SD0}
+                    {ok, V} = data_repl_serv:read(Node, TxId, Key),
+                    {reply, V, SD0}
             end
     end;
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
-handle_cast({prepared, TxId, PrepareTime, local}, 
+handle_cast({prepared, ReceivedTxId, PrepareTime, local}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, local_updates=LocalUpdates, do_repl=DoRepl, last_commit_ts=LastCommitTS,
             remote_updates=RemoteUpdates, sender=Sender, pending_list=PendingList, speculated=Speculated,
             prepare_time=OldPrepTime, pending_txs=PendingTxs, specula_data=SpeculaData}) ->
-    case N of
-        1 -> 
-            %lager:info("Got all prepare!"),
-            NewMaxPrep = max(PrepareTime, OldPrepTime),
-            ToAck = length(RemoteUpdates),
-            case ToAck of
-                0 ->
-                    case PendingList of
-                        [] -> 
-                            CommitTime = max(LastCommitTS+1, NewMaxPrep),
-                            %lager:info("Real committing"),
-                            commit_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, DoRepl,
-                                PendingTxs),
-                            gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-                            {noreply, SD0#state{last_commit_ts=CommitTime, tx_id={}}};
+    %lager:info("Got local prepare for ~w", [TxId]),
+    case ReceivedTxId of
+        TxId ->
+            case N of
+                1 -> 
+                    %lager:info("Got all local prepare!"),
+                    NewMaxPrep = max(PrepareTime, OldPrepTime),
+                    ToAck = length(RemoteUpdates),
+                    case ToAck of
+                        0 ->
+                            case PendingList of
+                                [] -> 
+                                    CommitTime = max(LastCommitTS+1, NewMaxPrep),
+                                    %lager:info("Real committing"),
+                                    commit_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, DoRepl,
+                                        PendingTxs),
+                                    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+                                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id={}}};
+                                _ ->
+                                    %lager:info("Specula committing "),
+                                    ets:insert(PendingTxs, {TxId, {0, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
+                                    gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
+                                    add_to_table(LocalUpdates, TxId, SpeculaData),
+                                    %lager:info("Pending list is ~w, TxId is ~w", [PendingList, TxId]),
+                                    {noreply, SD0#state{speculated=Speculated+1, tx_id=[], 
+                                        pending_list=PendingList++[TxId]}}
+                            end;
                         _ ->
-                            %lager:info("Specula committing "),
-                            ets:insert(PendingTxs, {TxId, {0, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
+                            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, remote),
+                            %% Add dependent data into the table
                             gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
+                            ets:insert(PendingTxs, {TxId, {ToAck, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
                             add_to_table(LocalUpdates, TxId, SpeculaData),
+                            add_to_table(RemoteUpdates, TxId, SpeculaData),
                             %lager:info("Pending list is ~w, TxId is ~w", [PendingList, TxId]),
-                            {noreply, SD0#state{speculated=Speculated+1, 
-                                pending_list=PendingList++[TxId]}}
-                    end;
+                            %lager:info("Inserting ~w, ~w, ~p, ~p", [ToAck, MaxPrepTime, LocalUpdates, RemoteUpdates]),
+                            {noreply, SD0#state{tx_id=[], speculated=Speculated+1, pending_list=PendingList++[TxId]}}
+                        end;
+                        %%TODO: Maybe it does not speculatively-commit.
                 _ ->
-                    ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, remote),
-                    %% Add dependent data into the table
-                    gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
-                    ets:insert(PendingTxs, {TxId, {ToAck, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
-                    add_to_table(LocalUpdates, TxId, SpeculaData),
-                    add_to_table(RemoteUpdates, TxId, SpeculaData),
-                    %lager:info("Pending list is ~w, TxId is ~w", [PendingList, TxId]),
-                    %lager:info("Inserting ~w, ~w, ~p, ~p", [ToAck, MaxPrepTime, LocalUpdates, RemoteUpdates]),
-                    {noreply, SD0#state{to_ack=ToAck, pending_list=PendingList++[TxId]}}
-                end;
-                %%TODO: Maybe it does not speculatively-commit.
+                    %lager:info("~w needs ~w replies", [TxId, N-1]),
+                    MaxPrepTime = max(OldPrepTime, PrepareTime),
+                    {noreply, SD0#state{to_ack=N-1, prepare_time=MaxPrepTime}}
+            end;
         _ ->
-            %lager:info("Not done for ~w", [TxId]),
-            MaxPrepTime = max(OldPrepTime, PrepareTime),
-            {noreply, SD0#state{to_ack=N-1, prepare_time=MaxPrepTime}}
+            %lager:info("Got bad prepare for ~w, PT is ~w", [TxId, PrepareTime]),
+            {noreply, SD0}
     end;
 
-handle_cast({prepared, _, _, local}, 
-	    SD0) ->
-    %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
-    {noreply, SD0};
+%handle_cast({prepared, TId, Time, local}, 
+%	    SD0) ->
+%    %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
+%    {noreply, SD0};
 
-handle_cast({abort, TxId, local}, SD0=#state{tx_id=TxId, local_updates=LocalUpdates, 
+handle_cast({abort, ReceivedTxId, local}, SD0=#state{tx_id=TxId, local_updates=LocalUpdates, 
         do_repl=DoRepl, sender=Sender, pending_txs=PendingTxs}) ->
-    %lager:info("Received abort for ~w", [TxId]),
-    abort_tx(TxId, LocalUpdates, [], DoRepl, PendingTxs),
-    gen_server:reply(Sender, {aborted, TxId}),
-    {noreply, SD0#state{tx_id=[]}};
-handle_cast({abort, _, local}, SD0) ->
+    case ReceivedTxId of
+        TxId ->
+            %lager:info("Received abort for ~w, setting tx_id to []", [TxId]),
+            abort_tx(TxId, LocalUpdates, [], DoRepl, PendingTxs),
+            gen_server:reply(Sender, {aborted, TxId}),
+            {noreply, SD0#state{tx_id=[]}};
+        _ ->
+            {noreply, SD0}
+    end;
+%handle_cast({abort, _, local}, SD0) ->
     %lager:info("Received abort for previous txn ~w", [OtherTxId]),
-    {noreply, SD0};
+%    {noreply, SD0};
 
 %% If the last transaction gets a remote prepare right after the reply is sent back to the client and before the
 %% next transaction arrives.. We will update the state in place, instead of always going to the ets table.
 %% But if we can not commit the transaction immediately, we have to store the updated state to ets table.
-handle_cast({prepared, TxId, PrepareTime, remote}, 
-	    SD0=#state{sender=Sender, tx_id=TxId, do_repl=DoRepl, specula_data=SpeculaData, 
-            prepare_time=OldMaxPrep, last_commit_ts=LastCommitTS, remote_updates=RemoteUpdates, 
-            pending_txs=PendingTxs, committed=Committed, 
-            pending_list=PendingList, to_ack=N, local_updates=LocalUpdates}) ->
+%handle_cast({prepared, TxId, PrepareTime, remote}, 
+%	    SD0=#state{sender=Sender, tx_id=TxId, do_repl=DoRepl, specula_data=SpeculaData, 
+%            prepare_time=OldMaxPrep, last_commit_ts=LastCommitTS, remote_updates=RemoteUpdates, 
+%            pending_txs=PendingTxs, committed=Committed, 
+%            pending_list=PendingList, to_ack=N, local_updates=LocalUpdates}) ->
     %lager:info("Received remote prepare"),
-    NewMaxPrep = max(OldMaxPrep, PrepareTime),
-    case N of
-        1 ->
-            case PendingList of
-                [] -> 
-                    CommitTime = max(NewMaxPrep, LastCommitTS+1),
-                    lager:info("Not possible! Trying to commit tx ~w", [TxId]),
-                    commit_specula_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, 
-                        DoRepl, PendingTxs, SpeculaData),
-                    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id=[], committed=Committed+1}};
-                [TxId] -> 
-                    %lager:info("Trying to commit tx ~w", [TxId]),
-                    CommitTime = max(NewMaxPrep, LastCommitTS+1),
-                    commit_specula_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, 
-                        DoRepl, PendingTxs, SpeculaData),
-                    %gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id=[], pending_list=[], committed=Committed+1}};
-                _ ->
-                    %%This can not happen!!!
-                    ets:insert(PendingTxs, {TxId, {0, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
-                    {noreply, SD0#state{to_ack=0, prepare_time=NewMaxPrep}}
-            end;
-        N ->
-            ets:insert(PendingTxs, {TxId, {N-1, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
-            {noreply, SD0#state{to_ack=N-1, prepare_time=NewMaxPrep}}
-    end;
+%    NewMaxPrep = max(OldMaxPrep, PrepareTime),
+%    case N of
+%        1 ->
+%            case PendingList of
+%                [] -> 
+%                    CommitTime = max(NewMaxPrep, LastCommitTS+1),
+%                    commit_specula_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, 
+%                        DoRepl, PendingTxs, SpeculaData),
+%                    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+%                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id=[], committed=Committed+1}};
+%                [TxId] -> 
+%                    CommitTime = max(NewMaxPrep, LastCommitTS+1),
+%                    commit_specula_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, 
+%                        DoRepl, PendingTxs, SpeculaData),
+%                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id=[], pending_list=[], committed=Committed+1}};
+%                _ ->
+%                    %%This can not happen!!!
+%                    ets:insert(PendingTxs, {TxId, {0, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
+%                    {noreply, SD0#state{to_ack=0, prepare_time=NewMaxPrep}}
+%            end;
+%        N ->
+%            ets:insert(PendingTxs, {TxId, {N-1, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
+%            {noreply, SD0#state{to_ack=N-1, prepare_time=NewMaxPrep}}
+%    end;
 handle_cast({prepared, PendingTxId, PendingPT, remote}, 
 	    SD0=#state{pending_list=PendingList, do_repl=DoRepl, last_commit_ts=LastCommitTS, pending_txs=PendingTxs,
-             committed=Committed, dep_dict=DepDict, dep_num=DepNum, specula_data=SpeculaData}) ->
+            sender=Sender, tx_id=CurrentTxId,
+             committed=Committed, dep_dict=DepDict, dep_num=DepNum, read_aborted=ReadAborted, specula_data=SpeculaData}) ->
     case ets:lookup(PendingTxs, PendingTxId) of
         [{PendingTxId, {1, PendingMaxPT, LocalUpdates, RemoteUpdates}}] ->
             MaxPT = max(PendingMaxPT, PendingPT),
@@ -301,17 +319,21 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
                     CommitTime = max(LastCommitTS+1, MaxPT),
                     commit_specula_tx(PendingTxId, CommitTime, LocalUpdates, RemoteUpdates, DoRepl,
                              PendingTxs, SpeculaData),
-                    {NewDepDict, NewDepNum, NewPendingList, NewMaxPT} = deal_dependency(PendingTxId,
-                                CommitTime, tl(PendingList), DepDict, DepNum, DoRepl, PendingTxs, SpeculaData),
-                    case NewPendingList of
-                        [] ->
-                            {noreply, SD0#state{committed=Committed+length(PendingList)-length(NewPendingList), 
-                                pending_list=[], tx_id=[], dep_dict=NewDepDict, dep_num=NewDepNum, 
-                                last_commit_ts=NewMaxPT}};
-                        _ ->
-                            {noreply, SD0#state{committed=Committed+length(PendingList)-length(NewPendingList), 
+                    {NewDepDict, NewDepNum, NewPendingList, NewMaxPT, NewReadAborted, NewCommitted} = deal_dependency(PendingTxId,
+                                CommitTime, tl(PendingList), DepDict, DepNum, DoRepl, PendingTxs, SpeculaData, ReadAborted, Committed+1),
+                    case NewReadAborted of
+                        ReadAborted ->
+                            %% No transaction is aborted
+                            {noreply, SD0#state{ 
                                 pending_list=NewPendingList, dep_dict=NewDepDict, dep_num=NewDepNum, 
-                                last_commit_ts=NewMaxPT}}
+                                last_commit_ts=NewMaxPT, read_aborted=NewReadAborted, committed=NewCommitted}};
+                        _ ->
+                            %% The current transaction must have been aborted due to flow dependency
+                            abort_tx(CurrentTxId, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs),
+                            gen_server:reply(Sender, {aborted, CurrentTxId}),
+                            {noreply, SD0#state{ 
+                                pending_list=NewPendingList, tx_id=[], dep_dict=NewDepDict, dep_num=NewDepNum, 
+                                last_commit_ts=NewMaxPT, read_aborted=NewReadAborted, committed=NewCommitted}}
                     end;
                 _ ->
                     ets:insert(PendingTxs, {PendingTxId, {0, PendingMaxPT, LocalUpdates, RemoteUpdates}}),
@@ -325,28 +347,40 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
             {noreply, SD0}
     end;
 
-handle_cast({abort, TxId, remote}, 
-	    SD0=#state{remote_updates=RemoteUpdates, pending_txs=PendingTxs, pending_list=PendingList, 
-            do_repl=DoRepl, tx_id=TxId, local_updates=LocalUpdates, aborted=Aborted}) ->
-    abort_tx(TxId, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs),
-    %gen_server:reply(Sender, {aborted, TxId}),
-    {L, _} = lists:split(length(PendingList) - 1, PendingList),
-    {noreply, SD0#state{tx_id=[], aborted=Aborted+1, 
-                pending_list=L}};
+%handle_cast({abort, TxId, remote}, 
+%	    SD0=#state{remote_updates=RemoteUpdates, pending_txs=PendingTxs, pending_list=PendingList, 
+%            do_repl=DoRepl, tx_id=TxId, local_updates=LocalUpdates, aborted=Aborted}) ->
+%    abort_tx(TxId, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs),
+%    %gen_server:reply(Sender, {aborted, TxId}),
+%    {L, _} = lists:split(length(PendingList) - 1, PendingList),
+%    %lager:info("Abort remote"),
+%    {noreply, SD0#state{tx_id=[], aborted=Aborted+1, 
+%                pending_list=L}};
 
 handle_cast({abort, PendingTxId, remote}, 
-	    SD0=#state{pending_list=PendingList, dep_dict=DepDict, specula_data=SpeculaData,
-            do_repl=DoRepl, dep_num=DepNum, pending_txs=PendingTxs, aborted=Aborted}) ->
+	    SD0=#state{pending_list=PendingList, tx_id=TxId, dep_dict=DepDict, specula_data=SpeculaData, sender=Sender,
+            do_repl=DoRepl, dep_num=DepNum, pending_txs=PendingTxs, local_updates=LocalUpdates,
+            remote_updates=RemoteUpdates, aborted=Aborted}) ->
     case start_from(PendingTxId, PendingList) of
         [] ->
             %lager:info("Not aborting anything"),
             {noreply, SD0};
         L ->
-            %lager:info("Pending list is ~w, PendingTxId is ~w, List is ~w", [PendingList, PendingTxId, L]),
+            %lager:info("Abort remote again, Pending list is ~w, PendingTxId is ~w, List is ~w", [PendingList, PendingTxId, L]),
             {DD, DN} = abort_specula_list(L, DepDict, DepNum, DoRepl, PendingTxs, SpeculaData),
-            {noreply, SD0#state{dep_dict=DD, dep_num=DN, tx_id=[], 
-                pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
-                aborted=Aborted+length(PendingList)-length(L)}}
+            %% The current transaction is aborted! So replying to client.
+            case TxId of
+                [] ->
+                    {noreply, SD0#state{dep_dict=DD, dep_num=DN, tx_id=[], 
+                        pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
+                        aborted=Aborted+length(L)}};
+                _ ->
+                    abort_tx(TxId, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs),
+                    gen_server:reply(Sender, {aborted, TxId}),
+                    {noreply, SD0#state{dep_dict=DD, dep_num=DN, tx_id=[], 
+                        pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
+                        aborted=Aborted+length(L)}}
+            end
     end;
 
 handle_cast(_Info, StateData) ->
@@ -417,10 +451,10 @@ remove_from_table([{_, Updates}|Rest], TxId, SpeculaData) ->
                     end end, Updates),
     remove_from_table(Rest, TxId, SpeculaData).
 
-deal_dependency([], _, [], DepDict, DepNum, MaxPT, _, _) ->
-    {DepDict, DepNum, [], MaxPT};
+deal_dependency([], _, [], DepDict, DepNum, MaxPT, _, _, ReadAborted, Committed) ->
+    {DepDict, DepNum, [], MaxPT, ReadAborted, Committed};
 deal_dependency(DependentTxId, CommitTime, PendingList, DepDict, DepNum, 
-                        DoRepl, PendingTxs, SpeculaData) ->
+                        DoRepl, PendingTxs, SpeculaData, ReadAborted, Committed) ->
     %%Check all txns depend on itself
     {DepNum1, ToAbort} = case dict:find(DependentTxId, DepDict) of 
                                              %%DepList is an ordered list that the last element is 
@@ -444,6 +478,7 @@ deal_dependency(DependentTxId, CommitTime, PendingList, DepDict, DepNum,
                     {DD, DN, lists:sublist(PendingList, length(PendingList)-length(L))}
            end,
     %% Try to commit the next txn.
+    ReadAborted1 = length(PendingList) - length(PendingList1) + ReadAborted,
     case PendingList1 of
         [H|Rest] ->
             case dict:find(H, DepNum2) of
@@ -457,11 +492,12 @@ deal_dependency(DependentTxId, CommitTime, PendingList, DepDict, DepNum,
                             MaxPT2 = max(PendingMaxPT, CommitTime+1),
                             commit_specula_tx(H, MaxPT2, LocalParts, RemoteParts, DoRepl, PendingTxs, SpeculaData),
                             deal_dependency(H, MaxPT2, Rest, DepDict2, DepNum2, 
-                                    DoRepl, PendingTxs, SpeculaData);
+                                    DoRepl, PendingTxs, SpeculaData, 
+                                ReadAborted1, Committed+1);
                         %% The next txn can not be committed.. Then just return
                         _ ->
                             %lager:info("Next txn not prepared!, pending list 1 is ~w", [PendingList1]),
-                            {DepDict2, DepNum2, PendingList1, CommitTime}
+                            {DepDict2, DepNum2, PendingList1, CommitTime, ReadAborted1, Committed}
                     end;
                 R ->
                     %% The next txn still depends on some txn.. Should not happen!!! 
@@ -469,7 +505,7 @@ deal_dependency(DependentTxId, CommitTime, PendingList, DepDict, DepNum,
                     error
             end;
         [] ->
-            {DepDict2, DepNum2, [], CommitTime}
+            {DepDict2, DepNum2, [], CommitTime, ReadAborted1, Committed}
     end.
 
 abort_specula_list([], DepDict, DepNum, _, _, _) ->
@@ -657,8 +693,10 @@ deal_dependency_test() ->
     ets:insert(MyTable, {T3, {0, 2, LP2, RP2}}), 
     %% Get aborted because of large commit timestamp 
     io:format(user, "Abort ~w ~n", [MaxPT1]),
-    {DD1, DP1, PD1, MPT1} = deal_dependency(T1, MaxPT1, [T2, T3], DepDict1, DepNum1, 
-            true, MyTable, MyTable),
+    {DD1, DP1, PD1, MPT1, Aborted, Committed} = deal_dependency(T1, MaxPT1, [T2, T3], DepDict1, DepNum1, 
+            true, MyTable, MyTable, 0, 0),
+    ?assertEqual(Aborted, 2),
+    ?assertEqual(Committed, 0),
     ?assertEqual(DD1, dict:new()),
     ?assertEqual(DP1, dict:new()),
     ?assertEqual(PD1, []),
@@ -673,14 +711,16 @@ deal_dependency_test() ->
     ets:insert(MyTable, {T3, {0, 4, LP2, RP2}}), 
     DepNum3 = dict:store(T2, 2, dict:new()),
     Result = deal_dependency(T1, MPT1-2, [T2, T3], DepDict1, DepNum3, 
-            true, MyTable, MyTable),
+            true, MyTable, MyTable, Aborted, Committed),
     ?assertEqual(error, Result),
     %% Return due to need for more prepare
     io:format(user, "Return ~w ~n", [Result]),
     ets:insert(MyTable, {T2, {1, 5, LP1, RP1}}), 
     ets:insert(MyTable, {T3, {0, 6, LP2, RP2}}), 
-    {DD2, DP2, PD2, MPT2} = deal_dependency(T1, MPT1-2, [T2, T3], DepDict2, DepNum2,
-            true, MyTable, MyTable),
+    {DD2, DP2, PD2, MPT2, Aborted1, Committed1} = deal_dependency(T1, MPT1-2, [T2, T3], DepDict2, DepNum2,
+            true, MyTable, MyTable, Aborted, Committed),
+    ?assertEqual(Aborted1, 2),
+    ?assertEqual(Committed1, 0),
     ?assertEqual(DD2, dict:store(T2, [T3], dict:new())),
     ?assertEqual(DP2, dict:store(T3, 1, dict:new())),
     ?assertEqual(PD2, [T2, T3]),
@@ -691,8 +731,10 @@ deal_dependency_test() ->
     io:format(user, "More prepare ~w ~n", [Result]),
     ets:insert(MyTable, {T2, {0, 6, LP1, RP1}}), 
     ets:insert(MyTable, {T3, {1, 7, LP2, RP2}}), 
-    {DD3, DP3, PD3, MPT3} = deal_dependency(T1, MPT1-2, [T2, T3], DepDict2, DepNum2, 
-            true, MyTable, MyTable),
+    {DD3, DP3, PD3, MPT3, Aborted2, Committed2} = deal_dependency(T1, MPT1-2, [T2, T3], DepDict2, DepNum2, 
+            true, MyTable, MyTable, Aborted1, Committed1),
+    ?assertEqual(Aborted2, Aborted1),
+    ?assertEqual(Committed2, Committed1+1),
     ?assertEqual(DD3, dict:new()),
     ?assertEqual(DP3, dict:new()),
     ?assertEqual(PD3, [T3]),
@@ -702,8 +744,10 @@ deal_dependency_test() ->
     %% Commit all
     ets:insert(MyTable, {T2, {0, 6, LP1, RP1}}), 
     ets:insert(MyTable, {T3, {0, 7, LP2, RP2}}), 
-    {DD4, DP4, PD4, MPT4} = deal_dependency(T1, MPT1-2, [T2, T3], DepDict2, DepNum2, 
-            true, MyTable, MyTable),
+    {DD4, DP4, PD4, MPT4, Aborted3, Committed3} = deal_dependency(T1, MPT1-2, [T2, T3], DepDict2, DepNum2, 
+            true, MyTable, MyTable, Aborted2, Committed2),
+    ?assertEqual(Aborted3, Aborted2),
+    ?assertEqual(Committed3, Committed2+2),
     ?assertEqual(DD4, dict:new()),
     ?assertEqual(DP4, dict:new()),
     ?assertEqual(PD4, []),
