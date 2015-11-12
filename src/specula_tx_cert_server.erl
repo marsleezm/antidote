@@ -196,8 +196,8 @@ handle_call({read, Key, TxId, Node0}, Sender, SD0=#state{dep_num=DepNum, specula
                     %lager:info("Well, from clocksi_vnode"),
                     {noreply, SD0};
                 _ ->
-                    {ok, V} = data_repl_serv:read(Node, TxId, Key),
-                    {reply, V, SD0}
+                    data_repl_serv:relay_read(Node, TxId, Key, Sender),
+                    {noreply, SD0}
             end
     end;
 

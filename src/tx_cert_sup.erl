@@ -54,7 +54,7 @@ read(Name, TxId, Key, Node) ->
         true ->
             gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {read, Key, TxId, Node});
         false ->
-            gen_server:call({global, Name}, {read, Key, TxId, Node})
+            gen_server:call({global, Name}, {read, Key, TxId})
     end.
 
 get_stat(Name) ->
