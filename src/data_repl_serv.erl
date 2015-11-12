@@ -67,7 +67,7 @@ read(Name, TxId, Key) ->
     gen_server:call({global, Name}, {read, TxId, Key}).
 
 relay_read(Name, TxId, Key, Reader) ->
-    gen_server:call({global, Name}, {relay_read, TxId, Key, Reader}).
+    gen_server:cast({global, Name}, {relay_read, TxId, Key, Reader}).
 
 %%%===================================================================
 %%% Internal
