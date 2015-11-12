@@ -126,7 +126,7 @@ process(#fpbreadreq{txid=TxId, threadid=ThreadId, key=Key, replica_ip=ReplicaIp,
                 undefined ->
                     hash_fun:get_vnode_by_id(PartitionId, NodeId);
                 _ ->
-                    ReplicaIp
+                    list_to_atom(atom_to_list(node())++"repl"++ReplicaIp)
             end,
     {ok, Value} = case ThreadId of
                         undefined ->
