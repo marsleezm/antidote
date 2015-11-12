@@ -132,7 +132,8 @@ handle_call({get_internal_data, Type, Param}, _Sender, SD0=#state{pending_list=P
     end;
 
 handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0=#state{dep_num=DepNum, 
-            dep_dict=DepDict}) ->
+            dep_dict=DepDict, pending_txs=PendingTxs, last_commit_ts=LastCommitTs, 
+            specula_data=SpeculaData, pending_list=PendingList, speculated=Speculated}) ->
     %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
     %% If there was a legacy ongoing transaction.
     {LocalUpdates, RemoteUpdates} = case LocalUpdates0 of
@@ -156,9 +157,12 @@ handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0=#state{
                            end,
     case length(LocalUpdates) of
         0 ->
+            ets:insert(PendingTxs, {TxId, {length(RemoteUpdates), 0, [], RemoteUpdates}}),
             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, remote),
-            {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates), local_updates=LocalUpdates, remote_updates=
-                RemoteUpdates, sender=Sender, dep_num=DepNum1, dep_dict=DepDict1}};
+            gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs}}),
+            add_to_table(RemoteUpdates, TxId, SpeculaData),
+            {noreply, SD0#state{tx_id=[], dep_num=DepNum1, dep_dict=DepDict1, speculated=Speculated+1,
+                    pending_list=PendingList++[TxId]}};
         _ ->
             %lager:info("Local updates are ~w", [LocalUpdates]),
             ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local),
@@ -203,7 +207,7 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({prepared, ReceivedTxId, PrepareTime, local}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, local_updates=LocalUpdates, do_repl=DoRepl, last_commit_ts=LastCommitTS,
             remote_updates=RemoteUpdates, sender=Sender, pending_list=PendingList, speculated=Speculated,
-            prepare_time=OldPrepTime, pending_txs=PendingTxs, specula_data=SpeculaData}) ->
+            prepare_time=OldPrepTime, pending_txs=PendingTxs, committed=Committed, specula_data=SpeculaData}) ->
     %lager:info("Got local prepare for ~w", [TxId]),
     case ReceivedTxId of
         TxId ->
@@ -221,7 +225,8 @@ handle_cast({prepared, ReceivedTxId, PrepareTime, local},
                                     commit_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, DoRepl,
                                         PendingTxs),
                                     gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-                                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id={}}};
+                                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id={}, committed=Committed+1,
+                                        speculated=Speculated+1}};
                                 _ ->
                                     %lager:info("Specula committing "),
                                     ets:insert(PendingTxs, {TxId, {0, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
