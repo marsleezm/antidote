@@ -77,6 +77,7 @@
                 if_certify :: boolean(),
                 if_replicate :: boolean(),
                 inmemory_store :: cache_id(),
+                dep_dict :: dict(),
                 %Statistics
                 debug = false :: boolean(),
                 total_time :: non_neg_integer(),
@@ -157,6 +158,7 @@ init([Partition]) ->
     PreparedTxs = tx_utilities:open_table(Partition, prepared),
     CommittedTxs = tx_utilities:open_table(Partition, committed),
     InMemoryStore = tx_utilities:open_table(Partition, inmemory_store),
+    DepDict = dict:new(),
 
     IfCertify = antidote_config:get(do_cert),
     IfReplicate = antidote_config:get(do_repl), 
@@ -174,6 +176,7 @@ init([Partition]) ->
                 if_certify = IfCertify,
                 if_replicate = IfReplicate,
                 inmemory_store=InMemoryStore,
+                dep_dict = DepDict,
                 total_time = 0, 
                 prepare_count = 0, 
                 num_aborted = 0,
@@ -306,10 +309,11 @@ handle_command({prepare, TxId, WriteSet, Type}, Sender,
                               prepare_count=PrepareCount,
                               num_cert_fail=NumCertFail,
                               prepared_txs=PreparedTxs,
+                              dep_dict=DepDict,
                               debug=Debug
                               }) ->
     %lager:info("~w: Got prepare of ~w, ~w: ~w", [Partition, TxId, Type, length(WriteSet)]),
-    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, IfCertify),
+    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, DepDict, IfCertify),
     case Result of
         {ok, PrepareTime} ->
             UsedTime = tx_utilities:now_microsec() - PrepareTime,
@@ -332,6 +336,9 @@ handle_command({prepare, TxId, WriteSet, Type}, Sender,
                             {noreply, State}
                     end 
             end;
+        {wait, NewDepDict, NumDeps} ->
+            NewDepDict1 = dict:store({})
+            
         {error, write_conflict} ->
             %lager:info("~w done, abort", [TxId]),
             case Debug of
@@ -464,9 +471,9 @@ async_send_msg(Delay, Msg, To) ->
     timer:sleep(Delay),
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
-prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify)->
+prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, DepDict, IfCertify)->
     %lager:info("Doing certification check"),
-    case certification_check(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify) of
+    case certification_check(TxId, TxWriteSet, CommittedTxs, PreparedTxs, sets:new(), IfCertify) of
         true ->
             %lager:info("Passed"),
             PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
@@ -474,15 +481,18 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify)->
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
             %lager:info("Inserting key sets ~w, ~w", [TxId, KeySet]),
 		    {ok, PrepareTime};
+        {wait, Deps} ->
+            NewDepDict = sets:fold(fun(DepTxId, DDict) ->
+                            dict:append(DepTxId, {TxId, SnapshotTime}, DDict)
+                        end, DepDict, Deps),
+            {wait, NewDepDict, sets:size(Deps)};
 	    false ->
             %lager:info("Fail for ~w of write set ~w", [TxId, TxWriteSet]),
-	        {error, write_conflict};
-        wait ->
-            {error,  wait_more}
+	        {error, write_conflict}
     end.
 
 prepare_and_commit(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InMemoryStore, IfCertify)->
-    case certification_check(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify) of
+    case certification_check(TxId, TxWriteSet, CommittedTxs, PreparedTxs, sets:new(), IfCertify) of
         true ->
             CommitTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
             InsertToStore = fun({Key, Value}) -> 
@@ -496,15 +506,13 @@ prepare_and_commit(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InMemoryStore, I
             lists:foreach(InsertToStore, TxWriteSet),
             {ok, {committed, CommitTime}};
 	    false ->
-	        {error, write_conflict};
-        wait ->
-            {error,  wait_more}
+	        {error, write_conflict}
     end.
 
 set_prepared(_PreparedTxs,[],_TxId,_Time, KeySet) ->
     KeySet;
 set_prepared(PreparedTxs,[{Key, Value} | Rest],TxId,Time, KeySet) ->
-    true = ets:insert(PreparedTxs, {Key, {TxId, Time, Value, []}}),
+    true = ets:insert(PreparedTxs, {Key, {TxId, Time, Value, [], []}}),
     set_prepared(PreparedTxs,Rest,TxId,Time, [Key|KeySet]).
 
 commit(TxId, TxCommitTime, CommittedTxs, 
@@ -566,47 +574,63 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore) ->
 
 %% @doc Performs a certification check when a transaction wants to move
 %%      to the prepared state.
-certification_check(_, _, _, _, false) ->
+certification_check(_, _, _, _, _, _, false) ->
     true;
-certification_check(_, [], _, _, true) ->
-    true;
-certification_check(TxId, [H|T], CommittedTxs, PreparedTxs, true) ->
+certification_check(_, [], _, _, NumOfDeps, InsertedKeys, true) ->
+    case NumOfdeps of
+        0 ->
+            true;
+        _ ->
+            {wait, NumOfDeps, InsertedKeys}
+    end;
+certification_check(TxId, [H|T], CommittedTxs, PreparedTxs, NumOfDeps, InsertedKeys, true) ->
+    {Key, Value} = H,
     SnapshotTime = TxId#tx_id.snapshot_time,
-    {Key, _Value} = H,
     case ets:lookup(CommittedTxs, Key) of
         [{Key, CommitTime}] ->
             %lager:info("~w: There is committed! ~w", [TxId, CommitTime]),
             case CommitTime > SnapshotTime of
                 true ->
                     %lager:info("~w: False because there is committed", [TxId]),
-                    false;
+                    {false, InsertedKeys};
                 false ->
-                    case check_prepared(TxId, PreparedTxs, Key) of
+                    case check_prepared(SnapshotTime, PreparedTxs, Key) of
                         true ->
-                            certification_check(TxId, T, CommittedTxs, PreparedTxs, true);
+                            true = ets:insert(PreparedTxs, {Key, {TxId, SnapshotTime, Value, [], []}}),
+                            certification_check(SnapshotTime, T, CommittedTxs, PreparedTxs, NumOfDeps, 
+                                [Key|InsertedKeys], true);
+                        {wait, DepTxId} ->
+                            certification_check(SnapshotTime, T, CommittedTxs, PreparedTxs, 
+                                sets:add_element(DepTxId, Deps), true);
                         false ->
                             %lager:info("~w: False of prepared", [TxId]),
                             false
                     end
             end;
         [] ->
-            case check_prepared(TxId, PreparedTxs, Key) of
+            case check_prepared(SnapshotTime, PreparedTxs, Key) of
                 true ->
-                    certification_check(TxId, T, CommittedTxs, PreparedTxs, true); 
+                    certification_check(SnapshotTime, T, CommittedTxs, PreparedTxs, Deps, true); 
+                {wait, DepTxId} ->
+                    certification_check(SnapshotTime, T, CommittedTxs, PreparedTxs, 
+                          sets:add_element(DepTxId, Deps), true);
                 false ->
-                    %lager:info("False of prepared"),
                     false
             end
     end.
 
-check_prepared(TxId, PreparedTxs, Key) ->
-    _SnapshotTime = TxId#tx_id.snapshot_time,
+check_prepared(SnapshotTime, PreparedTxs, Key) ->
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             true;
-        _ ->
+        {Key, {PrepTxId, PrepareTime, _, _}} ->
+            case PrepareTime >= SnapshotTime of
+                true ->
+                    false;
+                false ->
+                    {wait, PrepTxId} 
+            end
             %lager:info("Something exists ~p, ~w failes for key ~p", [Record, TxId, Key]),
-            false
     end.
 
 -spec update_store(Keys :: [{key()}],
