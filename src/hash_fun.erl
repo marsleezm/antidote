@@ -158,15 +158,14 @@ get_partitions() ->
             PartitionList
     end.
 
-
 get_hash_fun() ->
     case ets:lookup(meta_info, node_list) of
         [{node_list, List}] ->
             case antidote_config:get(do_repl) of
                 true ->
-                    {[{Node, length(PartList)} || {Node, PartList} <- List], antidote_config:get(to_repl)};
+                    {List, antidote_config:get(to_repl)};
                 false ->
-                    {[{Node, length(PartList)} || {Node, PartList} <- List], []}
+                    {List, []}
             end;
         [] ->
             init_hash_fun(),
@@ -174,9 +173,9 @@ get_hash_fun() ->
                 [{node_list, List}] ->
                     case antidote_config:get(do_repl) of
                         true ->
-                            {[{Node, length(PartList)} || {Node, PartList} <- List], antidote_config:get(to_repl)};
+                            {List, antidote_config:get(to_repl)};
                         false ->
-                            {[{Node, length(PartList)} || {Node, PartList} <- List], []}
+                            {List, []}
                     end
             end
     end.
@@ -193,18 +192,16 @@ init_hash_fun() ->
                 end, dict:new(), Partitions),
     PartitionListByNode = dict:to_list(Dict1),
     ets:insert(meta_info, {node_list, PartitionListByNode}),
-    lists:foldl(fun({Node, PartList}, Acc) ->
+    lists:foreach(fun({Node, PartList}) ->
         case node() of
             Node ->
-                 lager:info("Inserting Acc ~w, PartList ~w", [Acc, PartList]),
-                 ets:insert(meta_info, {Acc, PartList}),
-                 ets:insert(meta_info, {local_node, PartList}),
-                 Acc+1;
+                 lager:info("Inserting node ~w, PartList ~w", [Node, PartList]),
+                 ets:insert(meta_info, {Node, PartList}),
+                 ets:insert(meta_info, {local_node, PartList});
             _ ->
-                 lager:info("Inserting Acc ~w, PartList ~w", [Acc, PartList]),
-                 ets:insert(meta_info, {Acc, PartList}),
-                 Acc+1
-        end end, 0, PartitionListByNode),
+                 lager:info("Inserting node ~w, PartList ~w", [Node, PartList]),
+                 ets:insert(meta_info, {Node, PartList})
+        end end, PartitionListByNode),
     PartitionListByNode.
 
 build_rev_replicas() ->

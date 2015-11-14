@@ -89,9 +89,9 @@ init([]) ->
     {ok, #state{pending_txs=PendingTxs, specula_data=SpeculaData,
             dep_dict=dict:new(), dep_num=dict:new(), do_repl=antidote_config:get(do_repl)}}.
 
-handle_call({get_hash_fun}, _Sender, SD0) ->
-    L = hash_fun:get_hash_fun(),
-    {reply, L, SD0};
+handle_call({single_commit, Node, Key, Value}, _Sender, SD0) ->
+    Result = clocksi_vnode:single_commit(Node,[{Key, Value}]),
+    {reply, Result, SD0};
 
 handle_call({start_tx}, _Sender, SD0) ->
     TxId = tx_utilities:create_transaction_record(0),
@@ -131,19 +131,11 @@ handle_call({get_internal_data, Type, Param}, _Sender, SD0=#state{pending_list=P
             {reply, {dict:to_list(DepDict), dict:to_list(DepNum)}, SD0}
     end;
 
-handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0=#state{dep_num=DepNum, 
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{dep_num=DepNum, 
             dep_dict=DepDict, pending_txs=PendingTxs, last_commit_ts=LastCommitTs, 
             specula_data=SpeculaData, pending_list=PendingList, speculated=Speculated}) ->
     %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
     %% If there was a legacy ongoing transaction.
-    {LocalUpdates, RemoteUpdates} = case LocalUpdates0 of
-                                        {raw, LList} ->
-                                            {raw, RList} = RemoteUpdates0,
-                                            {[{hash_fun:get_vnode_by_id(P, N), Ups}  || {N, P, Ups} <- LList],
-                                             [{hash_fun:get_vnode_by_id(P, N), Ups}  || {N, P, Ups} <- RList]};
-                                        _ ->
-                                            {LocalUpdates0, RemoteUpdates0}
-                                    end,
     %lager:info("Certifying, txId is ~w, local num is ~w, remote num is ~w", 
     %        [TxId, length(LocalUpdates), length(RemoteUpdates)]),
     %lager:info("Got req: localUpdates ~p, remote updates ~p", [LocalUpdates0, RemoteUpdates0]),
@@ -170,13 +162,7 @@ handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0=#state{
                 RemoteUpdates, sender=Sender, dep_num=DepNum1, dep_dict=DepDict1}}
     end;
 
-handle_call({read, Key, TxId, Node0}, Sender, SD0=#state{dep_num=DepNum, specula_data=SpeculaData, hit_cache=HitCache}) ->
-    Node = case Node0 of
-                {raw,  N, P} ->
-                    hash_fun:get_vnode_by_id(P, N);
-                _ ->
-                    Node0
-              end,
+handle_call({read, Key, TxId, Node}, Sender, SD0=#state{dep_num=DepNum, specula_data=SpeculaData, hit_cache=HitCache}) ->
     %lager:info("~w Reading key ~w from ~w", [TxId, Key, Node]),
     case ets:lookup(SpeculaData, Key) of
         [{Key, Value, PendingTxId}] ->

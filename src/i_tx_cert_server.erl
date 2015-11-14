@@ -71,6 +71,10 @@ init([]) ->
 handle_call({get_stat}, _Sender, SD0) ->
     {reply, {0, 0, 0, 0, 0}, SD0};
 
+handle_call({single_commit, Node, Key, Value}, _Sender, SD0) ->
+    Result = clocksi_vnode:single_commit(Node, Key, Value),
+    {reply, Result, SD0};
+
 handle_call({get_hash_fun}, _Sender, SD0) ->
     L = hash_fun:get_hash_fun(),
     {reply, L, SD0};

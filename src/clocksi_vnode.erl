@@ -33,7 +33,7 @@
         do_reply/2,
         prepare/3,
         commit/3,
-        single_commit/1,
+        single_commit/2,
         abort/2,
 
         init/1,
@@ -127,11 +127,10 @@ prepare(Updates, TxId, Type) ->
 %% @doc Sends prepare+commit to a single partition
 %%      Called by a Tx coordinator when the tx only
 %%      affects one partition
-single_commit([{Node,WriteSet}]) ->
-    riak_core_vnode_master:command(Node,
+single_commit(Node, WriteSet) ->
+    riak_core_vnode_master:sync_command(Node,
                                    {single_commit, WriteSet},
-                                   self(),
-                                   ?CLOCKSI_MASTER).
+                                   ?CLOCKSI_MASTER, infinity).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
 commit(UpdatedParts, TxId, CommitTime) ->
@@ -368,8 +367,8 @@ handle_command({single_commit, WriteSet}, Sender,
                             num_committed=NumCommitted+1}};
                 false ->
                     %gen_server:cast(Sender, {committed, CommitTime}),
-                    Sender ! {ok, {committed, CommitTime}},
-                    {noreply, State#state{
+                    %Sender ! {ok, {committed, CommitTime}},
+                    {reply, {ok, {committed, CommitTime}}, State#state{
                             num_committed=NumCommitted+1}}
             end;
         {error, write_conflict} ->
@@ -654,7 +653,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             true = ets:delete(PreparedTxs, Key);
          [] ->
             %[{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
-            lager:warning("Something is wrong!!! A txn updated two same keys!")
+            lager:warning("Something is wrong!!! A txn updated two same keys ~p!", [Key])
     end,
     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs).
 
