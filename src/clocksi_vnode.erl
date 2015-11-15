@@ -78,6 +78,7 @@
                 if_replicate :: boolean(),
                 inmemory_store :: cache_id(),
                 %Statistics
+                max_ts :: non_neg_integer(),
                 debug = false :: boolean(),
                 total_time :: non_neg_integer(),
                 prepare_count :: non_neg_integer(),
@@ -174,6 +175,7 @@ init([Partition]) ->
                 if_certify = IfCertify,
                 if_replicate = IfReplicate,
                 inmemory_store=InMemoryStore,
+                max_ts=0,
                 total_time = 0, 
                 prepare_count = 0, 
                 num_aborted = 0,
@@ -273,28 +275,30 @@ handle_command({check_prepared_empty},_Sender,SD0=#state{prepared_txs=PreparedTx
 handle_command({check_servers_ready},_Sender,SD0) ->
     {reply, true, SD0};
 
-handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked,
+handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max_ts=MaxTS,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
-    clock_service:update_ts(TxId#tx_id.snapshot_time),
+    MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
+    %clock_service:update_ts(TxId#tx_id.snapshot_time),
     case ready_or_block(TxId, Key, PreparedTxs, Sender) of
         not_ready->
-            {noreply, SD0#state{num_blocked=NumBlocked+1}};
+            {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
         ready ->
             Result = read_value(Key, TxId, InMemoryStore),
-            {reply, Result, SD0}
+            {reply, Result, SD0#state{max_ts=MaxTS1}}
     end;
 
 handle_command({relay_read, Key, TxId, Reader}, _Sender, SD0=#state{num_blocked=NumBlocked,
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS}) ->
     %lager:info("Got relay read from ~w of Reader ~w", [Sender, Reader]),
-    clock_service:update_ts(TxId#tx_id.snapshot_time),
+    %clock_service:update_ts(TxId#tx_id.snapshot_time),
+    MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
     case ready_or_block(TxId, Key, PreparedTxs, {relay, Reader}) of
         not_ready->
-            {noreply, SD0#state{num_blocked=NumBlocked+1}};
+            {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
         ready ->
             Result = read_value(Key, TxId, InMemoryStore),
             gen_server:reply(Reader, Result), 
-            {noreply, SD0}
+            {noreply, SD0#state{max_ts=MaxTS1}}
     end;
 
 handle_command({prepare, TxId, WriteSet, Type}, Sender,
@@ -306,34 +310,38 @@ handle_command({prepare, TxId, WriteSet, Type}, Sender,
                               prepare_count=PrepareCount,
                               num_cert_fail=NumCertFail,
                               prepared_txs=PreparedTxs,
+                              max_ts=MaxTS,
                               debug=Debug
                               }) ->
     %lager:info("~w: Got prepare of ~w, ~w: ~w", [Partition, TxId, Type, length(WriteSet)]),
-    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, IfCertify),
+    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify),
     case Result of
         {ok, PrepareTime} ->
             UsedTime = tx_utilities:now_microsec() - PrepareTime,
+            %lager:info("~w: ~w prepred", [Partition, TxId]),
             case IfReplicate of
                 true ->
                     PendingRecord = {TxId, Sender, 
                             {prepared, TxId, PrepareTime, Type}, WriteSet, PrepareTime},
                     repl_fsm:repl_prepare(Partition, TxId, prepare, PendingRecord),
-                    {noreply, State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}};
+                    {noreply, State#state{total_time=TotalTime+UsedTime, max_ts=PrepareTime, prepare_count=PrepareCount+1}};
                 false ->
                     %riak_core_vnode:reply(OriginalSender, {prepared, TxId, PrepareTime, Type}),
                     case Debug of
                         false ->
                             %lager:info("Replying prepare for tx ~w with time ~w", [TxId, PrepareTime]),
                             gen_server:cast(Sender, {prepared, TxId, PrepareTime, Type}),
+                            %lager:info("~w: ~w replied", [Partition, TxId]),
                             {noreply,  
-                            State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}};
+                            State#state{total_time=TotalTime+UsedTime, max_ts=PrepareTime, 
+                            prepare_count=PrepareCount+1}};
                         true ->
                             ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {prepared, TxId, PrepareTime, Type}}}),
-                            {noreply, State}
+                            {noreply, State#state{max_ts=PrepareTime}}
                     end 
             end;
         {error, write_conflict} ->
-            %lager:info("~w done, abort", [TxId]),
+            %lager:info("~w: ~w done, abort", [Partition, TxId]),
             case Debug of
                 false ->
                     gen_server:cast(Sender, {abort, TxId, Type}),
@@ -352,10 +360,11 @@ handle_command({single_commit, WriteSet}, Sender,
                               prepared_txs=PreparedTxs,
                               inmemory_store=InMemoryStore,
                               num_cert_fail=NumCertFail,
+                              max_ts=MaxTS,
                               num_committed=NumCommitted
                               }) ->
     TxId = tx_utilities:create_transaction_record(0),
-    Result = prepare_and_commit(TxId, WriteSet, CommittedTxs, PreparedTxs, InMemoryStore, IfCertify), 
+    Result = prepare_and_commit(TxId, WriteSet, CommittedTxs, PreparedTxs, InMemoryStore, MaxTS, IfCertify), 
     case Result of
         {ok, {committed, CommitTime}} ->
             case IfReplicate of
@@ -363,12 +372,12 @@ handle_command({single_commit, WriteSet}, Sender,
                     PendingRecord = {TxId, Sender, 
                         {ok, {committed, CommitTime}}, WriteSet, CommitTime},
                     repl_fsm:repl_prepare(Partition, TxId, single_commit, PendingRecord),
-                    {noreply, State#state{ 
+                    {noreply, State#state{max_ts=CommitTime, 
                             num_committed=NumCommitted+1}};
                 false ->
                     %gen_server:cast(Sender, {committed, CommitTime}),
                     %Sender ! {ok, {committed, CommitTime}},
-                    {reply, {ok, {committed, CommitTime}}, State#state{
+                    {reply, {ok, {committed, CommitTime}}, State#state{max_ts=CommitTime,
                             num_committed=NumCommitted+1}}
             end;
         {error, write_conflict} ->
@@ -377,7 +386,7 @@ handle_command({single_commit, WriteSet}, Sender,
     end;
 
 handle_command({commit, TxId, TxCommitTime}, _Sender,
-               #state{%partition=Partition,
+               #state{partition=_Partition,
                       committed_txs=CommittedTxs,
                       %if_replicate=IfReplicate,
                       prepared_txs=PreparedTxs,
@@ -396,6 +405,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
             %        {noreply, State#state{
             %                num_committed=NumCommitted+1}};
             %    false ->
+                    %lager:info("~w: committed for ~w", [Partition, TxId]),
                     {noreply, State#state{
                             num_committed=NumCommitted+1}};
             %end;
@@ -406,6 +416,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
 handle_command({abort, TxId}, _Sender,
                #state{partition=_Partition, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore,
                 num_aborted=NumAborted} = State) ->
+    %lager:info("~w: Aborting ~w", [Partition, TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             true = ets:delete(PreparedTxs, TxId),
@@ -413,6 +424,7 @@ handle_command({abort, TxId}, _Sender,
         [] ->
             ok
     end,
+    %lager:info("~w: Aborted ~w", [Partition, TxId]),
     {noreply, State#state{num_aborted=NumAborted+1}};
 
 handle_command({start_read_servers}, _Sender, State) ->
@@ -464,12 +476,13 @@ async_send_msg(Delay, Msg, To) ->
     timer:sleep(Delay),
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
-prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify)->
+prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
     %lager:info("Doing certification check"),
     case certification_check(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify) of
         true ->
             %lager:info("Passed"),
-            PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
+            %PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
+            PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
 		    KeySet = set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
             %lager:info("Inserting key sets ~w, ~w", [TxId, KeySet]),
@@ -481,10 +494,11 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify)->
             {error,  wait_more}
     end.
 
-prepare_and_commit(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InMemoryStore, IfCertify)->
+prepare_and_commit(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InMemoryStore, MaxTS, IfCertify)->
     case certification_check(TxId, TxWriteSet, CommittedTxs, PreparedTxs, IfCertify) of
         true ->
-            CommitTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
+            %CommitTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
+            CommitTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
             InsertToStore = fun({Key, Value}) -> 
                             case ets:lookup(InMemoryStore, Key) of
                                 [] ->
@@ -548,15 +562,16 @@ clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore) ->
 clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore) ->
     case ets:lookup(PreparedTxs, Key) of
         [{Key, {TxId, _, _, []}}] ->
+            %lager:info("No reader"),
             true = ets:delete(PreparedTxs, Key);
-        [{Key, {TxId, _Time, Value, PendingReaders}}] ->
-            %lager:info("Replying to ~w", [PendingReaders]),
+        [{Key, {TxId, _, _, PendingReaders}}] ->
+            %lager:info("Some reader"),
             case ets:lookup(InMemoryStore, Key) of
                 [{Key, ValueList}] ->
                     {_, Value} = hd(ValueList),
-                    lists:foreach(fun(Sender) -> reply(Sender, {ok,Value}) end, PendingReaders);
+                    lists:foreach(fun({_, Sender}) -> reply(Sender, {ok,Value}) end, PendingReaders);
                 [] ->
-                    lists:foreach(fun(Sender) -> reply(Sender, {ok, []}) end, PendingReaders)
+                    lists:foreach(fun({_, Sender}) -> reply(Sender, {ok, []}) end, PendingReaders)
             end,
             true = ets:delete(PreparedTxs, Key);
         _ ->
@@ -641,7 +656,6 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                             [First, Value]
                     end,
             ets:insert(CommittedTxs, {Key, TxCommitTime}),
-            %lager:info("Replying to ~w", [PendingReaders]),
             lists:foreach(fun({SnapshotTime, Sender}) ->
                     case SnapshotTime >= TxCommitTime of
                         true ->
@@ -698,6 +712,11 @@ find_version([{TS, Value}|Rest], SnapshotTime) ->
     end.
 
 reply({relay, Sender}, Result) ->
+    %lager:info("Replying ~p to ~w", [Result, Sender]),
     gen_server:reply(Sender, Result);
+    %lager:info("Replied ~p to ~w", [Result, Sender]);
 reply(Sender, Result) ->
     riak_core_vnode:reply(Sender, Result).
+
+increment_ts(SnapshotTS, MaxTS) ->
+    max(SnapshotTS, MaxTS) + 1.
