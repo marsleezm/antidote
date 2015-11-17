@@ -207,7 +207,7 @@ handle_cast({prepared, ReceivedTxId, PrepareTime, local},
                             case PendingList of
                                 [] -> 
                                     CommitTime = max(LastCommitTS+1, NewMaxPrep),
-                                    %lager:info("Real committing"),
+                                    %lager:info("Committing ~w with ~w", [TxId, CommitTime]),
                                     commit_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, DoRepl,
                                         PendingTxs),
                                     gen_server:reply(Sender, {ok, {committed, CommitTime}}),
