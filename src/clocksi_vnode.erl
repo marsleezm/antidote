@@ -391,7 +391,7 @@ handle_command({single_commit, WriteSet}, Sender,
                               max_ts=MaxTS,
                               num_committed=NumCommitted
                               }) ->
-    TxId = tx_utilities:create_transaction_record(0),
+    TxId = tx_utilities:create_tx_id(0),
     Result = prepare_and_commit(TxId, WriteSet, CommittedTxs, PreparedTxs, InMemoryStore, MaxTS, IfCertify), 
     case Result of
         {ok, {committed, CommitTime}} ->
@@ -737,15 +737,15 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
             %lager:info("No one has prepared so inserted ~w, ~w", [TxId, PPTime]),
             ets:insert(PreparedTxs, {Key, {TxId, PPTime, Value, [], []}}),
             true;
-        [{Key, {PrepTxId, PrepareTime, PrepValue, RWaiter, PWaiter}}] ->
+        [{Key, [{PrepTxId, PrepareTime, PrepValue, RWaiter}|PWaiter]}] ->
             case PrepareTime > SnapshotTime of
                 true ->
                     %lager:info("~w fail because prepare time is ~w, PWaiters are ~p", [TxId, PrepareTime, PWaiter]),
                     false;
                 false ->
                     %lager:info("~p: ~w waits for ~w with ~w, which is ~p", [Key, TxId, PrepTxId, PrepareTime, PWaiter]),
-                    ets:insert(PreparedTxs, {Key, {PrepTxId, PrepareTime, PrepValue, RWaiter,
-                             PWaiter++[{TxId, PPTime, Value}]}}),
+                    ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, PrepValue, RWaiter}|
+                             (PWaiter++[{TxId, PPTime, Value}])]}),
                     wait
             end
             %lager:info("Something exists ~p, ~w failes for key ~p", [Record, TxId, Key]),
@@ -761,7 +761,7 @@ update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedT
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition) ->
     %lager:info("Trying to insert key ~w with ts ~w", [Key, TxCommitTime]),
     case ets:lookup(PreparedTxs, Key) of
-        [{Key, {TxId, _Time, Value, [], Deps}}] ->		
+        [{Key, [{TxId, _Time, Value, []}|Deps] }] ->		
             %lager:info("No pending reader! Waiter is ~p", [Deps]),
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
@@ -779,7 +779,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
 					true = ets:delete(PreparedTxs, Key),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
 								 PreparedTxs, DepDict1, Partition);
-                {PPTxId, _, _, _, _} ->
+                [{PPTxId, _, _, _}|_] ->
                     %lager:info("Record is ~w!", [Record]),
 					true = ets:insert(PreparedTxs, {Key, Record}),
                     DepDict2 = unblock_prepare(PPTxId, DepDict1, PreparedTxs, Partition),
@@ -814,7 +814,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                     true = ets:delete(PreparedTxs, Key),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
                         DepDict1, Partition);
-                {PPTxId, PPTime, Value, [], Remaining} ->
+                [{PPTxId, PPTime, Value, []}|Remaining] ->
                     DepDict2 = unblock_prepare(PPTxId, DepDict1, PreparedTxs, Partition),
                     NewPendingReaders = lists:foldl(fun({SnapshotTime, Sender}, PReaders) ->
                             case SnapshotTime >= TxCommitTime of
@@ -832,7 +832,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                                     PReaders
                             end end,
                         [], PendingReaders),
-                    true = ets:insert(PreparedTxs, {Key, {PPTxId, PPTime, Value, NewPendingReaders, Remaining}}),
+                    true = ets:insert(PreparedTxs, {Key, [{PPTxId, PPTime, Value, NewPendingReaders}|Remaining]}),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
                         DepDict2, Partition)
             end;
@@ -849,13 +849,13 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
         [] ->
             %lager:info("Ready now!!"),
             ready;
-        [{Key, {PreparedTxId, PrepareTime, Value, PendingReader, PendingPrepare}}] ->
+        [{Key, [{PreparedTxId, PrepareTime, Value, PendingReader}| PendingPrepare]}] ->
             %lager:info("~p Not ready.. ~w waits for ~w with ~w, others are ~w",
             %        [Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
             case PrepareTime =< SnapshotTime of
                 true ->
-                    ets:insert(PreparedTxs, {Key, {PreparedTxId, PrepareTime, Value,
-                        [{TxId#tx_id.snapshot_time, Sender}|PendingReader], PendingPrepare}}),
+                    ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, Value,
+                        [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
                     not_ready;
                 false ->
                     ready
