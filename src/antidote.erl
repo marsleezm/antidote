@@ -62,7 +62,7 @@ read(Key) ->
 
 -spec read(Node::preflist(), Key::key()) -> {ok, val()} | {error, reason()}.
 read(Node, Key) ->
-    TxId = tx_utilities:create_transaction_record(0),
+    TxId = tx_utilities:create_tx_id(0),
     clocksi_vnode:read_data_item(Node, Key, TxId).
 
 replica_read(Node, Key, TxId) ->
@@ -73,7 +73,7 @@ replica_read(Node, Key, TxId) ->
 debug_read(PartIndex, Key) ->
     Node = hash_fun:get_local_vnode_by_id(PartIndex),
     lager:info("Node is ~w", [Node]),
-    TxId = tx_utilities:create_transaction_record(0),
+    TxId = tx_utilities:create_tx_id(0),
     clocksi_vnode:read_data_item(Node, Key, TxId).
 
 -spec prepare(ThreadId::non_neg_integer(), TxId::txid(), 

@@ -28,15 +28,15 @@
 -define(GET_AND_UPDATE_TS(Clock), clock_service:get_and_update_ts(Clock)).
 -endif.
 
--export([create_transaction_record/1, now_microsec/0, open_table/2, open_private_table/1, get_table_name/2]).
+-export([create_tx_id/1, now_microsec/0, open_table/2, open_private_table/1, get_table_name/2]).
 
--spec create_transaction_record(snapshot_time() | ignore) -> txid().
-create_transaction_record(ClientClock) ->
+-spec create_tx_id(snapshot_time() | ignore) -> txid().
+create_tx_id(ClientClock) ->
     %% Seed the random because you pick a random read server, this is stored in the process state
     %{A1,A2,A3} = now(),
     _A = ClientClock,
     %_ = random:seed(A1, A2, A3),
-    TransactionId = #tx_id{snapshot_time=?GET_AND_UPDATE_TS(ClientClock), server_pid=self()},
+    TransactionId = #tx_id{snapshot_time=max(ClientClock, now_microsec()), server_pid=self()},
     TransactionId.
 
 %% @doc converts a tuple {MegaSecs,Secs,MicroSecs} into microseconds
@@ -67,4 +67,7 @@ open_private_table(Name) ->
 
 get_table_name(Partition,Base) ->
       list_to_atom(atom_to_list(Base) ++ "-" ++ integer_to_list(Partition)).
+
+
+
 

@@ -105,7 +105,7 @@ stop(Pid) -> gen_fsm:sync_send_all_state_event(Pid,stop).
 
 %% @doc Initialize the state.
 init([From, ClientClock, Operations]) ->
-    TxId = tx_utilities:create_transaction_record(ClientClock),
+    TxId = tx_utilities:create_tx_id(ClientClock),
     SD = #state{
             tx_id = TxId,
             read_set = [],

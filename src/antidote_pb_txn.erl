@@ -84,7 +84,7 @@ process(#fpbtxnreq{ops = Ops}, State) ->
     end;
 process(#fpbstarttxnreq{clock=Clock}, State) ->
     %lager:info("Start txn req"),
-    TxId = tx_utilities:create_transaction_record(Clock),
+    TxId = tx_utilities:create_tx_id(Clock),
     {reply, #fpbtxid{snapshot=TxId#tx_id.snapshot_time, pid=term_to_binary(TxId#tx_id.server_pid)}, State};
 process(#fpbpreptxnreq{txid=TxId, threadid=ThreadId, 
             local_updates=LocalUpdates, remote_updates=RemoteUpdates}, State) ->
@@ -116,7 +116,7 @@ process(#fpbreadreq{txid=TxId, threadid=ThreadId, key=Key, replica_ip=ReplicaIp,
     %T1 = tx_utilities:now_microsec(),
     RealTxId = case TxId of
                     undefined ->
-                        tx_utilities:create_transaction_record(0);
+                        tx_utilities:create_tx_id(0);
                     _ ->
                         decode_txid(TxId)
                 end,

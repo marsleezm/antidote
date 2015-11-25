@@ -115,7 +115,7 @@ stop(Pid) -> gen_fsm:sync_send_all_state_event(Pid,stop).
 
 %% @doc Initialize the state.
 init([From, ClientClock]) ->
-    TxId = tx_utilities:create_transaction_record(ClientClock),
+    TxId = tx_utilities:create_tx_id(ClientClock),
     SD = #state{
             tx_id = TxId,
             updated_partitions = dict:new(),
@@ -127,7 +127,7 @@ init([From, ClientClock]) ->
 
 -spec perform_singleitem_read(key()) -> {ok,val()} | {error,reason()}.
 perform_singleitem_read(Key) ->
-    TxId = tx_utilities:create_transaction_record(0),
+    TxId = tx_utilities:create_tx_id(0),
     Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
     IndexNode = hd(Preflist),
     case ?CLOCKSI_VNODE:read_data_item(IndexNode, Key, TxId) of

@@ -32,8 +32,14 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 single_commit(Name, Node, Key, Value) ->
-    gen_server:call({global, Name}, 
-            {single_commit, Node, Key, Value}).
+    case is_integer(Name) of
+        true ->
+            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, 
+                    {single_commit, Node, Key, Value});
+        false ->
+            gen_server:call({global, Name}, 
+                    {single_commit, Node, Key, Value})
+    end.
 
 certify(Name, TxId, LocalUpdates, RemoteUpdates) ->
     case is_integer(Name) of

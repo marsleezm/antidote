@@ -325,7 +325,7 @@ handle_command({single_commit, WriteSet}, Sender,
                               num_committed=NumCommitted,
                               specula_dep=SpeculaDep
                               }) ->
-    TxId = tx_utilities:create_transaction_record(0),
+    TxId = tx_utilities:create_tx_id(0),
     Result = prepare_and_commit(TxId, WriteSet, CommittedTxs, PreparedTxs, InMemoryStore, SpeculaDep, IfCertify),
     case Result of
         {ok, {committed, CommitTime}} ->

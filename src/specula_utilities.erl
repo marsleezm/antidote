@@ -166,15 +166,15 @@ generate_snapshot_test() ->
     ?assertEqual(2, Type:value(Snapshot2)).
 
 finalize_specula_and_reply_test() ->
-    TxId1 = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
+    TxId1 = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
     Tx1PrepareTime = tx_utilities:now_microsec(),
     Tx1CommitTime = tx_utilities:now_microsec(),
-    TxId2 = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
+    TxId2 = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
     Tx2CommitTime = tx_utilities:now_microsec(),
-    TxId3 = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
+    TxId3 = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
     Tx3PrepareTime = tx_utilities:now_microsec(),
     Tx3CommitTime = tx_utilities:now_microsec(),
-    TxId4 = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
+    TxId4 = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
     Key = 1,
     InMemoryStore = ets:new(inmemory_store, [set,named_table,protected]),
     PreparedTxs = ets:new(prepared_store, [set,named_table,protected]),
@@ -216,8 +216,8 @@ finalize_specula_and_reply_test() ->
     pass.
     
 clean_specula_committed_test() ->
-    TxId1 = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
-    TxId2 = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
+    TxId1 = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
+    TxId2 = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
     Key = 1,
     SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
     PreparedTxs = ets:new(prepared_txs, [set,named_table,protected]),
@@ -235,7 +235,7 @@ clean_specula_committed_test() ->
     
 
 make_prepared_specula_test() ->
-    TxId1 = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
+    TxId1 = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
     Key = 1,
     Record1 = {TxId1, 500, haha, []},
     SpeculaDep = ets:new(specula_dep, [set,named_table,protected]),
@@ -257,9 +257,9 @@ make_prepared_specula_test() ->
     pass.
 
 %find_specula_version_test() ->
-%    TxId1 = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
+%    TxId1 = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
 %    Tx1PrepareTime = tx_utilities:now_microsec(),
-%    TxId2 = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
+%    TxId2 = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
 %    Type = riak_dt_pncounter,
 %    Key = 1,
 %    {ok, Counter1} = Type:update(increment, haha, Type:new()),

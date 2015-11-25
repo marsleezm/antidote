@@ -147,7 +147,7 @@ start_execute_txns(timeout, SD) ->
 process_txs(SD=#state{causal_clock=CausalClock, num_committed_txn=CommittedTxn, 
         all_txn_ops=AllTxnOps, prepare_begin_list=PrepareBeginList,  
         current_txn_index=CurrentTxnIndex, num_txns=NumTxns}) ->
-    TxId = tx_utilities:create_transaction_record(CausalClock),
+    TxId = tx_utilities:create_tx_id(CausalClock),
     case NumTxns of
         0 ->
             proceed_txn(SD#state{prepare_time=TxId#tx_id.snapshot_time});
@@ -492,7 +492,7 @@ get_list_meta([H|T], SpeculaMeta, Acc1, Acc2, Acc3) ->
 -ifdef(SKIP).
 process_op_test() ->
     %% Common read
-    TxId = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
+    TxId = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
     Key1 = {counter, 1},
     Key2 = {counter, 2},
     Type = riak_dt_gcounter,
@@ -567,7 +567,7 @@ generate_specula_meta(NumTotalTxn, NumSpeculaTxn, NumCanCommit, _NumCommitted) -
 
     %% TxIds of specually committed transaction
     Seq1 = lists:seq(1, NumSpeculaTxn),
-    TxnIdList = lists:map(fun(_) -> tx_utilities:create_transaction_record(
+    TxnIdList = lists:map(fun(_) -> tx_utilities:create_tx_id(
                         tx_utilities:now_microsec()) end, Seq1),
 
     %% Metadatas of txns that can finally commit
@@ -588,7 +588,7 @@ generate_specula_meta(NumTotalTxn, NumSpeculaTxn, NumCanCommit, _NumCommitted) -
     {SpeculaMeta, _} = lists:foldl(fun({Id, Txn}, {Dict, Acc}) ->
                 {dict:store(Id, Txn#txn_metadata{index=Acc}, Dict), Acc+1} end, {dict:new(),1}, Zipped),
 
-    CurrentTxId = tx_utilities:create_transaction_record(tx_utilities:now_microsec()),
+    CurrentTxId = tx_utilities:create_tx_id(tx_utilities:now_microsec()),
 
     #state{all_txn_ops=AllTxnOps, txn_id_list=TxnIdList, tx_id=CurrentTxId, 
         num_to_prepare=CurrentTxn#txn_metadata.num_to_prepare, current_txn_index=NumSpeculaTxn+1, 

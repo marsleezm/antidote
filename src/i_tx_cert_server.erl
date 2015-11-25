@@ -71,16 +71,16 @@ init([]) ->
 handle_call({get_stat}, _Sender, SD0) ->
     {reply, {0, 0, 0, 0, 0}, SD0};
 
-handle_call({single_commit, Node, Key, Value}, _Sender, SD0) ->
-    Result = clocksi_vnode:single_commit(Node,[{Key, Value}]),
-    {reply, Result, SD0};
+handle_call({single_commit, Node, Key, Value}, Sender, SD0) ->
+    clocksi_vnode:single_commit(Node,[{Key, Value}], Sender),
+    {noreply, SD0};
 
 handle_call({get_hash_fun}, _Sender, SD0) ->
     L = hash_fun:get_hash_fun(),
     {reply, L, SD0};
 
 handle_call({start_tx}, _Sender, SD0) ->
-    TxId = tx_utilities:create_transaction_record(0),
+    TxId = tx_utilities:create_tx_id(0),
     {reply, TxId, SD0};
 
 handle_call({read, Key, TxId, Node0}, Sender, SD0) ->

@@ -195,12 +195,13 @@ init_hash_fun() ->
     lists:foreach(fun({Node, PartList}) ->
         case node() of
             Node ->
-                 lager:info("Inserting node ~w, PartList ~w", [Node, PartList]),
-                 ets:insert(meta_info, {Node, PartList}),
+    %             lager:info("Inserting node ~w, PartList ~w", [Node, PartList]),
+    %             ets:insert(meta_info, {Node, PartList}),
                  ets:insert(meta_info, {local_node, PartList});
             _ ->
-                 lager:info("Inserting node ~w, PartList ~w", [Node, PartList]),
-                 ets:insert(meta_info, {Node, PartList})
+                 ok
+    %             lager:info("Inserting node ~w, PartList ~w", [Node, PartList]),
+    %             ets:insert(meta_info, {Node, PartList})
         end end, PartitionListByNode),
     PartitionListByNode.
 
@@ -210,6 +211,7 @@ build_rev_replicas() ->
     lists:foreach(fun(N) ->
             ReplList = {N, [list_to_atom(atom_to_list(Node)++"repl"++atom_to_list(N)) 
                             ||  {Node, ToRepl} <- Lists, if_repl_myself(ToRepl, N)]},
+            lager:info("Inserting ~w to repl table", [ReplList]),
             ets:insert(meta_info, ReplList)
         end, AllNodes).
 

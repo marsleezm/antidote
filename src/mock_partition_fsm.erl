@@ -44,11 +44,21 @@
         terminate/2]).
 
 -export([
+        repl_commit/5,
+        repl_abort/4,
         repl_commit/4,
         repl_abort/3,
         abort/2,
         commit/3,
-        if_applied/4,
+        read_valid/2,
+        read_invalid/2,
+        if_applied/2,
+        specula_prepare/5,
+        specula_prepare/4,
+        commit_specula/4,
+        commit_specula/3,
+        abort_specula/3,
+        abort_specula/2,
         go_down/0
         ]).
 
@@ -67,14 +77,26 @@ start_link() ->
 init([]) ->
     {ok, #state{table=dict:new()}}.
 
-if_applied(UpdatedParts, TxId, Result, Type) ->
-    gen_server:call(test_fsm, {if_applied, Type, TxId, UpdatedParts, Result}).
+if_applied(Param, Result) ->
+    gen_server:call(test_fsm, {if_applied, Param, Result}).
 
 repl_commit(UpdatedParts, TxId, CommitTime, true) ->
     gen_server:cast(test_fsm, {repl_commit, TxId, UpdatedParts, CommitTime}).
 
+repl_commit(UpdatedParts, TxId, CommitTime, true, _) ->
+    gen_server:cast(test_fsm, {repl_commit, TxId, UpdatedParts, CommitTime}).
+
 repl_abort(UpdatedParts, TxId, true) ->
     gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
+
+repl_abort(UpdatedParts, TxId, true, _) ->
+    gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
+
+read_valid(_, TxId) ->
+    gen_server:cast(test_fsm, {read_valid, TxId}).
+
+read_invalid(_, TxId) ->
+    gen_server:cast(test_fsm, {read_invalid, TxId}).
 
 abort(UpdatedParts, TxId) ->
     gen_server:cast(test_fsm, {abort, TxId, UpdatedParts}).
@@ -82,32 +104,68 @@ abort(UpdatedParts, TxId) ->
 commit(UpdatedParts, TxId, CommitTime) ->
     gen_server:cast(test_fsm, {commit, TxId, UpdatedParts, CommitTime}).
 
+specula_prepare(DataReplServ, TxId, Partition, Updates, PrepareTime) ->
+    gen_server:cast(test_fsm, {specula_prepare, DataReplServ, TxId, Partition, Updates, PrepareTime}).
+
+specula_prepare(TxId, Partition, Updates, PrepareTime) ->
+    gen_server:cast(test_fsm, {specula_prepare, cache_serv, TxId, Partition, Updates, PrepareTime}).
+
+commit_specula(DataReplServ, TxId, Partition, CommitTime) ->
+    gen_server:cast(test_fsm, {commit_specula, DataReplServ, TxId, Partition, CommitTime}).
+
+commit_specula(TxId, Partition, CommitTime) ->
+    gen_server:cast(test_fsm, {commit_specula, cache_serv, TxId, Partition, CommitTime}).
+
+abort_specula(DataReplServ, TxId, Partition) ->
+    gen_server:cast(test_fsm, {abort_specula, DataReplServ, TxId, Partition}).
+
+abort_specula(TxId, Partition) ->
+    gen_server:cast(test_fsm, {abort_specula, cache_serv, TxId, Partition}).
+
 go_down() ->
     gen_server:call(test_fsm, {go_down}).
 
 
-handle_call({if_applied, Type, TxId, Parts, Result}, _Sender, State=#state{table=Table}) ->
-    io:format(user, "if applied ~w, ~w, ~w ~n", [Type, TxId, Parts]),
-    {ok, Reply} = dict:find({Type, Parts, TxId}, Table),
+handle_call({if_applied, Param, Result}, _Sender, State=#state{table=Table}) ->
+    io:format(user, "if applied ~w, result is ~w ~n", [Param, Result]),
+    {ok, Reply} = dict:find(Param, Table),
     {reply, (Reply == Result), State};
 
 handle_call({go_down},_Sender,SD0) ->
     %io:format(user, "shutting down machine ~w", [self()]),
     {stop,shutdown,ok,SD0}.
 
+handle_cast({specula_prepare, ServName, TxId, Partition, Updates, PrepareTime}, State=#state{table=Table}) ->
+    {noreply, State#state{table=dict:store({specula_prepare, ServName, TxId, Partition}, {Updates, PrepareTime}, Table)}};
+
+handle_cast({commit_specula, ServName, TxId, Partition, CommitTime}, State=#state{table=Table}) ->
+    io:format(user, "commit_specula ~w ~w ~w ~w ~n", [ServName, TxId, Partition, CommitTime]),
+    {noreply, State#state{table=dict:store({commit_specula, ServName, TxId, Partition}, CommitTime, Table)}};
+
+handle_cast({abort_specula, ServName, TxId, Partition}, State=#state{table=Table}) ->
+    io:format(user, "abort_specula ~w ~w ~w ~n", [ServName, TxId, Partition]),
+    {noreply, State#state{table=dict:store({abort_specula, ServName, TxId, Partition}, nothing, Table)}};
+
+handle_cast({read_valid, TxId}, State=#state{table=Table}) ->
+    {noreply, State#state{table=dict:store({read_valid, TxId}, nothing, Table)}};
+
+handle_cast({read_invalid, TxId}, State=#state{table=Table}) ->
+    {noreply, State#state{table=dict:store({read_invalid, TxId}, nothing, Table)}};
+
 handle_cast({repl_commit, TxId, Parts, CommitTime}, State=#state{table=Table}) ->
-    {noreply, State#state{table=dict:store({repl_commit, Parts, TxId}, CommitTime, Table)}};
+    io:format(user, "repl_commit ~w ~w  ~w ~n", [TxId, Parts, CommitTime]),
+    {noreply, State#state{table=dict:store({repl_commit, TxId, Parts}, CommitTime, Table)}};
 
 handle_cast({repl_abort, TxId, Parts}, State=#state{table=Table}) ->
-    %io:format(user, "rebar_abort ~w ~w ~n", [TxId, Parts]),
-    {noreply, State#state{table=dict:store({repl_abort, Parts, TxId}, nothing, Table)}};
+    io:format(user, "rebar_abort ~w ~w ~n", [TxId, Parts]),
+    {noreply, State#state{table=dict:store({repl_abort, TxId, Parts}, nothing, Table)}};
 
 handle_cast({abort, TxId, Parts}, State=#state{table=Table}) ->
-    %io:format(user, "abort ~w ~w ~n", [TxId, Parts]),
-    {noreply, State#state{table=dict:store({abort, Parts, TxId}, nothing, Table)}};
+    io:format(user, "abort ~w ~w ~n", [TxId, Parts]),
+    {noreply, State#state{table=dict:store({abort, TxId, Parts}, nothing, Table)}};
 
 handle_cast({commit, TxId, Parts, CommitTime}, State=#state{table=Table}) ->
-    {noreply, State#state{table=dict:store({commit, Parts, TxId}, CommitTime, Table)}};
+    {noreply, State#state{table=dict:store({commit, TxId, Parts}, CommitTime, Table)}};
 
 handle_cast(_Info, StateData) ->
     {noreply,StateData}.

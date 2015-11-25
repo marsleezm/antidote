@@ -27,9 +27,15 @@
 -include_lib("eunit/include/eunit.hrl").
 -define(CLOCKSI_VNODE, mock_partition_fsm).
 -define(REPL_FSM, mock_partition_fsm).
+-define(SPECULA_TX_CERT_SERVER, mock_partition_fsm).
+-define(CACHE_SERV, mock_partition_fsm).
+-define(DATA_REPL_SERV, mock_partition_fsm).
 -else.
 -define(CLOCKSI_VNODE, clocksi_vnode).
 -define(REPL_FSM, repl_fsm).
+-define(SPECULA_TX_CERT_SERVER, specula_tx_cert_server).
+-define(CACHE_SERV, cache_serv).
+-define(DATA_REPL_SERV, data_repl_serv).
 -endif.
 
 %% API
@@ -51,13 +57,17 @@
         tx_id :: txid(),
         prepare_time = 0 :: non_neg_integer(),
         last_commit_ts = 0 :: non_neg_integer(),
+        to_ack :: non_neg_integer(),
+        read_deps :: integer(),
         local_updates :: [],
         remote_updates :: [],
-        dep_dict :: dict(),
-        dep_num :: dict(),
+        rep_dict :: dict(),
+        read_dep_dict :: dict(),
         pending_list=[] :: [txid()],
+        stage :: atom(),
+        invalid_ts :: non_neg_integer(),
 
-        specula_data :: cache_id(),
+        %specula_data :: cache_id(),
         pending_txs :: cache_id(),
         do_repl :: boolean(),
         is_specula = false :: boolean(),
@@ -66,8 +76,7 @@
         committed=0 :: non_neg_integer(),
         aborted=0 :: non_neg_integer(),
         speculated=0 :: non_neg_integer(),
-        sender :: term(),
-        to_ack :: non_neg_integer()}).
+        sender :: term()}).
 
 %%%===================================================================
 %%% API
@@ -84,18 +93,22 @@ start_link(Name) ->
 
 init([]) ->
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
+    Lists = antidote_config:get(to_repl),
+    [RepNodes] = [Reps || {Node, Reps} <- Lists, Node == node()],
+    RepDict = lists:foldl(fun(N, D) -> dict:store(N, 
+        list_to_atom(atom_to_list(node())++"repl"++atom_to_list(N)), D) end, dict:new(), RepNodes), 
     PendingTxs = tx_utilities:open_private_table(pending_txs), 
-    SpeculaData = tx_utilities:open_private_table(specula_data),
-    {ok, #state{pending_txs=PendingTxs, specula_data=SpeculaData,
-            dep_dict=dict:new(), dep_num=dict:new(), do_repl=antidote_config:get(do_repl)}}.
+    %SpeculaData = tx_utilities:open_private_table(specula_data),
+    {ok, #state{pending_txs=PendingTxs, rep_dict=RepDict, read_deps=0, read_dep_dict=dict:new(),
+            do_repl=antidote_config:get(do_repl)}}.
 
-handle_call({single_commit, Node, Key, Value}, _Sender, SD0) ->
-    Result = clocksi_vnode:single_commit(Node,[{Key, Value}]),
-    {reply, Result, SD0};
+handle_call({single_commit, Node, Key, Value}, Sender, SD0) ->
+    clocksi_vnode:single_commit(Node,[{Key, Value}], Sender),
+    {noreply, SD0};
 
 handle_call({start_tx}, _Sender, SD0) ->
-    TxId = tx_utilities:create_transaction_record(0),
-    {reply, TxId, SD0};
+    TxId = tx_utilities:create_tx_id(0),
+    {reply, TxId, SD0#state{tx_id=TxId, stage=reading, invalid_ts=0, read_deps=0}};
 
 handle_call({get_stat}, _Sender, SD0=#state{aborted=Aborted, committed=Committed, read_aborted=ReadAborted, hit_cache=HitCache,
         speculated=Speculated}) ->
@@ -104,7 +117,7 @@ handle_call({get_stat}, _Sender, SD0=#state{aborted=Aborted, committed=Committed
     {reply, {HitCache, ReadAborted, Aborted, Committed, Speculated}, SD0};
 
 handle_call({get_internal_data, Type, Param}, _Sender, SD0=#state{pending_list=PendingList, 
-        pending_txs=PendingTxs, specula_data=SpeculaData, dep_dict=DepDict, dep_num=DepNum})->
+        pending_txs=PendingTxs})->
     case Type of
         pending_list ->
             {reply, PendingList, SD0};
@@ -114,124 +127,97 @@ handle_call({get_internal_data, Type, Param}, _Sender, SD0=#state{pending_list=P
                     {reply, [], SD0};
                 [Content] ->
                     {reply, Content, SD0}
-            end;
-        specula_data ->
-            case ets:lookup(SpeculaData, Param) of
-                [] ->
-                    {reply, [], SD0};
-                [Content] ->
-                    {reply, Content, SD0}
-            end;
-        all_specula_data ->
-            {reply, ets:tab2list(SpeculaData), SD0};
-        dependency ->
-            {Reader, Creator} = Param,
-            {reply, {dict:find(Reader, DepNum), dict:find(Creator, DepDict)}, SD0};
-        all_dependency ->
-            {reply, {dict:to_list(DepDict), dict:to_list(DepNum)}, SD0}
+            end
     end;
 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{dep_num=DepNum, 
-            dep_dict=DepDict, pending_txs=PendingTxs, last_commit_ts=LastCommitTs, 
-            specula_data=SpeculaData, pending_list=PendingList, speculated=Speculated}) ->
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{rep_dict=RepDict, 
+            pending_txs=PendingTxs, last_commit_ts=LastCommitTs, read_deps=OldReadDeps,
+            pending_list=PendingList, speculated=Speculated, read_dep_dict=ReadDepDict}) ->
     %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
     %% If there was a legacy ongoing transaction.
     %lager:info("Certifying, txId is ~w, local num is ~w, remote num is ~w", 
     %        [TxId, length(LocalUpdates), length(RemoteUpdates)]),
     %lager:info("Got req: localUpdates ~p, remote updates ~p", [LocalUpdates0, RemoteUpdates0]),
-    {DepNum1, DepDict1} = case dict:find(TxId, DepNum) of
-                            {ok, Deps} ->
-                                DD = lists:foldl(fun(T, Acc) -> dict:append(T, TxId, Acc) end, 
-                                        DepDict, sets:to_list(Deps)),
-                                {dict:store(TxId, sets:size(Deps), DepDict), DD};
-                            error ->
-                                {DepNum, DepDict}
-                           end,
+    ReadDeps = length(ets:lookup(anti_dep, TxId)),
+    true = ets:delete(anti_dep, TxId),
     case length(LocalUpdates) of
         0 ->
-            ets:insert(PendingTxs, {TxId, {length(RemoteUpdates), 0, [], RemoteUpdates}}),
-            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, remote),
+            RemotePartitions = [P || {P, _} <- RemoteUpdates],
+            ReadDepDict1 = case ReadDeps+OldReadDeps of
+                                0 -> ReadDepDict;
+                                N -> dict:store(TxId, N, ReadDepDict)
+                            end,
+            ets:insert(PendingTxs, {TxId, {length(RemotePartitions), LastCommitTs+1, [], RemotePartitions}}),
+            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
             gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs}}),
-            add_to_table(RemoteUpdates, TxId, SpeculaData),
-            {noreply, SD0#state{tx_id=[], dep_num=DepNum1, dep_dict=DepDict1, speculated=Speculated+1,
-                    pending_list=PendingList++[TxId]}};
+            add_to_table(RemoteUpdates, TxId, LastCommitTs+1, RepDict),
+            {noreply, SD0#state{tx_id=[], speculated=Speculated+1, stage=specula, read_dep_dict=ReadDepDict1,
+                    pending_list=PendingList++[TxId], prepare_time=LastCommitTs+1}};
         _ ->
-            %lager:info("Local updates are ~w", [LocalUpdates]),
+            lager:info("Local updates are ~w", [LocalUpdates]),
+            LocalPartitions = [P || {P, _} <- LocalUpdates],
             ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local),
-            {noreply, SD0#state{tx_id=TxId, to_ack=length(LocalUpdates), local_updates=LocalUpdates, remote_updates=
-                RemoteUpdates, sender=Sender, dep_num=DepNum1, dep_dict=DepDict1}}
+            {noreply, SD0#state{tx_id=TxId, to_ack=length(LocalUpdates), read_deps=ReadDeps+OldReadDeps, 
+                    local_updates=LocalPartitions, 
+                remote_updates=RemoteUpdates, sender=Sender, prepare_time=LastCommitTs+1, stage=local_cert}}
     end;
 
-handle_call({read, Key, TxId, Node}, Sender, SD0=#state{dep_num=DepNum, specula_data=SpeculaData, hit_cache=HitCache}) ->
-    %lager:info("~w Reading key ~w from ~w", [TxId, Key, Node]),
-    case ets:lookup(SpeculaData, Key) of
-        [{Key, Value, PendingTxId}] ->
-            %lager:info("Has Value ~w", [Value]),
-            DepNum1 = case dict:find(TxId, DepNum) of
-                        {ok, Set} ->
-                            dict:store(TxId, sets:add_element(PendingTxId, Set), DepNum);
-                        error ->
-                            dict:store(TxId, sets:add_element(PendingTxId, sets:new()), DepNum)
-                      end,
-            {reply, {ok, Value}, SD0#state{dep_num=DepNum1, hit_cache=HitCache+1}};
-        [] ->
-            %lager:info("No Value"),
-            case Node of 
-                {_,_} ->
-                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender),
-                    %lager:info("Well, from clocksi_vnode"),
-                    {noreply, SD0};
-                _ ->
-                    data_repl_serv:relay_read(Node, TxId, Key, Sender),
-                    {noreply, SD0}
-            end
-    end;
+handle_call({read, Key, TxId, Node}, Sender, SD0) ->
+    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, local),
+    {noreply, SD0};
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
 handle_cast({prepared, ReceivedTxId, PrepareTime, local}, 
-	    SD0=#state{to_ack=N, tx_id=TxId, local_updates=LocalUpdates, do_repl=DoRepl, last_commit_ts=LastCommitTS,
-            remote_updates=RemoteUpdates, sender=Sender, pending_list=PendingList, speculated=Speculated,
-            prepare_time=OldPrepTime, pending_txs=PendingTxs, committed=Committed, specula_data=SpeculaData}) ->
-    %lager:info("Got local prepare for ~w", [TxId]),
+	    SD0=#state{to_ack=N, tx_id=TxId, local_updates=LocalParts, do_repl=DoRepl, read_deps=ReadDeps,
+            remote_updates=RemoteUpdates, sender=Sender, read_dep_dict=ReadDepDict, pending_list=PendingList,
+             speculated=Speculated, last_commit_ts=LastCommitTs,
+            prepare_time=OldPrepTime, pending_txs=PendingTxs, committed=Committed, rep_dict=RepDict}) ->
+    lager:info("Got local prepare for ~w", [TxId]),
     case ReceivedTxId of
         TxId ->
             case N of
                 1 -> 
-                    %lager:info("Got all local prepare!"),
+                    lager:info("Got all local prepare!"),
                     NewMaxPrep = max(PrepareTime, OldPrepTime),
-                    ToAck = length(RemoteUpdates),
-                    case ToAck of
-                        0 ->
+                    RemoteParts = [P || {P, _} <- RemoteUpdates],
+                    ToAck = length(RemoteParts),
+                    case ( ToAck ==0 ) and (ReadDeps == 0) of
+                        true ->
                             case PendingList of
                                 [] -> 
-                                    CommitTime = max(LastCommitTS+1, NewMaxPrep),
-                                    %lager:info("Committing ~w with ~w", [TxId, CommitTime]),
-                                    commit_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, DoRepl,
+                                    CommitTime = max(NewMaxPrep, LastCommitTs+1),
+                                    lager:info("Committing ~w with ~w", [TxId, CommitTime]),
+                                    commit_tx(TxId, NewMaxPrep, LocalParts, DoRepl,
                                         PendingTxs),
-                                    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+                                    gen_server:reply(Sender, {ok, {committed, NewMaxPrep}}),
                                     {noreply, SD0#state{last_commit_ts=CommitTime, tx_id={}, committed=Committed+1,
                                         speculated=Speculated+1}};
                                 _ ->
                                     %lager:info("Specula committing "),
-                                    ets:insert(PendingTxs, {TxId, {0, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
+                                    ets:insert(PendingTxs, {TxId, {0, ReadDeps, NewMaxPrep, LocalParts, RemoteParts}}),
                                     gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
-                                    add_to_table(LocalUpdates, TxId, SpeculaData),
+                                    add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
                                     %lager:info("Pending list is ~w, TxId is ~w", [PendingList, TxId]),
                                     {noreply, SD0#state{speculated=Speculated+1, tx_id=[], 
                                         pending_list=PendingList++[TxId]}}
                             end;
                         _ ->
-                            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, remote),
+                            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                             %% Add dependent data into the table
                             gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
-                            ets:insert(PendingTxs, {TxId, {ToAck, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
-                            add_to_table(LocalUpdates, TxId, SpeculaData),
-                            add_to_table(RemoteUpdates, TxId, SpeculaData),
-                            %lager:info("Pending list is ~w, TxId is ~w", [PendingList, TxId]),
-                            %lager:info("Inserting ~w, ~w, ~p, ~p", [ToAck, MaxPrepTime, LocalUpdates, RemoteUpdates]),
-                            {noreply, SD0#state{tx_id=[], speculated=Speculated+1, pending_list=PendingList++[TxId]}}
+                            ets:insert(PendingTxs, {TxId, {ToAck, NewMaxPrep, LocalParts, RemoteParts}}),
+                            add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
+                            case ReadDeps of
+                                0 ->
+                                    {noreply, SD0#state{tx_id=[], speculated=Speculated+1, 
+                                    pending_list=PendingList++[TxId]}};
+                                _ ->
+                                    ReadDepDict1 = dict:store(TxId, ReadDeps, ReadDepDict),
+                                    {noreply, SD0#state{tx_id=[], speculated=Speculated+1, read_dep_dict=ReadDepDict1, 
+                                    pending_list=PendingList++[TxId]}}
+                            end
                         end;
                         %%TODO: Maybe it does not speculatively-commit.
                 _ ->
@@ -244,99 +230,135 @@ handle_cast({prepared, ReceivedTxId, PrepareTime, local},
             {noreply, SD0}
     end;
 
-%handle_cast({prepared, TId, Time, local}, 
-%	    SD0) ->
-%    %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
-%    {noreply, SD0};
-
-handle_cast({abort, ReceivedTxId, local}, SD0=#state{tx_id=TxId, local_updates=LocalUpdates, 
-        do_repl=DoRepl, sender=Sender, pending_txs=PendingTxs}) ->
-    case ReceivedTxId of
-        TxId ->
-            %lager:info("Received abort for ~w, setting tx_id to []", [TxId]),
-            abort_tx(TxId, LocalUpdates, [], DoRepl, PendingTxs),
-            gen_server:reply(Sender, {aborted, TxId}),
-            {noreply, SD0#state{tx_id=[]}};
-        _ ->
-            {noreply, SD0}
-    end;
-%handle_cast({abort, _, local}, SD0) ->
-    %lager:info("Received abort for previous txn ~w", [OtherTxId]),
-%    {noreply, SD0};
-
-%% If the last transaction gets a remote prepare right after the reply is sent back to the client and before the
-%% next transaction arrives.. We will update the state in place, instead of always going to the ets table.
-%% But if we can not commit the transaction immediately, we have to store the updated state to ets table.
-%handle_cast({prepared, TxId, PrepareTime, remote}, 
-%	    SD0=#state{sender=Sender, tx_id=TxId, do_repl=DoRepl, specula_data=SpeculaData, 
-%            prepare_time=OldMaxPrep, last_commit_ts=LastCommitTS, remote_updates=RemoteUpdates, 
-%            pending_txs=PendingTxs, committed=Committed, 
-%            pending_list=PendingList, to_ack=N, local_updates=LocalUpdates}) ->
-    %lager:info("Received remote prepare"),
-%    NewMaxPrep = max(OldMaxPrep, PrepareTime),
-%    case N of
-%        1 ->
-%            case PendingList of
-%                [] -> 
-%                    CommitTime = max(NewMaxPrep, LastCommitTS+1),
-%                    commit_specula_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, 
-%                        DoRepl, PendingTxs, SpeculaData),
-%                    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-%                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id=[], committed=Committed+1}};
-%                [TxId] -> 
-%                    CommitTime = max(NewMaxPrep, LastCommitTS+1),
-%                    commit_specula_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, 
-%                        DoRepl, PendingTxs, SpeculaData),
-%                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id=[], pending_list=[], committed=Committed+1}};
-%                _ ->
-%                    %%This can not happen!!!
-%                    ets:insert(PendingTxs, {TxId, {0, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
-%                    {noreply, SD0#state{to_ack=0, prepare_time=NewMaxPrep}}
-%            end;
-%        N ->
-%            ets:insert(PendingTxs, {TxId, {N-1, NewMaxPrep, LocalUpdates, RemoteUpdates}}),
-%            {noreply, SD0#state{to_ack=N-1, prepare_time=NewMaxPrep}}
-%    end;
-handle_cast({prepared, PendingTxId, PendingPT, remote}, 
-	    SD0=#state{pending_list=PendingList, do_repl=DoRepl, last_commit_ts=LastCommitTS, pending_txs=PendingTxs,
-            sender=Sender, tx_id=CurrentTxId,
-             committed=Committed, dep_dict=DepDict, dep_num=DepNum, read_aborted=ReadAborted, specula_data=SpeculaData}) ->
-    case ets:lookup(PendingTxs, PendingTxId) of
-        [{PendingTxId, {1, PendingMaxPT, LocalUpdates, RemoteUpdates}}] ->
-            MaxPT = max(PendingMaxPT, PendingPT),
-            %% To make sure that a transaction commits with timestamp larger than its previous txn
+%% TODO: if we don't direclty speculate after getting all local prepared, maybe we can wait a littler more
+%%       and here we should check if the transaction can be directly committed or not. 
+handle_cast({read_valid, TxId}, SD0=#state{tx_id=TxId, read_deps=ReadDeps}) ->
+    {noreply, SD0#state{read_deps=ReadDeps-1}};
+handle_cast({read_valid, TxId}, SD0=#state{pending_txs=PendingTxs, rep_dict=RepDict, read_dep_dict=ReadDepDict, 
+            pending_list=PendingList, do_repl=DoRepl, read_aborted=ReadAborted, tx_id=CurrentTxId, committed=Committed,
+            local_updates=LocalParts, last_commit_ts=LastCommitTS, sender=Sender}) ->
+    case dict:find(TxId, ReadDepDict) of
+        {ok, 1} -> 
+            ReadDepDict1 = dict:erase(TxId, ReadDepDict),
             case hd(PendingList) of
-                PendingTxId ->
-                    CommitTime = max(LastCommitTS+1, MaxPT),
-                    commit_specula_tx(PendingTxId, CommitTime, LocalUpdates, RemoteUpdates, DoRepl,
-                             PendingTxs, SpeculaData),
-                    {NewDepDict, NewDepNum, NewPendingList, NewMaxPT, NewReadAborted, NewCommitted} = deal_dependency(PendingTxId,
-                                CommitTime, tl(PendingList), DepDict, DepNum, DoRepl, PendingTxs, SpeculaData, ReadAborted, Committed+1),
+                 TxId ->
+                    {NewPendingList, NewMaxPT, NewReadDep, NewReadAborted, NewCommitted} = try_to_commit(
+                            LastCommitTS, PendingList, RepDict, ReadDepDict1, DoRepl, PendingTxs, 
+                        ReadAborted, Committed, {true, false}),
                     case NewReadAborted of
                         ReadAborted ->
                             %% No transaction is aborted
-                            {noreply, SD0#state{ 
-                                pending_list=NewPendingList, dep_dict=NewDepDict, dep_num=NewDepNum, 
-                                last_commit_ts=NewMaxPT, read_aborted=NewReadAborted, committed=NewCommitted}};
+                            {noreply, SD0#state{
+                                pending_list=NewPendingList, read_dep_dict=NewReadDep,
+                                  last_commit_ts=NewMaxPT, read_aborted=NewReadAborted, committed=NewCommitted}};
                         _ ->
-                            %% The current transaction must have been aborted due to flow dependency
-                            abort_tx(CurrentTxId, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs),
+                              %% The current transaction must have been aborted due to flow dependency
+                            ReadDepDict2 = abort_tx(CurrentTxId, LocalParts, DoRepl, 
+                                PendingTxs, ReadDepDict1),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
-                            {noreply, SD0#state{ 
-                                pending_list=NewPendingList, tx_id=[], dep_dict=NewDepDict, dep_num=NewDepNum, 
+                            {noreply, SD0#state{
+                              pending_list=NewPendingList, tx_id=[], read_dep_dict=ReadDepDict2,
                                 last_commit_ts=NewMaxPT, read_aborted=NewReadAborted, committed=NewCommitted}}
                     end;
                 _ ->
-                    ets:insert(PendingTxs, {PendingTxId, {0, PendingMaxPT, LocalUpdates, RemoteUpdates}}),
+                    {noreply, SD0#state{read_dep_dict=ReadDepDict1}}
+            end;
+        {ok, N} -> 
+            ReadDepDict1 = dict:store(TxId, N-1, ReadDepDict),
+            {noreply, SD0#state{read_dep_dict=ReadDepDict1}};
+        error ->
+            {noreply, SD0}
+    end;
+
+handle_cast({read_invalid, MyCommitTime, TxId}, SD0=#state{tx_id=TxId, sender=Sender, 
+        stage=Stage, invalid_ts=InvalidTS, do_repl=DoRepl, read_dep_dict=ReadDepDict, 
+        local_updates=LocalParts, pending_txs=PendingTxs}) ->
+    case Stage of
+        reading ->
+            {noreply, SD0#state{invalid_ts=max(MyCommitTime, InvalidTS)}};
+        local_cert ->
+            %% TODO: Replace to read verification
+            RD1 = abort_tx(TxId, LocalParts, DoRepl, PendingTxs, ReadDepDict),
+            gen_server:reply(Sender, {aborted, TxId}),
+            {noreply, SD0#state{read_dep_dict=RD1, tx_id=[]}}
+    end;
+
+handle_cast({read_invalid, _MyCommitTime, PendingTxId}, SD0=#state{tx_id=CurrentTxId, sender=Sender, 
+        do_repl=DoRepl, read_dep_dict=ReadDepDict, pending_list=PendingList, aborted=Aborted, 
+        rep_dict=RepDict, local_updates=LocalParts, pending_txs=PendingTxs}) ->
+    case start_from(PendingTxId, PendingList) of
+        [] ->
+            %lager:info("Not aborting anything"),
+            {noreply, SD0};
+        L ->
+            %lager:info("Abort remote again, Pending list is ~w, PendingTxId is ~w, List is ~w", [PendingList, PendingTxId, L]),
+            RD = abort_specula_list(L, RepDict, ReadDepDict, DoRepl, PendingTxs),
+            %% The current transaction is aborted! So replying to client.
+            case CurrentTxId of
+                [] ->
+                    {noreply, SD0#state{read_dep_dict=RD, tx_id=[], 
+                        pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
+                        aborted=Aborted+length(L)}};
+                _ ->
+                    RD1 = abort_tx(CurrentTxId, LocalParts, DoRepl, PendingTxs, RD),
+                    gen_server:reply(Sender, {aborted, CurrentTxId}),
+                    {noreply, SD0#state{read_dep_dict=RD1, tx_id=[], 
+                        pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
+                        aborted=Aborted+length(L)}}
+            end
+    end;
+
+handle_cast({abort, ReceivedTxId, local}, SD0=#state{tx_id=TxId, local_updates=LocalUpdates, 
+        do_repl=DoRepl, sender=Sender, pending_txs=PendingTxs, read_dep_dict=ReadDepDict}) ->
+    case ReceivedTxId of
+        TxId ->
+            %lager:info("Received abort for ~w, setting tx_id to []", [TxId]),
+            ReadDepDict1 = abort_tx(TxId, LocalUpdates, DoRepl, PendingTxs, ReadDepDict),
+            gen_server:reply(Sender, {aborted, TxId}),
+            {noreply, SD0#state{tx_id=[], read_dep_dict=ReadDepDict1}};
+        _ ->
+            {noreply, SD0}
+    end;
+handle_cast({prepared, PendingTxId, PendingPT, remote}, 
+	    SD0=#state{pending_list=PendingList, do_repl=DoRepl, pending_txs=PendingTxs,
+            sender=Sender, tx_id=CurrentTxId, rep_dict=RepDict, last_commit_ts=LastCommitTS,
+             committed=Committed, read_aborted=ReadAborted, 
+            local_updates=LocalParts, read_dep_dict=ReadDepDict}) ->
+    lager:info("Got remote prepare for ~w", [PendingTxId]),
+    case ets:lookup(PendingTxs, PendingTxId) of
+        [{PendingTxId, {1, OldMaxPrepTime, LPs, RPs}}] ->
+            NewMaxPrepTime = max(PendingPT, OldMaxPrepTime),
+            lager:info("Can try to commit"),
+            case hd(PendingList) of
+                 PendingTxId ->
+                    {NewPendingList, NewMaxPT, NewReadDep, NewReadAborted, NewCommitted} = try_to_commit(
+                            LastCommitTS, PendingList, RepDict, ReadDepDict, DoRepl, PendingTxs, 
+                        ReadAborted, Committed, {false, {NewMaxPrepTime, LPs, RPs}}),
+                    case NewReadAborted of
+                        ReadAborted ->
+                            %% No transaction is aborted
+                            {noreply, SD0#state{
+                                pending_list=NewPendingList, read_dep_dict=NewReadDep,
+                                  last_commit_ts=NewMaxPT, read_aborted=NewReadAborted, committed=NewCommitted}};
+                        _ ->
+                              %% The current transaction must have been aborted due to flow dependency
+                            ReadDep1 = abort_tx(CurrentTxId, LocalParts, DoRepl, PendingTxs, NewReadDep),
+                            gen_server:reply(Sender, {aborted, CurrentTxId}),
+                            {noreply, SD0#state{
+                              pending_list=NewPendingList, tx_id=[], read_dep_dict=ReadDep1, 
+                                last_commit_ts=NewMaxPT, read_aborted=NewReadAborted, committed=NewCommitted}}
+                    end;
+                _ ->
+                    ets:insert(PendingTxs, {PendingTxId, {0, NewMaxPrepTime, LPs, RPs}}),
                     {noreply, SD0}
             end;
-        [{PendingTxId, {N, PendingMaxPT, LocalParts, RemoteParts}}] ->
-            ets:insert(PendingTxs, {PendingTxId, {N-1, max(PendingMaxPT, PendingPT), 
-                LocalParts, RemoteParts}}),
+        [{PendingTxId, {N, OldMaxPrepTime, LPs, RPs}}] ->
+            ets:insert(PendingTxs, {PendingTxId, {N-1, max(PendingPT, OldMaxPrepTime), LPs, RPs}}),
             {noreply, SD0};
         [] ->
             {noreply, SD0}
     end;
+            
 
 %handle_cast({abort, TxId, remote}, 
 %	    SD0=#state{remote_updates=RemoteUpdates, pending_txs=PendingTxs, pending_list=PendingList, 
@@ -349,26 +371,26 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
 %                pending_list=L}};
 
 handle_cast({abort, PendingTxId, remote}, 
-	    SD0=#state{pending_list=PendingList, tx_id=TxId, dep_dict=DepDict, specula_data=SpeculaData, sender=Sender,
-            do_repl=DoRepl, dep_num=DepNum, pending_txs=PendingTxs, local_updates=LocalUpdates,
-            remote_updates=RemoteUpdates, aborted=Aborted}) ->
+	    SD0=#state{pending_list=PendingList, tx_id=TxId, sender=Sender, rep_dict=RepDict,
+            do_repl=DoRepl, read_dep_dict=ReadDepDict, pending_txs=PendingTxs, local_updates=LocalParts,
+            aborted=Aborted}) ->
     case start_from(PendingTxId, PendingList) of
         [] ->
             %lager:info("Not aborting anything"),
             {noreply, SD0};
         L ->
             %lager:info("Abort remote again, Pending list is ~w, PendingTxId is ~w, List is ~w", [PendingList, PendingTxId, L]),
-            {DD, DN} = abort_specula_list(L, DepDict, DepNum, DoRepl, PendingTxs, SpeculaData),
+            RD = abort_specula_list(L, RepDict, ReadDepDict, DoRepl, PendingTxs),
             %% The current transaction is aborted! So replying to client.
             case TxId of
                 [] ->
-                    {noreply, SD0#state{dep_dict=DD, dep_num=DN, tx_id=[], 
+                    {noreply, SD0#state{read_dep_dict=RD, tx_id=[], 
                         pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
                         aborted=Aborted+length(L)}};
                 _ ->
-                    abort_tx(TxId, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs),
+                    RD1 = abort_tx(TxId, LocalParts, DoRepl, PendingTxs, RD),
                     gen_server:reply(Sender, {aborted, TxId}),
-                    {noreply, SD0#state{dep_dict=DD, dep_num=DN, tx_id=[], 
+                    {noreply, SD0#state{read_dep_dict=RD1, tx_id=[], 
                         pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
                         aborted=Aborted+length(L)}}
             end
@@ -393,140 +415,177 @@ terminate(Reason, _SD) ->
     ok.
 
 %%%%%%%%%%%%%%%%%%%%%
-commit_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs) ->
-    LocalParts = [Part || {Part, _} <- LocalUpdates],
-    RemoteParts = [Part || {Part, _} <- RemoteUpdates],
+try_to_abort(PendingList, ToAbortTxs, ReadDepDict, RepDict, PendingTxs, DoRepl, ReadAborted) ->
+    io:format(user, "Trying to abort ~w ~n", [ToAbortTxs]),
+    case ToAbortTxs of
+        [] ->
+            %lager:info("Nothing to abort"),
+            {ReadDepDict, PendingList, ReadAborted};
+        _ ->
+            MinIndex = find_min_index(ToAbortTxs, PendingList),
+            FullLength = length(PendingList),
+            io:format(user, "Min index is ~w, FulLength is ~w, ReadAborted is ~w ~n", [MinIndex, FullLength, ReadAborted]),
+            L = lists:sublist(PendingList, MinIndex, FullLength),
+            RD = abort_specula_list(L, RepDict, ReadDepDict, DoRepl, PendingTxs),
+            {RD, lists:sublist(PendingList, MinIndex-1), ReadAborted+FullLength-MinIndex+1}
+    end.
+
+%% Same reason, no need for RemoteParts
+commit_tx(TxId, CommitTime, LocalParts, DoRepl, PendingTxs) ->
     true = ets:delete(PendingTxs, TxId),
-    %lager:info("Deleting for ~w", [TxId]),
+    lager:info("Sending commit of ~w to ~w", [TxId, LocalParts]),
     ?CLOCKSI_VNODE:commit(LocalParts, TxId, CommitTime),
+    ?REPL_FSM:repl_commit(LocalParts, TxId, CommitTime, DoRepl).
+
+commit_specula_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, PendingTxs, RepDict) ->
+    commit_tx(TxId, CommitTime, LocalParts, DoRepl, PendingTxs),
+    lager:info("Sending specula commit to ~w", [RemoteParts]),
     ?CLOCKSI_VNODE:commit(RemoteParts, TxId, CommitTime),
-    ?REPL_FSM:repl_commit(LocalParts, TxId, CommitTime, DoRepl),
-    ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, DoRepl).
+    ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, DoRepl, true),
+    %io:format(user, "Calling commit to table with ~w, ~w, ~w ~n", [RemoteParts, TxId, CommitTime]),
+    commit_to_table(RemoteParts, TxId, CommitTime, RepDict).
 
-commit_specula_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs, SpeculaData) ->
-    commit_tx(TxId, CommitTime, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs),
-    remove_from_table(LocalUpdates, TxId, SpeculaData),
-    remove_from_table(RemoteUpdates, TxId, SpeculaData).
+abort_specula_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs, RepDict, ReadDepDict) ->
+    NewReadDepDict = abort_tx(TxId, LocalParts, DoRepl, PendingTxs, ReadDepDict),
+    abort_to_table(RemoteParts, TxId, RepDict),
+    ?CLOCKSI_VNODE:abort(RemoteParts, TxId),
+    ?REPL_FSM:repl_abort(RemoteParts, TxId, DoRepl, true),
+    NewReadDepDict.
 
-abort_specula_tx(TxId, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs, SpeculaData) ->
-    abort_tx(TxId, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs),
-    remove_from_table(LocalUpdates, TxId, SpeculaData),
-    remove_from_table(RemoteUpdates, TxId, SpeculaData).
-
-abort_tx(TxId, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs) ->
-    LocalParts = [Part || {Part, _} <- LocalUpdates],
-    RemoteParts = [Part || {Part, _} <- RemoteUpdates],
+%% Do not need remote partitions, because abort_tx can only be called before a transaction sends out its
+%% remote prepare. If a txn has already sent its prepare request, it would be in specula state already,
+%% which will be aborted with specula_abrot 
+abort_tx(TxId, LocalParts, DoRepl, PendingTxs, ReadDepDict) ->
     true = ets:delete(PendingTxs, TxId),
     %lager:info("Deleting ~w", [TxId]),
     ?CLOCKSI_VNODE:abort(LocalParts, TxId),
-    ?CLOCKSI_VNODE:abort(RemoteParts, TxId),
     ?REPL_FSM:repl_abort(LocalParts, TxId, DoRepl),
-    ?REPL_FSM:repl_abort(RemoteParts, TxId, DoRepl).
+    dict:erase(TxId, ReadDepDict).
 
-add_to_table([], _, _) ->
+add_to_table([], _, _, _) ->
     ok;
-add_to_table([{_, Updates}|Rest], TxId, SpeculaData) ->
-    lists:foreach(fun({K, V}) -> ets:insert(SpeculaData, {K, V, TxId}) end,
-        Updates),
-    add_to_table(Rest, TxId, SpeculaData).
+add_to_table([{{Partition, Node}, Updates}|Rest], TxId, PrepareTime, RepDict) ->
+    case dict:find(Node, RepDict) of
+        {ok, DataReplServ} ->
+            ?DATA_REPL_SERV:prepare_specula(DataReplServ, TxId, Partition, Updates, PrepareTime);
+        _ ->
+            %% Send to local cache.
+            ?CACHE_SERV:prepare_specula(TxId, Partition, Updates, PrepareTime)
+    end,
+    add_to_table(Rest, TxId, PrepareTime, RepDict).
 
-remove_from_table([], _, _) ->
+commit_to_table([], _, _, _) ->
     ok;
-remove_from_table([{_, Updates}|Rest], TxId, SpeculaData) ->
-    lists:foreach(fun({K, V}) -> 
-                    case ets:lookup(SpeculaData, K) of 
-                        [{K, V, TxId}] ->
-                            ets:delete(SpeculaData, K);
-                        _ ->
-                            ok
-                    end end, Updates),
-    remove_from_table(Rest, TxId, SpeculaData).
+commit_to_table([{Partition, Node}|Rest], TxId, CommitTime, RepDict) ->
+    %io:format(user, "Part is ~w, Node is ~w, Rest is ~w ~n", [Partition, Node, Rest]),
+    lager:info("Committing to table for ~w", [Partition]),
+    case dict:find(Node, RepDict) of
+        {ok, DataReplServ} ->
+            lager:info("Sending to ~w", [DataReplServ]),
+            ?DATA_REPL_SERV:commit_specula(DataReplServ, TxId, Partition, CommitTime);
+        _ ->
+            %% Send to local cache.
+            ?CACHE_SERV:commit_specula(TxId, Partition, CommitTime)
+    end,
+    commit_to_table(Rest, TxId, CommitTime, RepDict).
 
-deal_dependency([], _, [], DepDict, DepNum, MaxPT, _, _, ReadAborted, Committed) ->
-    {DepDict, DepNum, [], MaxPT, ReadAborted, Committed};
-deal_dependency(DependentTxId, CommitTime, PendingList, DepDict, DepNum, 
-                        DoRepl, PendingTxs, SpeculaData, ReadAborted, Committed) ->
-    %%Check all txns depend on itself
-    {DepNum1, ToAbort} = case dict:find(DependentTxId, DepDict) of 
-                                             %%DepList is an ordered list that the last element is 
-                                             %%the oldest transaction.
-                                             {ok, DepList} ->
-                                                solve_read_dependency(DependentTxId, CommitTime, DepList, 
-                                                    DepNum);
-                                             error ->
-                                                %% No txn depends on itself..
-                                                {DepNum, ignore}
-                                          end,
-    DepDict1 = dict:erase(DependentTxId, DepDict),
-    {DepDict2, DepNum2, PendingList1}
-         = case ToAbort of
-                ignore ->
-                    %lager:info("Nothing to abort"),
-                    {DepDict1, DepNum1, PendingList};
-                _ ->
-                    L = start_from(ToAbort, PendingList),
-                    {DD, DN} = abort_specula_list(L, DepDict1, DepNum1, DoRepl, PendingTxs, SpeculaData),
-                    {DD, DN, lists:sublist(PendingList, length(PendingList)-length(L))}
-           end,
-    %% Try to commit the next txn.
-    ReadAborted1 = length(PendingList) - length(PendingList1) + ReadAborted,
-    case PendingList1 of
-        [H|Rest] ->
-            case dict:find(H, DepNum2) of
-                error ->
+abort_to_table([], _, _) ->
+    ok;
+abort_to_table([{Partition, Node}|Rest], TxId, RepDict) ->
+    case dict:find(Node, RepDict) of
+        {ok, DataReplServ} ->
+            ?DATA_REPL_SERV:abort_specula(DataReplServ, TxId, Partition);
+        _ ->
+            %% Send to local cache.
+            ?CACHE_SERV:abort_specula(TxId, Partition)
+    end,
+    abort_to_table(Rest, TxId, RepDict).
+
+%% Deal dependencies and check if any following transactions can be committed.
+try_to_commit(LastCommitTime, [], _RepDict, ReadDepDict, _DoRepl, _PendingTxs, ReadAborted, Committed, _) ->
+    {[], LastCommitTime, ReadDepDict, ReadAborted, Committed};
+try_to_commit(LastCommitTime, [H|Rest]=PendingList, RepDict, ReadDepDict, 
+                        DoRepl, PendingTxs, ReadAborted, Committed, {ReadOk, PrepareOk}) ->
+    Result =
+            case (ReadOk == true) or (dict:find(H, ReadDepDict) == error) of
+                true ->
+                    lager:info("Txn has no read dependency"),
                     %% The next txn has no dependency
-                    case ets:lookup(PendingTxs, H) of
-                        %% The next txn has got all prepare request
-                        [{H, {0, PendingMaxPT, LocalParts, RemoteParts}}] ->
-                            %io:format(user, "Committing ~w, CommitTime is ~w, Pending PT is ~w ~n", 
-                            %        [H, CommitTime, PendingMaxPT]),
-                            MaxPT2 = max(PendingMaxPT, CommitTime+1),
-                            commit_specula_tx(H, MaxPT2, LocalParts, RemoteParts, DoRepl, PendingTxs, SpeculaData),
-                            deal_dependency(H, MaxPT2, Rest, DepDict2, DepNum2, 
-                                    DoRepl, PendingTxs, SpeculaData, 
-                                ReadAborted1, Committed+1);
-                        %% The next txn can not be committed.. Then just return
-                        _ ->
-                            %lager:info("Next txn not prepared!, pending list 1 is ~w", [PendingList1]),
-                            {DepDict2, DepNum2, PendingList1, CommitTime, ReadAborted1, Committed}
+                    case PrepareOk of
+                        false ->
+                            case ets:lookup(PendingTxs, H) of
+                                %% The next txn has got all prepare request
+                                [{H, {0, PendingMaxPT, LPs, RPs}}] ->
+                                    {true, max(PendingMaxPT, LastCommitTime+1), LPs, RPs};
+                                _ ->
+                                    false
+                            end;
+                        {PrepareTime, LPs, RPs} ->
+                                {true, max(PrepareTime, LastCommitTime+1), LPs, RPs}
                     end;
-                R ->
-                    %% The next txn still depends on some txn.. Should not happen!!! 
-                    lager:error("The next txn still depends on some other txns.. This is wrong! ~w", [R]), 
-                    error
-            end;
-        [] ->
-            {DepDict2, DepNum2, [], CommitTime, ReadAborted1, Committed}
+                false ->
+                    lager:info("Txn has read dependency!! WTF? ~w", [dict:find(H, ReadDepDict)]),
+                    false
+            end,
+    lager:info("If can commit decision is ~w", [Result]),
+    case Result of
+        false ->
+            {PendingList, LastCommitTime, ReadDepDict, ReadAborted, Committed};
+        {true, CommitTime, LocalParts, RemoteParts} ->
+            DepList = ets:lookup(dependency, H),
+            {ReadDepDict1, ToAbortTxs} = solve_read_dependency(CommitTime, ReadDepDict, DepList),
+            lager:info("Before commit specula tx"),
+            commit_specula_tx(H, CommitTime, LocalParts, RemoteParts, DoRepl,
+               PendingTxs, RepDict),
+            {ReadDepDict2, PendingList1, ReadAborted1}
+                = try_to_abort(Rest, ToAbortTxs, ReadDepDict1, RepDict, PendingTxs, DoRepl, ReadAborted),
+            try_to_commit(CommitTime, PendingList1, RepDict, ReadDepDict2, DoRepl, PendingTxs, ReadAborted1, Committed+1,
+                {false, false})
     end.
 
-abort_specula_list([], DepDict, DepNum, _, _, _) ->
-    {DepDict, DepNum};
-abort_specula_list([H|T], DepDict, DepNum, DoRepl, PendingTxs, SpeculaData) ->
+abort_specula_list([], _RepDict, ReadDep, _, _) ->
+    ReadDep;
+abort_specula_list([H|T], RepDict, ReadDep, DoRepl, PendingTxs) ->
     %lager:info("Trying to abort ~w", [H]),
-    [{H, {_, _, LocalUpdates, RemoteUpdates}}] = ets:lookup(PendingTxs, H), 
-    abort_specula_tx(H, LocalUpdates, RemoteUpdates, DoRepl, PendingTxs, SpeculaData),
-    abort_specula_list(T, dict:erase(H, DepDict), dict:erase(H, DepNum), DoRepl, PendingTxs, SpeculaData). 
+    [{H, {_, _, LocalParts, RemoteParts}}] = ets:lookup(PendingTxs, H), 
+    ReadDep1 = abort_specula_tx(H, LocalParts, RemoteParts, DoRepl, PendingTxs, RepDict, ReadDep),
+    abort_specula_list(T, RepDict, ReadDep1, DoRepl, PendingTxs). 
 
 %% Deal with reads that depend on this txn
-solve_read_dependency(_, _, [], DepNum) ->
-    {DepNum, ignore};
-solve_read_dependency(TxId, CommitTime, [T|Rest], DepNum) ->
-    %lager:info("Resolving read dependency: s ~w, c ~w", [T#tx_id.snapshot_time, CommitTime]),
-    case T#tx_id.snapshot_time >= CommitTime of
-        true ->
-            case dict:find(T, DepNum) of
-                error ->
-                    solve_read_dependency(TxId, CommitTime, Rest, DepNum); 
-                {ok, 1} ->
-                    solve_read_dependency(TxId, CommitTime, Rest, dict:erase(T, DepNum)); 
-                {ok, N} ->
-                    solve_read_dependency(TxId, CommitTime, Rest, dict:store(T, N-1, DepNum)) 
-            end;
-        false ->
-            %io:format(user, "Read invalid ~w ~n", [T]),
-            %%Cascading abort
-            {DepNum, T}
-    end.
+solve_read_dependency(CommitTime, ReadDep, DepList) ->
+    %io:format(user, "My commit time is ~w, DepList is ~w ~n", [CommitTime, DepList]),
+    Self = self(),
+    lists:foldl(fun({TxId, DepTxId}, {RD, ToAbort}) ->
+                    TxServer = DepTxId#tx_id.server_pid,
+                    case DepTxId#tx_id.snapshot_time >= CommitTime of
+                        %% This read is still valid
+                        true ->
+                            %io:format(user, "Read still valid for ~w ~n", [DepTxId]),
+                            case TxServer of
+                                Self ->
+                                    case dict:find(DepTxId, RD) of
+                                        {ok, 1} ->
+                                            {dict:erase(DepTxId, RD), ToAbort};
+                                        {ok, N} ->
+                                            {dict:store(DepTxId, N-1, RD), ToAbort}
+                                    end;
+                                _ ->
+                                    ets:delete_object(dependency, {TxId, DepTxId}), 
+                                    ?SPECULA_TX_CERT_SERVER:read_valid(TxServer, DepTxId),
+                                    {RD, ToAbort}
+                            end;
+                        false ->
+                            %% Read is not valid
+                            case TxServer of
+                                Self ->
+                                    {RD, [DepTxId|ToAbort]};
+                                _ ->
+                                    ets:delete_object(dependency, {TxId, DepTxId}), 
+                                    ?SPECULA_TX_CERT_SERVER:read_invalid(TxServer, DepTxId),
+                                    {RD, ToAbort}
+                            end
+                    end
+                end, {ReadDep, []}, DepList).
     
 start_from(_, []) ->
     [];
@@ -535,40 +594,49 @@ start_from(H, [H|T])->
 start_from(H, [_|T]) ->
     start_from(H, T).
 
+find_min_index(FirstList, FullList) ->
+    Set = sets:from_list(FirstList),
+    {_, MinIndex} = lists:foldl(fun(E, {Index, Num}) ->
+                case sets:is_element(E, Set) of
+                    true ->  {Index+1, min(Index, Num)};
+                    false -> {Index+1, Num}
+                end end, {1, 1}, FullList),
+    MinIndex.
+
 -ifdef(TEST).
 
-add_to_table_test() ->
-    MyTable = ets:new(whatever, [private, set]),
-    Updates= [{node1, [{key1, 1}, {key2, 2}]}, {node2, [{key3, 2}]}],
-    TxId1 = tx_utilities:create_transaction_record(0),
-    add_to_table(Updates, TxId1, MyTable),
-    ?assertEqual([{key1, 1, TxId1}], ets:lookup(MyTable, key1)),
-    ?assertEqual([{key2, 2, TxId1}], ets:lookup(MyTable, key2)),
-    ?assertEqual([{key3, 2, TxId1}], ets:lookup(MyTable, key3)),
-    TxId2 = tx_utilities:create_transaction_record(0),
-    Updates2 =  [{node1, [{key1, 2}]}, {node3, [{key4, 4}]}],
-    add_to_table(Updates2, TxId2, MyTable),
-    ?assertEqual([{key1, 2, TxId2}], ets:lookup(MyTable, key1)),
-    ?assertEqual([{key2, 2, TxId1}], ets:lookup(MyTable, key2)),
-    ?assertEqual([{key3, 2, TxId1}], ets:lookup(MyTable, key3)),
-    ?assertEqual([{key4, 4, TxId2}], ets:lookup(MyTable, key4)),
-    true = ets:delete(MyTable).
+%add_to_table_test() ->
+%    MyTable = ets:new(whatever, [private, set]),
+%    Updates= [{node1, [{key1, 1}, {key2, 2}]}, {node2, [{key3, 2}]}],
+%    TxId1 = tx_utilities:create_tx_id(0),
+%    add_to_table(Updates, TxId1, MyTable),
+%    ?assertEqual([{key1, 1, TxId1}], ets:lookup(MyTable, key1)),
+%    ?assertEqual([{key2, 2, TxId1}], ets:lookup(MyTable, key2)),
+%    ?assertEqual([{key3, 2, TxId1}], ets:lookup(MyTable, key3)),
+%    TxId2 = tx_utilities:create_tx_id(0),
+%    Updates2 =  [{node1, [{key1, 2}]}, {node3, [{key4, 4}]}],
+%    add_to_table(Updates2, TxId2, MyTable),
+%    ?assertEqual([{key1, 2, TxId2}], ets:lookup(MyTable, key1)),
+%    ?assertEqual([{key2, 2, TxId1}], ets:lookup(MyTable, key2)),
+%    ?assertEqual([{key3, 2, TxId1}], ets:lookup(MyTable, key3)),
+%    ?assertEqual([{key4, 4, TxId2}], ets:lookup(MyTable, key4)),
+%    true = ets:delete(MyTable).
 
-remove_from_table_test() ->
-    MyTable = ets:new(whatever, [private, set]),
-    Updates= [{node1, [{key1, 1}, {key2, 2}]}, {node2, [{key3, 2}]}],
-    TxId1 = tx_utilities:create_transaction_record(0),
-    add_to_table(Updates, TxId1, MyTable),
-    TxId2 = tx_utilities:create_transaction_record(0),
-    remove_from_table(Updates, TxId2, MyTable),
-    ?assertEqual([{key1, 1, TxId1}], ets:lookup(MyTable, key1)),
-    ?assertEqual([{key2, 2, TxId1}], ets:lookup(MyTable, key2)),
-    ?assertEqual([{key3, 2, TxId1}], ets:lookup(MyTable, key3)),
-    remove_from_table(Updates, TxId1, MyTable),
-    ?assertEqual([], ets:lookup(MyTable, key1)),
-    ?assertEqual([], ets:lookup(MyTable, key2)),
-    ?assertEqual([], ets:lookup(MyTable, key3)),
-    true = ets:delete(MyTable).
+%remove_from_table_test() ->
+%    MyTable = ets:new(whatever, [private, set]),
+%    Updates= [{node1, [{key1, 1}, {key2, 2}]}, {node2, [{key3, 2}]}],
+%    TxId1 = tx_utilities:create_tx_id(0),
+%    add_to_table(Updates, TxId1, MyTable),
+%    TxId2 = tx_utilities:create_tx_id(0),
+%    remove_from_table(Updates, TxId2, MyTable),
+%    ?assertEqual([{key1, 1, TxId1}], ets:lookup(MyTable, key1)),
+%    ?assertEqual([{key2, 2, TxId1}], ets:lookup(MyTable, key2)),
+%    ?assertEqual([{key3, 2, TxId1}], ets:lookup(MyTable, key3)),
+%    remove_from_table(Updates, TxId1, MyTable),
+%    ?assertEqual([], ets:lookup(MyTable, key1)),
+%    ?assertEqual([], ets:lookup(MyTable, key2)),
+%    ?assertEqual([], ets:lookup(MyTable, key3)),
+%    true = ets:delete(MyTable).
 
 start_from_test() ->
     L = [1,2,3,4,5,6],
@@ -579,171 +647,154 @@ start_from_test() ->
 
 abort_tx_test() ->
     MyTable = ets:new(whatever, [private, set]),
+    ReadDepDict = dict:new(),
     mock_partition_fsm:start_link(),
-    LocalUps=[{lp1, [{key1, 1}, {key2, 2}]}, {lp2, [{key3, 3}]}],
-    RemoteUps=[{rp1, [{key4, 1}, {key5, 2}]}, {rp2, [{key6, 3}]}],
     LocalParts = [lp1, lp2],
-    RemoteParts = [rp1, rp2],
-    TxId1 = tx_utilities:create_transaction_record(0),
+    TxId1 = tx_utilities:create_tx_id(0),
     ets:insert(MyTable, {TxId1, whatever}),
-    abort_tx(TxId1, LocalUps, RemoteUps, true, MyTable),
+    ReadDepDict1 = dict:store(TxId1, 5, ReadDepDict),
+    ReadDepDict2 = abort_tx(TxId1, LocalParts, true, MyTable, ReadDepDict1),
     ?assertEqual([], ets:lookup(MyTable, TxId1)),
-    ?assertEqual(true, mock_partition_fsm:if_applied(LocalParts, TxId1, nothing, abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied(RemoteParts, TxId1, nothing, abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied(LocalParts, TxId1, nothing, repl_abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied(RemoteParts, TxId1, nothing, repl_abort)),
+    ?assertEqual(dict:find(TxId1, ReadDepDict2), error), %{abort, T1, [p1]}, nothing
+    ?assertEqual(true, mock_partition_fsm:if_applied({abort, TxId1, LocalParts}, nothing)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({repl_abort, TxId1, LocalParts}, nothing)),
     true = ets:delete(MyTable).
 
 commit_tx_test() ->
     MyTable = ets:new(whatever, [private, set]),
-    LocalUps=[{lp1, [{key1, 1}, {key2, 2}]}, {lp2, [{key3, 3}]}],
-    RemoteUps=[{rp1, [{key4, 1}, {key5, 2}]}, {rp2, [{key6, 3}]}],
     LocalParts = [lp1, lp2],
-    RemoteParts = [rp1, rp2],
-    TxId1 = tx_utilities:create_transaction_record(0),
+    TxId1 = tx_utilities:create_tx_id(0),
     ets:insert(MyTable, {TxId1, whatever}),
     CT = 10000,
-    commit_tx(TxId1, CT, LocalUps, RemoteUps, true, MyTable),
+    commit_tx(TxId1, CT, LocalParts, true, MyTable),
     ?assertEqual([], ets:lookup(MyTable, TxId1)),
-    ?assertEqual(true, mock_partition_fsm:if_applied(LocalParts, TxId1, CT, commit)),
-    ?assertEqual(true, mock_partition_fsm:if_applied(RemoteParts, TxId1, CT, commit)),
-    ?assertEqual(true, mock_partition_fsm:if_applied(LocalParts, TxId1, CT, repl_commit)),
-    ?assertEqual(true, mock_partition_fsm:if_applied(RemoteParts, TxId1, CT, repl_commit)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({commit, TxId1, LocalParts}, CT)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({repl_commit, TxId1, LocalParts}, CT)),
     ets:delete(MyTable).
 
 abort_specula_list_test() ->
     MyTable = ets:new(whatever, [private, set]),
-    DepDict = dict:new(),
-    DepNum = dict:new(),
-    T1 = tx_utilities:create_transaction_record(0),
-    T2 = tx_utilities:create_transaction_record(0),
-    T3 = tx_utilities:create_transaction_record(0),
-    T4 = tx_utilities:create_transaction_record(0),
-    DepDict1 = dict:store(T1, whatever, DepDict),
-    DepDict2 = dict:store(T3, whatever, DepDict1),
-    DepDict3 = dict:store(T4, whatever, DepDict2),
-    DepNum1 = dict:store(T2, whatever, DepNum),
-    DepNum2 = dict:store(T3, whatever, DepNum1),
-    DepNum3 = dict:store(T4, whatever, DepNum2),
-    LocalUps = [{p1, [{key1, 1}]}],
-    RemoteUps = [{p2, [{key2, 2}]}],
-    ets:insert(MyTable, {T1, {1, 1, LocalUps, RemoteUps}}),
-    ets:insert(MyTable, {T2, {1, 1, LocalUps, RemoteUps}}),
-    ets:insert(MyTable, {T3, {1, 1, LocalUps, RemoteUps}}),
-    {DepDict4, DepNum4} = abort_specula_list([T1, T2, T3], DepDict3, DepNum3, true, MyTable, MyTable),
+    ets:new(dependency, [public, bag, named_table]),
+    ReadDepDict = dict:new(),
+    RepDict0 = dict:store(n1, n1rep, dict:new()),
+    RepDict = dict:store(n2, n2rep, RepDict0),
+    T1 = tx_utilities:create_tx_id(0),
+    T2 = tx_utilities:create_tx_id(0),
+    T3 = tx_utilities:create_tx_id(0),
+    ReadDepDict1 = dict:store(T1, 3, ReadDepDict),
+    ReadDepDict2 = dict:store(T2, 1, ReadDepDict1),
+    ReadDepDict3 = dict:store(T3, 0, ReadDepDict2),
+    ets:insert(MyTable, {T1, {1, 1, [{p1, n1}], [{p2, n2}]}}),
+    ets:insert(MyTable, {T2, {1, 1, [{p1, n1}], [{p2, n2}]}}),
+    ets:insert(MyTable, {T3, {1, 1, [{p1, n1}], [{p2, n2}]}}),
+    ReadDepDict4 = abort_specula_list([T1, T2, T3], RepDict, ReadDepDict3, true, MyTable),
+    ?assertEqual(error, dict:find(T1, ReadDepDict4)),
+    ?assertEqual(error, dict:find(T2, ReadDepDict4)),
+    ?assertEqual(error, dict:find(T3, ReadDepDict4)),
     ?assertEqual([], ets:lookup(MyTable, T1)),
     ?assertEqual([], ets:lookup(MyTable, T2)),
     ?assertEqual([], ets:lookup(MyTable, T3)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([p1], T1, nothing, abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([p2], T1, nothing, abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([p1], T1, nothing, repl_abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([p2], T1, nothing, repl_abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([p1], T2, nothing, abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([p2], T2, nothing, abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([p1], T2, nothing, repl_abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([p2], T2, nothing, repl_abort)),
-    ?assertEqual({ok, whatever}, dict:find(T4, DepDict4)),
-    ?assertEqual({ok, whatever}, dict:find(T4, DepNum4)),
-    ?assertEqual(error, dict:find(T3, DepDict4)),
-    ?assertEqual(error, dict:find(T3, DepNum4)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({abort, T1, [{p1, n1}]}, nothing)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({abort, T1, [{p2, n2}]}, nothing)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({repl_abort, T1, [{p1, n1}]}, nothing)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({repl_abort, T1, [{p2, n2}]}, nothing)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({abort, T2, [{p1, n1}]}, nothing)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({abort, T2, [{p2, n2}]}, nothing)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({repl_abort, T2, [{p1, n1}]}, nothing)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({repl_abort, T2, [{p2, n2}]}, nothing)),
     ets:delete(MyTable).
 
 solve_read_dependency_test() ->
-    T1 = tx_utilities:create_transaction_record(0), 
-    CommitTime1 = tx_utilities:now_microsec(),
-    T2 = tx_utilities:create_transaction_record(0),
-    CommitTime2 = tx_utilities:now_microsec(),
-    T3 = tx_utilities:create_transaction_record(0),
-    %% T2 should be aborted
-    DepNum = dict:new(),
-    DepNum1 = dict:store(T2,1, DepNum),
-    DepNum2 = dict:store(T3,2, DepNum1),
-    {_, T} = solve_read_dependency(T1, CommitTime2, [T2, T3], DepNum2),
-    ?assertEqual(T, T2),
-    {DP1, TT} = solve_read_dependency(T1, CommitTime1, [T2, T3], DepNum2),
-    ?assertEqual({[{T3,1}], ignore}, {dict:to_list(DP1), TT}).
+    T1 = tx_utilities:create_tx_id(0), 
+    T2 = T1#tx_id{server_pid=test_fsm}, 
+    CommitTime = tx_utilities:now_microsec(),
+    T3 = tx_utilities:create_tx_id(0),
+    T4 = T3#tx_id{server_pid=test_fsm}, 
+    %% T1, T2 should be aborted, T3, T4 should get read_valid.
+    ReadDepDict = dict:new(),
+    ReadDepDict1 = dict:store(T3, 2, ReadDepDict),
+    {RD2, T} = solve_read_dependency(CommitTime, ReadDepDict1, [{nil, T1}, {nil, T2}, {nil, T3}, {nil, T4}]),
+    ?assertEqual({[{T3,1}], [T1]}, {dict:to_list(RD2), T}),
+    ?assertEqual(true, mock_partition_fsm:if_applied({read_valid, T4}, nothing)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({read_invalid, T2}, nothing)).
 
-deal_dependency_test() ->
+try_to_commit_test() ->
     MyTable = ets:new(whatever, [private, set]),
-    T1 = tx_utilities:create_transaction_record(0),
+    T1 = tx_utilities:create_tx_id(0),
     %CommitTime1 = tx_utilities:now_microsec(),
-    T2 = tx_utilities:create_transaction_record(0),
+    T2 = tx_utilities:create_tx_id(0),
     MaxPT1 = T2#tx_id.snapshot_time+1,
     %CommitTime2 = tx_utilities:now_microsec(),
-    T3 = tx_utilities:create_transaction_record(0),
+    T3 = tx_utilities:create_tx_id(0),
+    T4 = tx_utilities:create_tx_id(0),
+    T5 = tx_utilities:create_tx_id(0),
     %MaxPT2 = tx_utilities:now_microsec(),
-    DepDict1 = dict:store(T1, [T2, T3], dict:new()),
-    DepDict2 = dict:store(T2, [T3], DepDict1),
-    DepNum1 = dict:store(T2, 1, dict:new()),
-    DepNum2 = dict:store(T3, 2, DepNum1),
-    LP1 = [{lp1, [{key1, 1}]}], 
-    RP1 = [{rp1, [{key3, 1}]}],
-    LP2 = [{lp2, [{key2, 1}]}], 
-    RP2 = [{rp2, [{key4, 1}]}],
-    ets:insert(MyTable, {T2, {0, 2, LP1, RP1}}), 
-    ets:insert(MyTable, {T3, {0, 2, LP2, RP2}}), 
-    %% Get aborted because of large commit timestamp 
+    RepDict00 = dict:store(n1, n1rep, dict:new()),
+    RepDict01 = dict:store(n2, n2rep, RepDict00),
+    RepDict = dict:store(n3, n3rep, RepDict01),
+    ReadDepDict1 = dict:store(T1, 1, dict:new()),
+    ReadDepDict2 = dict:store(T3, 2, ReadDepDict1),
+    %% T1 can not commit due to having read dependency 
     io:format(user, "Abort ~w ~n", [MaxPT1]),
-    {DD1, DP1, PD1, MPT1, Aborted, Committed} = deal_dependency(T1, MaxPT1, [T2, T3], DepDict1, DepNum1, 
-            true, MyTable, MyTable, 0, 0),
-    ?assertEqual(Aborted, 2),
+    {PD1, MPT1, RD1, Aborted, Committed} =  try_to_commit(MaxPT1, [T1, T2], RepDict, ReadDepDict2, 
+                                    true, MyTable, 0, 0, {false, false}),
+    ?assertEqual(Aborted, 0),
     ?assertEqual(Committed, 0),
-    ?assertEqual(DD1, dict:new()),
-    ?assertEqual(DP1, dict:new()),
-    ?assertEqual(PD1, []),
+    ?assertEqual(RD1, ReadDepDict2),
+    ?assertEqual(PD1, [T1, T2]),
     ?assertEqual(MPT1, MaxPT1),
+
+    ets:insert(MyTable, {T1, {0, 2, [{lp1, n1}], [{rp1, n3}]}}), 
+    ets:insert(MyTable, {T2, {1, 2, [{lp1, n1}], [{rp1, n3}]}}), 
+    ets:insert(MyTable, {T3, {0, 2, [{lp2, n2}], [{rp2, n4}]}}), 
+    ReadDepDict3 = dict:erase(T1, ReadDepDict2),
+    %% T1 can commit because of read_dep ok. 
+    {PD2, MPT2, RD2, Aborted1, Committed1} =  try_to_commit(MaxPT1, [T1, T2], RepDict, ReadDepDict3, 
+                                    true, MyTable, 0, 0, {true, false}),
+    ?assertEqual(Aborted1, 0),
+    ?assertEqual(Committed1, 1),
+    ?assertEqual(true, mock_partition_fsm:if_applied({commit_specula, n3rep, T1, rp1}, MPT2)),
+    ?assertEqual(dict:to_list(RD2), dict:to_list(ReadDepDict3)),
+    ?assertEqual(PD2, [T2]),
+    ?assertEqual(MPT2, MaxPT1+1),
+
+    %% T2 can commit becuase of prepare OK
+    {_PD3, MPT3, _RD3, Aborted2, Committed2} =  try_to_commit(MPT2, [T2, T3], RepDict, ReadDepDict3, 
+                                    true, MyTable, Aborted1, Committed1, {false, {MPT2+10, [{lp1, n1}], [{rp1, n3}]}}),
     ?assertEqual([], ets:lookup(MyTable, T2)),
-    ?assertEqual([], ets:lookup(MyTable, T3)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([lp1], T2, nothing, abort)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([rp2], T3, nothing, repl_abort)),
-    %% Abort due to wrong number dependency
-    io:format(user, "Wrong num ~w ~n", [MPT1]),
-    ets:insert(MyTable, {T2, {0, 3, LP1, RP1}}), 
-    ets:insert(MyTable, {T3, {0, 4, LP2, RP2}}), 
-    DepNum3 = dict:store(T2, 2, dict:new()),
-    Result = deal_dependency(T1, MPT1-2, [T2, T3], DepDict1, DepNum3, 
-            true, MyTable, MyTable, Aborted, Committed),
-    ?assertEqual(error, Result),
-    %% Return due to need for more prepare
-    io:format(user, "Return ~w ~n", [Result]),
-    ets:insert(MyTable, {T2, {1, 5, LP1, RP1}}), 
-    ets:insert(MyTable, {T3, {0, 6, LP2, RP2}}), 
-    {DD2, DP2, PD2, MPT2, Aborted1, Committed1} = deal_dependency(T1, MPT1-2, [T2, T3], DepDict2, DepNum2,
-            true, MyTable, MyTable, Aborted, Committed),
-    ?assertEqual(Aborted1, 2),
-    ?assertEqual(Committed1, 0),
-    ?assertEqual(DD2, dict:store(T2, [T3], dict:new())),
-    ?assertEqual(DP2, dict:store(T3, 1, dict:new())),
-    ?assertEqual(PD2, [T2, T3]),
-    ?assertEqual(MPT2, MPT1-2),
-    ?assertEqual(ets:lookup(MyTable, T2),  [{T2, {1, 5, LP1, RP1}}]), 
-    ?assertEqual(ets:lookup(MyTable, T3),  [{T3, {0, 6, LP2, RP2}}]),
-    %% Do not commit the second due to more prepare
-    io:format(user, "More prepare ~w ~n", [Result]),
-    ets:insert(MyTable, {T2, {0, 6, LP1, RP1}}), 
-    ets:insert(MyTable, {T3, {1, 7, LP2, RP2}}), 
-    {DD3, DP3, PD3, MPT3, Aborted2, Committed2} = deal_dependency(T1, MPT1-2, [T2, T3], DepDict2, DepNum2, 
-            true, MyTable, MyTable, Aborted1, Committed1),
-    ?assertEqual(Aborted2, Aborted1),
-    ?assertEqual(Committed2, Committed1+1),
-    ?assertEqual(DD3, dict:new()),
-    ?assertEqual(DP3, dict:new()),
-    ?assertEqual(PD3, [T3]),
-    ?assertEqual(MPT3, MPT1-1),
-    ?assertEqual(ets:lookup(MyTable, T2),  []), 
-    ?assertEqual(ets:lookup(MyTable, T3),  [{T3, {1, 7, LP2, RP2}}]),
-    %% Commit all
-    ets:insert(MyTable, {T2, {0, 6, LP1, RP1}}), 
-    ets:insert(MyTable, {T3, {0, 7, LP2, RP2}}), 
-    {DD4, DP4, PD4, MPT4, Aborted3, Committed3} = deal_dependency(T1, MPT1-2, [T2, T3], DepDict2, DepNum2, 
-            true, MyTable, MyTable, Aborted2, Committed2),
-    ?assertEqual(Aborted3, Aborted2),
-    ?assertEqual(Committed3, Committed2+2),
-    ?assertEqual(DD4, dict:new()),
-    ?assertEqual(DP4, dict:new()),
+    ?assertEqual(Aborted2, 0),
+    ?assertEqual(Committed2, 2),
+    %?assertEqual(true, mock_partition_fsm:if_applied({repl_commit, TxId1, LocalParts}, CT)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({commit, T2, [{lp1, n1}]}, MPT3)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({repl_commit, T2, [{rp1, n3}]}, MPT3)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({commit_specula, n3rep, T2, rp1}, MPT3)),
+
+    %% T3, T4 get committed and T5 gets aborted.
+    ets:insert(MyTable, {T3, {0, T3#tx_id.snapshot_time+1, [{lp2, n2}], [{rp2, n4}]}}), 
+    ets:insert(MyTable, {T4, {0, T5#tx_id.snapshot_time+1, [{lp2, n2}], [{rp2, n4}]}}), 
+    ets:insert(MyTable, {T5, {0, 6, [{lp2, n2}], [{rp2, n4}]}}), 
+    ets:insert(dependency, {T3, T4}),
+    ets:insert(dependency, {T3, T5}),
+    ets:insert(dependency, {T4, T5}),
+    ReadDepDict4 = dict:store(T4, 1, ReadDepDict3),
+    ReadDepDict5 = dict:store(T5, 2, ReadDepDict4),
+    ReadDepDict6 = dict:erase(T3, ReadDepDict5),
+    io:format(user, "My commit time is ~w, Txns are ~w ~w ~w", [0, T3, T4, T5]),
+    {PD4, MPT4, RD4, Aborted3, Committed3} =  try_to_commit(0, [T3, T4, T5], RepDict, ReadDepDict6, 
+                                    true, MyTable, Aborted2, Committed2, {false, false}),
+    ?assertEqual(Aborted3, 1),
+    ?assertEqual(Committed3, 4),
+    ?assertEqual(RD4, dict:new()),
     ?assertEqual(PD4, []),
-    ?assertEqual(MPT4, MPT1),
-    ?assertEqual(true, mock_partition_fsm:if_applied([lp1], T2, MPT1-1, commit)),
-    ?assertEqual(true, mock_partition_fsm:if_applied([rp2], T3, MPT1, repl_commit)).
+    ?assertEqual(MPT4, T5#tx_id.snapshot_time+1),
+    ?assertEqual(ets:lookup(MyTable, T4),  []), 
+    ?assertEqual(ets:lookup(MyTable, T5),  []),
+
+    ?assertEqual(true, mock_partition_fsm:if_applied({commit_specula, cache_serv, T3, rp2}, T3#tx_id.snapshot_time+1)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({commit_specula, cache_serv, T4, rp2}, MPT4)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({abort_specula, cache_serv, T5, rp2}, nothing)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({commit, T4, [{lp2, n2}]}, MPT4)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({repl_commit, T4, [{rp2, n4}]}, MPT4)),
+    ?assertEqual(true, mock_partition_fsm:if_applied({repl_abort, T5, [{rp2, n4}]}, nothing )).
     
 -endif.

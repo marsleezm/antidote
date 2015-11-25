@@ -134,7 +134,7 @@ start_execute_txns(timeout, SD) ->
 execute_batch_ops(SD=#state{causal_clock=CausalClock,
                     operations=Operations}) ->
     %lager:info("In execute batch"),
-    TxId = tx_utilities:create_transaction_record(CausalClock),
+    TxId = tx_utilities:create_tx_id(CausalClock),
     %lager:info("My tx id is ~w", [TxId]),
     [CurrentOps|_RestOps] = Operations, 
     ProcessOp = fun(Operation, {UpdatedParts, RSet, Buffer, TmpReadStat, TmpPrepareBegin}) ->

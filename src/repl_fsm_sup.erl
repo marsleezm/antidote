@@ -50,7 +50,8 @@ init([]) ->
         true ->
             MyRepFsm = {repl_fsm, {repl_fsm, start_link, []}, transient, 5000, worker, [repl_fsm]},
             DataReplFsms = generate_data_repl_serv(), 
-            {ok, {{one_for_one, 5, 10}, [MyRepFsm|DataReplFsms]}};
+            CacheServ = {cache_serv, {cache_serv, start_link, []}, transient, 5000, worker, [cache_serv]}, 
+            {ok, {{one_for_one, 5, 10}, [CacheServ|[MyRepFsm|DataReplFsms]]}};
         false ->
             {ok, {{one_for_one, 5, 10}, []}}
     end.

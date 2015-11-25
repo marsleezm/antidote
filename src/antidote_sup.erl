@@ -59,6 +59,10 @@ init(_Args) ->
     antidote_config:load("antidote.config"),
     ets:new(meta_info,
         [set,public,named_table,{read_concurrency,true},{write_concurrency,false}]),
+    ets:new(dependency,
+        [bag,public,named_table,{read_concurrency,false},{write_concurrency,true}]),
+    ets:new(anti_dep,
+        [bag,public,named_table,{read_concurrency,false},{write_concurrency,true}]),
 
          case antidote_config:get(do_specula) of
             true -> 
