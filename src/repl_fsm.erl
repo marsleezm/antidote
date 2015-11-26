@@ -137,7 +137,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
             {Sender, WriteSet, CommitTime} = LogContent,
             case Mode of
                 quorum ->
-                    lager:info("Got single_commit request for ~w, ~p, Sending to ~w", [TxId, LogContent, Replicas]),
+                    %lager:info("Got single_commit request for ~w, ~p, Sending to ~w", [TxId, LogContent, Replicas]),
                     ets:insert(PendingLog, {{TxId, Partition}, {{single_commit, Sender, 
                             CommitTime, WriteSet, ignore}, ReplFactor}}),
                     quorum_replicate(Replicas, single_commit, TxId, Partition, WriteSet, CommitTime, MyName);
@@ -157,10 +157,10 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                                                     {ok, R} -> R;
                                                     error -> Replicas
                                              end, 
-                            lager:info("Remote prepared request for ~w, ~p, Sending to ~w", [TxId, LogContent, ReplicasToSend]),
+                            %lager:info("Remote prepared request for {~w, ~w}, ~p, Sending to ~w", [TxId, Partition, LogContent, ReplicasToSend]),
                             quorum_replicate(ReplicasToSend, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
                         _ ->
-                            lager:info("Local prepared request for ~w, ~p, Sending to ~w", [TxId, LogContent, Replicas]),
+                            %lager:info("Local prepared request for {~w, ~w}, ~p, Sending to ~w", [TxId, Partition, LogContent, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, WriteSet, local}, ReplFactor}}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
@@ -174,18 +174,18 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
 
 handle_cast({repl_commit, TxId, UpdatedParts, CommitTime, SkipLocal}, 
 	    SD0=#state{local_rep_set=LocalRepSet}) ->
-    lager:info("Updated parts are ~w", [UpdatedParts]),
+    %lager:info("Updated parts are ~w", [UpdatedParts]),
     AllReplicas = get_all_replicas(UpdatedParts),
-    lager:info("All replicas are ~w", [AllReplicas]),
+    %lager:info("All replicas are ~w", [AllReplicas]),
     lists:foreach(fun({Node, Partitions}) -> 
-        lager:info("Node is ~w, partitions are ~w", [Node, Partitions]),
+        %lager:info("Node is ~w, partitions are ~w", [Node, Partitions]),
         [{_, Replicas}] = ets:lookup(meta_info, Node),
-        lager:info("Node replicas are ~w", [Replicas]),
+        %lager:info("Node replicas are ~w", [Replicas]),
         lists:foreach(fun(R) ->
-            lager:info("Sending repl commit to ~w", [R]),
+            %lager:info("Sending repl commit to ~w", [R]),
             case (SkipLocal == true) and (sets:is_element(R, LocalRepSet) == true) of
                 true ->
-                    lager:info("Skipping sending commit to ~w", [R]),
+                    %lager:info("Skipping sending commit to ~w", [R]),
                     ok;
                 false ->
                     gen_server:cast({global, R}, {repl_commit, TxId, CommitTime, Partitions})
@@ -200,10 +200,10 @@ handle_cast({repl_abort, TxId, UpdatedParts, SkipLocal},
     lists:foreach(fun({Node, Partitions}) -> 
         [{_, Replicas}] = ets:lookup(meta_info, Node),
         lists:foreach(fun(R) ->
-            lager:info("Sending repl abort to ~w", [R]),
+            %lager:info("Sending repl abort to ~w", [R]),
             case (SkipLocal == true) and (sets:is_element(R, LocalRepSet) == true) of
                 true ->
-                    lager:info("Skipping sending abort to ~w", [R]),
+                    %lager:info("Skipping sending abort to ~w", [R]),
                     ok;
                 false ->
                     gen_server:cast({global, R}, {repl_abort, TxId, Partitions}) 
@@ -217,23 +217,23 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
         %ToReply = {prepared, TxId, PrepareTime, remote},
 %                    ets:insert(PendingLog, {{TxId, Partition}, {{Prep, Sender,
 %                            PrepareTime, WriteSet, IfLocal}, ReplFactor-1}}),
-            lager:info("Got req from ~w for ~w, done", [Partition, TxId]),
+            %lager:info("Got req from ~w for ~w, done", [Partition, TxId]),
             {PrepType, Sender, Timestamp, _, IfLocal} = R,
             case PrepType of
                 prepared ->
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     gen_server:cast(Sender, {prepared, TxId, Timestamp, IfLocal});
                 single_commit ->
-                    lager:info("Sender is ~w", [Sender]),
+                    %lager:info("Sender is ~w", [Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     gen_server:reply(Sender, {ok, {committed, Timestamp}})
             end;
         [{{TxId, Partition}, {R, N}}] ->
-            lager:info("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
+            %lager:info("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
             %lager:info("Accumulating"),
             ets:insert(PendingLog, {{TxId, Partition}, {R, N-1}});
         [] -> %%The record is appended already, do nothing
-            lager:warning("Prepare repl has disappeared!!!!"),
+            lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
             ok
     end,
     {noreply, SD0};

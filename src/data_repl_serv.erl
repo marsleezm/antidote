@@ -196,7 +196,7 @@ handle_cast({relay_read, Key, TxId, Reader},
 
 handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, name=Name}) ->
-    lager:info("~w: Specula prepare for [~w, ~w] of writeset ~w", [Name, TxId, Partition, WriteSet]),
+    lager:info("~w: Specula prepare for [~w, ~w]", [Name, TxId, Partition]),
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
                     case ets:lookup(ReplicatedLog, Key) of
                         [] ->
@@ -253,7 +253,7 @@ handle_cast({commit_specula, TxId, Partition, CommitTime},
 
 handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog}) ->
-    lager:info("Got repl prepare for {~w, ~w}, write set is ~w", [TxId, Partition, WriteSet]),
+    lager:info("Got repl prepare for {~w, ~w}", [TxId, Partition]),
     case Type of
         prepared ->
             ets:insert(PendingLog, {{TxId, Partition}, {WriteSet, TimeStamp}}),

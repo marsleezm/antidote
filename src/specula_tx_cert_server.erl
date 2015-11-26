@@ -177,7 +177,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
     %% If there was a legacy ongoing transaction.
     %lager:info("Certifying, txId is ~w, local num is ~w, remote num is ~w", 
     %        [TxId, length(LocalUpdates), length(RemoteUpdates)]),
-    %lager:info("Got req: localUpdates ~p, remote updates ~p", [LocalUpdates0, RemoteUpdates0]),
+    %lager:info("Got req: txid ~w, localUpdates ~p, remote updates ~p", [TxId, LocalUpdates, RemoteUpdates]),
     ReadDeps = length(ets:lookup(anti_dep, TxId)),
     true = ets:delete(anti_dep, TxId),
     lager:info("Start certifying ~w, old read deps is ~w, new read deps is ~w", [TxId, OldReadDeps, ReadDeps]),
@@ -195,7 +195,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
             {noreply, SD0#state{tx_id=[], speculated=Speculated+1, stage=specula, read_dep_dict=ReadDepDict1,
                     pending_list=PendingList++[TxId], prepare_time=LastCommitTs+1}};
         _ ->
-            lager:info("Local updates are ~w", [LocalUpdates]),
+            %lager:info("Local updates are ~w", [LocalUpdates]),
             LocalPartitions = [P || {P, _} <- LocalUpdates],
             ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local),
             {noreply, SD0#state{tx_id=TxId, to_ack=length(LocalUpdates), read_deps=ReadDeps+OldReadDeps, 
@@ -262,7 +262,7 @@ handle_cast({prepared, ReceivedTxId, PrepareTime, local},
                         end;
                         %%TODO: Maybe it does not speculatively-commit.
                 _ ->
-                    %lager:info("~w needs ~w replies", [TxId, N-1]),
+                    lager:info("~w needs ~w local prep replies", [TxId, N-1]),
                     MaxPrepTime = max(OldPrepTime, PrepareTime),
                     {noreply, SD0#state{to_ack=N-1, prepare_time=MaxPrepTime}}
             end;
@@ -274,6 +274,7 @@ handle_cast({prepared, ReceivedTxId, PrepareTime, local},
 %% TODO: if we don't direclty speculate after getting all local prepared, maybe we can wait a littler more
 %%       and here we should check if the transaction can be directly committed or not. 
 handle_cast({read_valid, TxId}, SD0=#state{tx_id=TxId, read_deps=ReadDeps}) ->
+    lager:info("~w got read valid before certify!", [TxId]),
     {noreply, SD0#state{read_deps=ReadDeps-1}};
 handle_cast({read_valid, TxId}, SD0=#state{pending_txs=PendingTxs, rep_dict=RepDict, read_dep_dict=ReadDepDict, 
             pending_list=PendingList, do_repl=DoRepl, read_aborted=ReadAborted, tx_id=CurrentTxId, committed=Committed,
@@ -374,9 +375,8 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
     case ets:lookup(PendingTxs, PendingTxId) of
         [{PendingTxId, {1, OldMaxPrepTime, LPs, RPs}}] ->
             NewMaxPrepTime = max(PendingPT, OldMaxPrepTime),
-            lager:info("Can try to commit"),
+            lager:info("got all replies, Can try to commit"),
             ets:insert(PendingTxs, {PendingTxId, {0, NewMaxPrepTime, LPs, RPs}}),
-            lager:info("Inserted"),
             case hd(PendingList) of
                  PendingTxId ->
                     {NewPendingList, NewMaxPT, NewReadDep, NewReadAborted, NewCommitted} = try_to_commit(
@@ -399,9 +399,11 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
                                 last_commit_ts=NewMaxPT, read_aborted=NewReadAborted, committed=NewCommitted}}
                     end;
                 _ ->
+                    lager:info("Can not commit due to pending ~w", [PendingList]),
                     {noreply, SD0}
             end;
         [{PendingTxId, {N, OldMaxPrepTime, LPs, RPs}}] ->
+            lager:info("Needs ~w more replies", [N-1]),
             ets:insert(PendingTxs, {PendingTxId, {N-1, max(PendingPT, OldMaxPrepTime), LPs, RPs}}),
             {noreply, SD0};
         [] ->
@@ -621,7 +623,9 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                                         {ok, 1} ->
                                             {dict:erase(DepTxId, RD), ToAbort};
                                         {ok, N} ->
-                                            {dict:store(DepTxId, N-1, RD), ToAbort}
+                                            {dict:store(DepTxId, N-1, RD), ToAbort};
+                                        error -> %% This txn hasn't even started certifying...
+                                            {RD, ToAbort}
                                     end;
                                 _ ->
                                     lager:info("~w is not my own, read valid", [DepTxId]),

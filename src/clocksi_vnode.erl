@@ -413,7 +413,7 @@ handle_command({prepare, TxId, WriteSet, IfLocal}, RawSender,
                               debug=Debug
                               }) ->
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
-    lager:info("~w: Got prepare of ~w, ~w: ~w", [Partition, TxId, IfLocal, WriteSet]),
+    lager:info("~w: Got prepare of ~w, ~w", [Partition, TxId, IfLocal]),
     Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify),
     case Result of
         {ok, PrepareTime} ->
