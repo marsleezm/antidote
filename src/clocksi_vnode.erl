@@ -25,6 +25,7 @@
 
 -export([start_vnode/1,
 	    read_data_item/3,
+        debug_read/3,
 	    relay_read/5,
         set_prepared/5,
         async_send_msg/3,
@@ -115,6 +116,12 @@ read_data_item(Node, Key, TxId) ->
     %lager:info("Trying to read ~w in node ~w", [Key, Node]),
     riak_core_vnode_master:sync_command(Node,
                                    {read, Key, TxId},
+                                   ?CLOCKSI_MASTER, infinity).
+
+debug_read(Node, Key, TxId) ->
+    %lager:info("Trying to read ~w in node ~w", [Key, Node]),
+    riak_core_vnode_master:sync_command(Node,
+                                   {debug_read, Key, TxId},
                                    ?CLOCKSI_MASTER, infinity).
 
 relay_read(Node, Key, TxId, Reader, From) ->
@@ -290,10 +297,11 @@ handle_command({do_reply, TxId}, _Sender, SD0=#state{prepared_txs=PreparedTxs, p
     end;
 
 handle_command({if_prepared, TxId, Keys}, _Sender, SD0=#state{prepared_txs=PreparedTxs}) ->
+    lager:info("Checking if prepared of ~w for ~w", [TxId, Keys]),
     Result = lists:all(fun(Key) ->
             case ets:lookup(PreparedTxs, Key) of
-                [{Key, [{TxId, _, _, _, _}|_]}] -> true;
-                _ -> false
+                [{Key, [{TxId, _, _, _, _}|_]}] -> lager:info("Found sth for key ~w", [Key]), true;
+                _ -> lager:info("Nothing for key ~w", [Key]), false
             end end, Keys),
     {reply, Result, SD0};
 
@@ -324,6 +332,16 @@ handle_command({check_prepared_empty},_Sender,SD0=#state{prepared_txs=PreparedTx
 
 handle_command({check_servers_ready},_Sender,SD0) ->
     {reply, true, SD0};
+
+handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{max_ts=MaxTS,
+            inmemory_store=InMemoryStore, partition=Partition}) ->
+    lager:info("Got read for ~w of ~w, part is ~w", [Key, TxId, Partition]),
+    MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
+    %lager:info("tx ~w, upgraded ts to ~w", [TxId, MaxTS1]),
+    %clock_service:update_ts(TxId#tx_id.snapshot_time),
+    Result = read_value(Key, TxId, InMemoryStore),
+    lager:info("Reading ~w value is ~w", [Key, Result]),
+    {reply, Result, SD0#state{max_ts=MaxTS1}};
 
 handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max_ts=MaxTS,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=Partition}) ->
@@ -524,9 +542,11 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
 handle_command({abort, TxId}, _Sender,
                State = #state{partition=Partition, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore,
                 num_aborted=NumAborted, dep_dict=DepDict, if_replicate=IfReplicate}) ->
-    %lager:info("~w: Aborting ~w", [Partition, TxId]),
+    lager:info("~w: Aborting ~w", [Partition, TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
+            specula_utilities:deal_abort_deps(TxId),
+            lager:info("Found key set"),
             true = ets:delete(PreparedTxs, TxId),
             DepDict1 = case IfReplicate of
                         true ->
@@ -536,6 +556,7 @@ handle_command({abort, TxId}, _Sender,
                     end,
             {noreply, State#state{num_aborted=NumAborted+1, dep_dict=DepDict1}};
         [] ->
+            lager:info("Didn't find key set"),
             {noreply, State}
     end;
     %lager:info("~w: Aborted ~w", [Partition, TxId]),
@@ -606,9 +627,9 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
 		    {ok, PrepareTime};
         N ->
             %lager:info("~w passed but has ~w deps", [TxId, N]),
-		    KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
+		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             %lager:info("Key set is ~w", [KeySet]),
-            true = ets:insert(PreparedTxs, {TxId, KeySet}),
+            true = ets:insert(PreparedTxs, {{waiting, TxId}, TxWriteSet}),
             {wait, N, PrepareTime}
     end.
 
@@ -678,6 +699,7 @@ commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Pa
     %lager:info("Before commit, DepDict is ~w", [dict:to_list(DepDict)]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
+            specula_utilities:deal_commit_deps(TxId, TxCommitTime),
             DepDict1 = update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition),
             %lager:info("After commit, DepDict is ~w", [dict:to_list(DepDict1)]),
             true = ets:delete(PreparedTxs, TxId),
@@ -715,8 +737,8 @@ clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore, DepDict, _) ->
     DepDict; 
 clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Partition) ->
     case ets:lookup(PreparedTxs, Key) of
-        [{Key, {TxId, _, _, [], PrepDeps}}] ->
-            %lager:info("No reader"),
+        [{Key, [{TxId, _, _, _, []}| PrepDeps]}] ->
+            lager:info("clean abort: No reader"),
 			%% 0 for commit time means that the first prepared txs will just be prepared
             {PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict),
             case PPTxId of
@@ -728,8 +750,8 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 					true = ets:insert(PreparedTxs, {Key, Record}),
 					clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition)
             end;
-        [{Key, {TxId, _, _, PendingReaders, PrepDeps}}] ->
-            %lager:info("Some reader"),
+        [{Key, [{TxId, _, _, _, PendingReaders}|PrepDeps]}] ->
+            lager:info("Clean abort: some reader"),
 			{PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict),
             Value = case ets:lookup(InMemoryStore, Key) of
 		                [{Key, ValueList}] ->
@@ -950,8 +972,9 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                     %% The read is not ready, may read from speculative version 
                     Result =
                         find_appr_version(PrepareTime, LastPPTime, SnapshotTime, PendingPrepare),
+                    lager:info("Result is ~w", [Result]),
                     {ApprTxId, ApprPPTime, ApprPPValue} = 
-                        case Result of first -> {PreparedTxId, PrepareTime, LastPPTime};
+                        case Result of first -> {PreparedTxId, PrepareTime, Value};
                                              _ -> Result end,
                     case SnapshotTime >= ApprPPTime + ?SPECULA_TIMEOUT of
                         true ->
@@ -960,7 +983,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                             ets:insert(anti_dep, {TxId, ApprTxId}),
                             {specula, ApprPPValue};
                         _ ->
-                            ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, Value,
+                            ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastPPTime, Value,
                                 [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
                             not_ready
                     end; 
@@ -1027,16 +1050,18 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
 unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
     %lager:info("Unblocking transaction ~w", [TxId]),
     case dict:find(TxId, DepDict) of
-        {ok, {1, PrepareTime, Sender, Type}} ->
+        {ok, {1, PrepareTime, Sender, IfLocal}} ->
             case Partition of
                 ignore ->
                     %lager:info("No more dependency, sending reply back for ~w", [TxId]),
-                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, Type});
+                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, IfLocal});
                 _ ->
-                    [{TxId, WriteSet}] = ets:lookup(PreparedTxs, TxId),
-                    PendingRecord = {TxId, Sender,
-                        {prepared, TxId, PrepareTime, Type}, WriteSet, PrepareTime},
-                    repl_fsm:repl_prepare(Partition, TxId, prepare, PendingRecord)
+                    [{{waiting, TxId}, WriteSet}] = ets:lookup(PreparedTxs, {waiting, TxId}),
+                    ets:delete(PreparedTxs, {waiting, TxId}),
+                    ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
+                    PendingRecord = {Sender,
+                        IfLocal, WriteSet, PrepareTime},
+                    repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
             end,
             dict:erase(TxId, DepDict);
         {ok, {N, PrepareTime, Sender, Type}} ->

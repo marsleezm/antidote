@@ -51,7 +51,7 @@
         abort/2,
         commit/3,
         read_valid/2,
-        read_invalid/2,
+        read_invalid/3,
         if_applied/2,
         specula_prepare/5,
         specula_prepare/4,
@@ -95,7 +95,7 @@ repl_abort(UpdatedParts, TxId, true, _) ->
 read_valid(_, TxId) ->
     gen_server:cast(test_fsm, {read_valid, TxId}).
 
-read_invalid(_, TxId) ->
+read_invalid(_, _, TxId) ->
     gen_server:cast(test_fsm, {read_invalid, TxId}).
 
 abort(UpdatedParts, TxId) ->

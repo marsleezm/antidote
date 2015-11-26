@@ -44,6 +44,7 @@
 
 %% States
 -export([relay_read/4,
+        debug_read/3,
         prepare_specula/5,
         commit_specula/4,
         abort_specula/3,
@@ -71,6 +72,9 @@ start_link(Name) ->
 
 read(Name, Key, TxId) ->
     gen_server:call({global, Name}, {read, Key, TxId}).
+
+debug_read(Name, Key, TxId) ->
+    gen_server:call({global, Name}, {debug_read, Key, TxId}).
 
 if_prepared(Name, TxId, Keys) ->
     gen_server:call({global, Name}, {if_prepared, TxId, Keys}).
@@ -110,6 +114,23 @@ handle_call({retrieve_log, LogName},  _Sender,
             {reply, Log, SD0};
         [] ->
             {reply, [], SD0}
+    end;
+
+handle_call({debug_read, Key, TxId}, _Sender, 
+	    SD0=#state{replicated_log=ReplicatedLog}) ->
+    lager:info("Got debug read for ~w", [Key]),
+    case ets:lookup(ReplicatedLog, Key) of
+        [] ->
+            lager:info("Debug reading ~w, there is nothing", [Key]),
+            {reply, {ok, []}, SD0};
+        [{Key, ValueList}] ->
+            lager:info("Debug reading ~w, Value list is ~w", [Key, ValueList]),
+            MyClock = TxId#tx_id.snapshot_time,
+            case find_nonspec_version(ValueList, MyClock) of
+                Value ->
+                    lager:info("Found value is ~w", [Value]),
+                    {reply, {ok, Value}, SD0}
+            end
     end;
 
 handle_call({read, Key, TxId}, _Sender, 
@@ -208,15 +229,7 @@ handle_cast({abort_specula, TxId, Partition},
                             ets:insert(ReplicatedLog, {Key, NewValueList})
                     end 
                   end, KeySet),
-    case ets:lookup(dependency, TxId) of
-        [] ->
-            ok; %% No read dependency was created!
-        List ->
-            lists:foreach(fun({TId, DependTxId}) ->
-                            ets:delete_object(dependency, {TId, DependTxId}),
-                            specula_tx_cert_server:read_invalid(DependTxId#tx_id.server_pid, DependTxId)
-                          end, List)
-    end,
+    specula_utilities:deal_abort_deps(TxId),
     {noreply, SD0};
     
 handle_cast({commit_specula, TxId, Partition, CommitTime}, 
@@ -235,19 +248,7 @@ handle_cast({commit_specula, TxId, Partition, CommitTime},
                             ets:insert(ReplicatedLog, {Key, NewValueList})
                     end 
                   end, KeySet),
-    case ets:lookup(dependency, TxId) of
-        [] ->
-            ok; %% No read dependency was created!
-        List ->
-            lists:foreach(fun({TId, DependTxId}) ->
-                            ets:delete_object(dependency, {TId, DependTxId}),
-                            case DependTxId#tx_id.snapshot_time >= CommitTime of
-                                true ->
-                                    specula_tx_cert_server:read_valid(DependTxId#tx_id.server_pid, DependTxId);
-                                false ->
-                                    specula_tx_cert_server:read_invalid(DependTxId#tx_id.server_pid, DependTxId)
-                          end end, List)
-    end,
+    specula_utilities:deal_commit_deps(TxId, CommitTime),
     {noreply, SD0};
 
 handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender}, 
@@ -305,8 +306,21 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 terminate(_Reason, _SD) ->
     ok.
 
+find_nonspec_version([],  _SnapshotTime) ->
+    [];
+find_nonspec_version([{TS, Value}|Rest], SnapshotTime) ->
+    case SnapshotTime >= TS of
+        true ->
+            Value;
+        false ->
+            find_version(Rest, SnapshotTime)
+    end;
+find_nonspec_version([{_, _, _}|Rest], SnapshotTime) ->
+    find_version(Rest, SnapshotTime).
+
+
 find_version([],  _SnapshotTime) ->
-    {ok, []};
+    [];
 find_version([{TS, Value}|Rest], SnapshotTime) ->
     case SnapshotTime >= TS of
         true ->
@@ -357,6 +371,6 @@ delete_version([{TS, V, TxId}|Rest], TxId) ->
 
 replace_version([{_, Value, TxId}|Rest], TxId, CommitTime) -> 
     [{CommitTime, Value}|Rest];
-replace_version([{TS, V, TxId}|Rest], TxId, CommitTime) -> 
-    [{TS, V, TxId}|replace_version(Rest, TxId, CommitTime)].
+replace_version([{TS, V, PrepTxId}|Rest], TxId, CommitTime) -> 
+    [{TS, V, PrepTxId}|replace_version(Rest, TxId, CommitTime)].
 
