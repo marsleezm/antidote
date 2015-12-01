@@ -83,23 +83,9 @@ handle_call({start_tx}, _Sender, SD0) ->
     TxId = tx_utilities:create_tx_id(0),
     {reply, TxId, SD0};
 
-handle_call({read, Key, TxId, Node0}, Sender, SD0) ->
-    Node = case Node0 of
-                {raw,  N, P} ->
-                    hash_fun:get_vnode_by_id(P, N);
-                _ ->
-                    Node0
-              end,
-            %lager:info("No Value"),
-    case Node of
-        {_,_} ->
-            clocksi_vnode:relay_read(Node, Key, TxId, Sender),
-            %lager:info("Well, from clocksi_vnode"),
-            {noreply, SD0};
-        _ ->
-            data_repl_serv:relay_read(Node, TxId, Key, Sender),
-            {noreply, SD0}
-    end;
+handle_call({read, Key, TxId, Node}, Sender, SD0) ->
+    clocksi_vnode:relay_read(Node, Key, TxId, Sender, no_specula),
+    {noreply, SD0};
 
 handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0) ->
     {LocalUpdates, RemoteUpdates} = case LocalUpdates0 of   
@@ -116,7 +102,7 @@ handle_call({certify, TxId, LocalUpdates0, RemoteUpdates0},  Sender, SD0) ->
     %lager:info("TxId ~w", [TxId]),
     case length(LocalUpdates) of
         0 ->
-            clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
+            clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
             {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates), local_parts=LocalParts, remote_parts=
                 RemoteUpdates, sender=Sender}};
         _ ->
@@ -132,6 +118,7 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({prepared, TxId, PrepareTime, local}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, local_parts=LocalParts, do_repl=DoRepl,
             remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime}) ->
+    %lager:info("Got prepared local"),
     case N of
         1 -> 
             RemoteParts = [Part || {Part, _} <- RemoteUpdates],
@@ -145,8 +132,9 @@ handle_cast({prepared, TxId, PrepareTime, local},
                     {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
                 _ ->
                     MaxPrepTime = max(PrepareTime, OldPrepTime),
-                    clocksi_vnode:prepare(RemoteUpdates, TxId, remote),
-                    %lager:info("~w: to ack is ~w, parts are ~w", [TxId, length(RemoteParts), RemoteParts]),
+                    clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
+                    %lager:info("~w: Updates are ~p, to ack is ~w, parts are ~w", [TxId, RemoteUpdates, 
+                        %length(RemoteParts), RemoteParts]),
                     {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=length(RemoteParts),
                         remote_parts=RemoteParts}}
                 end;
@@ -163,6 +151,7 @@ handle_cast({prepared, _, _, local},
 
 handle_cast({abort, TxId, local}, SD0=#state{tx_id=TxId, local_parts=LocalParts, 
             do_repl=DoRepl, sender=Sender}) ->
+    %lager:info("Local abort ~w", [TxId]),
     clocksi_vnode:abort(LocalParts, TxId),
     repl_fsm:repl_abort(LocalParts, TxId, DoRepl),
     gen_server:reply(Sender, {aborted, TxId}),
@@ -186,15 +175,17 @@ handle_cast({prepared, TxId, PrepareTime, remote},
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
             {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
         N ->
+            %lager:info("Need ~w more replies for ~w", [N-1, TxId]),
             {noreply, SD0#state{to_ack=N-1, prepare_time=max(MaxPrepTime, PrepareTime)}}
     end;
 handle_cast({prepared, _, _, remote}, 
 	    SD0) ->
     {noreply, SD0};
 
-handle_cast({abort, TxId, remote}, 
+handle_cast({abort, TxId, {remote,_}}, 
 	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, 
         local_parts=LocalParts, do_repl=DoRepl}) ->
+    %lager:info("Remote abort ~w", [TxId]),
     clocksi_vnode:abort(LocalParts, TxId),
     clocksi_vnode:abort(RemoteParts, TxId),
     repl_fsm:repl_abort(LocalParts, TxId, DoRepl),
@@ -202,7 +193,7 @@ handle_cast({abort, TxId, remote},
     gen_server:reply(Sender, {aborted, TxId}),
     {noreply, SD0#state{tx_id={}}};
 
-handle_cast({abort, _, remote}, 
+handle_cast({abort, _, {remote,_}}, 
 	    SD0) ->
     {noreply, SD0};
 

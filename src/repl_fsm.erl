@@ -151,16 +151,23 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                 quorum ->
                     case IfLocal of
                         {remote, SenderName} ->
-                            ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
-                                    PrepareTime, WriteSet, remote}, ReplFactor-1}}),
-                            ReplicasToSend = case dict:find(SenderName, ExceptReplicas) of
-                                                    {ok, R} -> R;
-                                                    error -> Replicas
-                                             end, 
-                            %lager:info("Remote prepared request for {~w, ~w}, ~p, Sending to ~w", [TxId, Partition, LogContent, ReplicasToSend]),
-                            quorum_replicate(ReplicasToSend, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
+                            %lager:info("IfLocal is ~w", [IfLocal]),
+                            case dict:find(SenderName, ExceptReplicas) of
+                                {ok, R} -> 
+                                    %lager:info("Remote prepared request for {~w, ~w}, Sending to ~w", 
+                                        %[TxId, Partition, R]),
+                                    ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
+                                            PrepareTime, WriteSet, remote}, ReplFactor-1}}),
+                                    quorum_replicate(R, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
+                                error ->
+                                    %lager:info("Remote prepared request for {~w, ~w}, Sending to ~w", 
+                                        %[TxId, Partition, Replicas]),
+                                    ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
+                                            PrepareTime, WriteSet, remote}, ReplFactor}}),
+                                    quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
+                            end;
                         _ ->
-                            %lager:info("Local prepared request for {~w, ~w}, ~p, Sending to ~w", [TxId, Partition, LogContent, Replicas]),
+                            %lager:info("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, WriteSet, local}, ReplFactor}}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
@@ -221,6 +228,7 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
             {PrepType, Sender, Timestamp, _, IfLocal} = R,
             case PrepType of
                 prepared ->
+                    %lager:info("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, IfLocal, TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     gen_server:cast(Sender, {prepared, TxId, Timestamp, IfLocal});
                 single_commit ->

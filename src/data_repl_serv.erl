@@ -17,7 +17,16 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
-%% TODO: should implement heart-beat for timestamp.
+%%
+%% TODO: Two problems for read
+%%      1. A replica is only allowed to serve a request if it's timestamp
+%%       is higher than the snapshot time. The replica should update its 
+%%       timestamp after it receives a commit from master.
+%%      2. A replica needs to handles commit/abort sequentially. Basically
+%%       if the timestamp of abort/commit it received is higher than
+%%       the pending ones, it has to wait (can not update it's timestamp).
+%%
+
 -module(data_repl_serv).
 
 -behavior(gen_server).
@@ -118,36 +127,37 @@ handle_call({retrieve_log, LogName},  _Sender,
 
 handle_call({debug_read, Key, TxId}, _Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
-    lager:info("Got debug read for ~w", [Key]),
+    %lager:info("Got debug read for ~w", [Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
-            lager:info("Debug reading ~w, there is nothing", [Key]),
+            %lager:info("Debug reading ~w, there is nothing", [Key]),
             {reply, {ok, []}, SD0};
         [{Key, ValueList}] ->
-            lager:info("Debug reading ~w, Value list is ~w", [Key, ValueList]),
+            %lager:info("Debug reading ~w, Value list is ~w", [Key, ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
             case find_nonspec_version(ValueList, MyClock) of
                 Value ->
-                    lager:info("Found value is ~w", [Value]),
+                    %lager:info("Found value is ~w", [Value]),
                     {reply, {ok, Value}, SD0}
             end
     end;
 
 handle_call({read, Key, TxId}, _Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
-    lager:info("Reading for ~w , key ~w", [TxId, Key]),
+    %lager:info("Reading for ~w , key ~w", [TxId, Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
-            lager:info("Nothing!"),
+            %lager:info("Nothing!"),
             {reply, {ok, []}, SD0};
         [{Key, ValueList}] ->
-            lager:info("Value list is ~w", [ValueList]),
+            %lager:info("Value list is ~w", [ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
             case find_version(ValueList, MyClock) of
                 {specula, SpeculaTxId, Value} ->
-                    lager:info("Found specula value ~w from ~w", [ValueList, SpeculaTxId]),
+                    %lager:info("Found specula value ~w from ~w", [ValueList, SpeculaTxId]),
                     ets:insert(dependency, {SpeculaTxId, TxId}),         
                     ets:insert(anti_dep, {TxId, SpeculaTxId}),        
+                    %lager:info("Inserting antidep from ~w to ~w for key ~w", [TxId, SpeculaTxId, Key]),
                     {reply, {ok, Value}, SD0};
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
                 Value ->
@@ -155,24 +165,26 @@ handle_call({read, Key, TxId}, _Sender,
             end
     end;
 
-handle_call({if_prepared, TxId, Keys}, _Sender, SD0=#state{replicated_log=ReplicatedLog, name=Name}) ->
+handle_call({if_prepared, TxId, Keys}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
     Result = lists:all(fun(Key) ->
-                    lager:info("~w: Check ~w for ~w", [Name, Key, TxId]),
+                    %lager:info("~w: Check ~w for ~w", [Name, Key, TxId]),
                     case ets:lookup(ReplicatedLog, Key) of
-                        [{Key, [{_, _, TxId}|_]}] -> lager:info("Check ok"), true;
-                        R -> lager:info("Check false, Record is ~w", [R]), false
+                        [{Key, [{_, _, TxId}|_]}] -> %lager:info("Check ok")
+                                true;
+                        _ -> %lager:info("Check false, Record is ~w", [R]), 
+                                false
                     end end, Keys),
     {reply, Result, SD0};
 
 handle_call({if_bulk_prepared, TxId, Partition}, _Sender, SD0=#state{
-            pending_log=PendingLog, name=Name}) ->
-    lager:info("~w: checking if bulk_prepared for ~w ~w", [Name, TxId, Partition]),
+            pending_log=PendingLog}) ->
+    %lager:info("~w: checking if bulk_prepared for ~w ~w", [Name, TxId, Partition]),
     case ets:lookup(PendingLog, {TxId, Partition}) of
         [{{TxId, Partition}, {_, _}}] ->
-            lager:info("It's inserted"),
+            %lager:info("It's inserted"),
             {reply, true, SD0};
-        Record ->
-            lager:info("~w: something else", [Record]),
+        _Record ->
+            %lager:info("~w: something else", [Record]),
             {reply, false, SD0}
     end;
 
@@ -195,20 +207,20 @@ handle_cast({relay_read, Key, TxId, Reader},
     end;
 
 handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, 
-	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, name=Name}) ->
-    lager:info("~w: Specula prepare for [~w, ~w]", [Name, TxId, Partition]),
+	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog}) ->
+    %lager:info("~w: Specula prepare for [~w, ~w]", [Name, TxId, Partition]),
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
                     case ets:lookup(ReplicatedLog, Key) of
                         [] ->
                             %% Putting TxId in the record to mark the transaction as speculative 
                             %% and for dependency tracking that will happen later
                             true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value, TxId}]}),
-                            lager:info("Inserted for ~w, empty", [Key]),
+                            %lager:info("Inserted for ~w, empty", [Key]),
                             [Key|KS];
                         [{Key, ValueList}] ->
                             {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
                             true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value, TxId}|RemainList]}),
-                            lager:info("Inserted for ~w", [Key]),
+                            %lager:info("Inserted for ~w", [Key]),
                             [Key|KS]
                     end end, [], WriteSet),
     ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
@@ -219,12 +231,13 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp},
 handle_cast({abort_specula, TxId, Partition}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog}) ->
     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
-    lager:info("Aborting specula for ~w ~w", [TxId, Partition]),
+    %lager:info("Aborting specula for ~w ~w", [TxId, Partition]),
     lists:foreach(fun(Key) ->
                     case ets:lookup(ReplicatedLog, Key) of
                         [] -> %% TODO: this can not happen 
                             ok;
                         [{Key, ValueList}] ->
+                            %lager:info("Deleting ~p of ~w, Value list is ~p", [Key, TxId, ValueList]),
                             NewValueList = delete_version(ValueList, TxId), 
                             ets:insert(ReplicatedLog, {Key, NewValueList})
                     end 
@@ -234,17 +247,18 @@ handle_cast({abort_specula, TxId, Partition},
     
 handle_cast({commit_specula, TxId, Partition, CommitTime}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog}) ->
-    lager:info("Committing specula for ~w ~w", [TxId, Partition]),
+    %lager:info("Committing specula for ~w ~w", [TxId, Partition]),
     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
     lists:foreach(fun(Key) ->
                     case ets:lookup(ReplicatedLog, Key) of
                         [] -> %% TODO: this can not happen 
-                            lager:info("Found nothing for ~w, not possible", [Key]),
+                            %lager:info("Found nothing for ~p, not possible", [Key]),
                             ok;
                         [{Key, ValueList}] ->
-                            lager:info("Key ~w, ValueList is ~w", [Key, ValueList]),
+                            %lager:info("Commit specula for key ~p, TxId ~w with ~w, ValueList is ~p", 
+                                %[Key, TxId, CommitTime, ValueList]),
                             NewValueList = replace_version(ValueList, TxId, CommitTime), 
-                            lager:info("NewValueList is ~w", [NewValueList]),
+                            %lager:info("NewValueList is ~w", [NewValueList]),
                             ets:insert(ReplicatedLog, {Key, NewValueList})
                     end 
                   end, KeySet),
@@ -253,15 +267,14 @@ handle_cast({commit_specula, TxId, Partition, CommitTime},
 
 handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog}) ->
-    lager:info("Got repl prepare for {~w, ~w}", [TxId, Partition]),
     case Type of
         prepared ->
             ets:insert(PendingLog, {{TxId, Partition}, {WriteSet, TimeStamp}}),
-            lager:info("Got prepare.. Replying to ~w", [Sender]),
+            %lager:info("Got repl prepare for {~w, ~w}, replying to ~w", [TxId, Partition, Sender]),
             gen_server:cast({global, Sender}, {ack, Partition, TxId}), 
             {noreply, SD0};
         single_commit ->
-            lager:info("Got single commit.. Replying to ~w", [Sender]),
+            %lager:info("Got single commit.. Replying to ~w", [Sender]),
             AppendFun = fun({Key, Value}) ->
                 case ets:lookup(ReplicatedLog, Key) of
                     [] ->
@@ -278,7 +291,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
 	    SD0=#state{replicated_log=ReplicatedLog,
             pending_log=PendingLog}) ->
-    lager:info("Got repl commit for ~w of partitions ~w", [TxId, Partitions]),
+    %lager:info("Got repl commit for ~w of partitions ~w", [TxId, Partitions]),
     append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, Partitions),
     {noreply, SD0};
 
@@ -341,9 +354,9 @@ append_by_parts(_, _, _, _, []) ->
 append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
     case ets:lookup(PendingLog, {TxId, Part}) of
         [{{TxId, Part}, {WriteSet, _}}] ->
-            lager:info("For ~w ~w found writeset", [TxId, Part, WriteSet]),
+            %lager:info("For ~w ~w found writeset", [TxId, Part, WriteSet]),
             AppendFun = fun({Key, Value}) ->
-                            lager:info("Adding ~w, ~w into log", [Key, Value]),
+                            %lager:info("Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
                             case ets:lookup(ReplicatedLog, Key) of
                                 [] ->
                                     true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
@@ -366,11 +379,15 @@ abort_by_parts(PendingLog, TxId, [Part|Rest]) ->
 
 delete_version([{_, _, TxId}|Rest], TxId) -> 
     Rest;
-delete_version([{TS, V, TxId}|Rest], TxId) -> 
-    [{TS, V, TxId}|delete_version(Rest, TxId)].
+delete_version([{C, V}|Rest], TxId) -> 
+    [{C, V}|delete_version(Rest, TxId)];
+delete_version([{TS, V, TId}|Rest], TxId) -> 
+    [{TS, V, TId}|delete_version(Rest, TxId)].
 
 replace_version([{_, Value, TxId}|Rest], TxId, CommitTime) -> 
     [{CommitTime, Value}|Rest];
+replace_version([{C, V}|Rest], TxId, CommitTime) -> 
+    [{C, V}|replace_version(Rest, TxId, CommitTime)];
 replace_version([{TS, V, PrepTxId}|Rest], TxId, CommitTime) -> 
     [{TS, V, PrepTxId}|replace_version(Rest, TxId, CommitTime)].
 

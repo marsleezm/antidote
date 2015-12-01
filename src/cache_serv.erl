@@ -30,7 +30,7 @@
 
 -define(NUM_VERSIONS, 20).
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 -define(CLOCKSI_VNODE, clocksi_vnode).
 
@@ -50,6 +50,7 @@
         commit_specula/3,
         abort_specula/2,
         if_prepared/2,
+        read/4,
         read/2,
         read/3]).
 
@@ -58,33 +59,37 @@
 -record(state, {
         cache_log :: cache_id(),
         delay :: non_neg_integer(),
+        do_specula :: boolean(),
 		self :: atom()}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
-start_link() ->
-    gen_server:start_link({local, cache_serv},
+start_link(Name) ->
+    gen_server:start_link({global, Name},
              ?MODULE, [], []).
 
+read(Name, Key, TxId, Node) ->
+    gen_server:call({global, Name}, {read, Key, TxId, Node}).
+
 read(Key, TxId, Node) ->
-    gen_server:call(cache_serv, {read, Key, TxId, Node}).
+    gen_server:call({global, node()}, {read, Key, TxId, Node}).
 
 read(Key, TxId) ->
-    gen_server:call(cache_serv, {read, Key, TxId}).
+    gen_server:call({global, node()}, {read, Key, TxId}).
 
 if_prepared(TxId, Keys) ->
-    gen_server:call(cache_serv, {if_prepared, TxId, Keys}).
+    gen_server:call({global, node()}, {if_prepared, TxId, Keys}).
 
 prepare_specula(TxId, Partition, WriteSet, PrepareTime) ->
-    gen_server:cast(cache_serv, {prepare_specula, TxId, Partition, WriteSet, PrepareTime}).
+    gen_server:cast({global, node()}, {prepare_specula, TxId, Partition, WriteSet, PrepareTime}).
 
 abort_specula(TxId, Partition) -> 
-    gen_server:cast(cache_serv, {abort_specula, TxId, Partition}).
+    gen_server:cast({global, node()}, {abort_specula, TxId, Partition}).
 
 commit_specula(TxId, Partition, CommitTime) -> 
-    gen_server:cast(cache_serv, {commit_specula, TxId, Partition, CommitTime}).
+    gen_server:cast({global, node()}, {commit_specula, TxId, Partition, CommitTime}).
 
 %%%===================================================================
 %%% Internal
@@ -93,14 +98,22 @@ commit_specula(TxId, Partition, CommitTime) ->
 init([]) ->
     lager:info("Cache server inited"),
     CacheLog = tx_utilities:open_private_table(cache_log),
-    {ok, #state{
+    DoSpecula = antidote_config:get(do_specula),
+    {ok, #state{do_specula = DoSpecula,
                 cache_log = CacheLog}}.
 
 handle_call({read, Key, TxId, Node}, Sender, 
-	    SD0=#state{cache_log=CacheLog}) ->
+	    SD0=#state{do_specula=false}) ->
+    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
+    {noreply, SD0};
+
+handle_call({read, Key, TxId, Node}, Sender, 
+	    SD0=#state{cache_log=CacheLog, do_specula=true}) ->
+    %lager:info("Read ~w of ~w", [Key, TxId]), 
     case ets:lookup(CacheLog, Key) of
         [] ->
-            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, remote),
+            %lager:info("Relaying read to ~w", [Node]),
+            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
             %lager:info("Well, from clocksi_vnode"),
             %lager:info("Nothing!"),
             {noreply, SD0};
@@ -110,11 +123,12 @@ handle_call({read, Key, TxId, Node}, Sender,
             case find_version(ValueList, MyClock) of
                 {SpeculaTxId, Value} ->
                     ets:insert(dependency, {SpeculaTxId, TxId}),         
+                    %lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
                     ets:insert(anti_dep, {TxId, SpeculaTxId}),        
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
                     {reply, {ok, Value}, SD0};
                 [] ->
-                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, remote),
+                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
                     %lager:info("Well, from clocksi_vnode"),
                     {noreply, SD0}
             end
@@ -130,6 +144,7 @@ handle_call({read, Key, TxId}, _Sender,
             case find_version(ValueList, MyClock) of
                 {SpeculaTxId, Value} ->
                     ets:insert(dependency, {SpeculaTxId, TxId}),
+                    lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
                     ets:insert(anti_dep, {TxId, SpeculaTxId}),
                     {reply, {ok, Value}, SD0};
                 [] ->
@@ -212,8 +227,8 @@ find_version([{TS, Value, TxId}|Rest], SnapshotTime) ->
 
 delete_version([{_, _, TxId}|Rest], TxId) -> 
     Rest;
-delete_version([{TS, V, TxId}|Rest], TxId) -> 
-    [{TS, V, TxId}|delete_version(Rest, TxId)].
+delete_version([{TS, V, Tx}|Rest], TxId) -> 
+    [{TS, V, Tx}|delete_version(Rest, TxId)].
 
 delete_keys(Table, KeySet, TxId) ->
     lists:foreach(fun(Key) ->
@@ -221,7 +236,9 @@ delete_keys(Table, KeySet, TxId) ->
                         [] -> %% TODO: this can not happen 
                             ok;
                         [{Key, ValueList}] ->
+                            lager:info("Delete version ~w, key is ~w, list is ~p", [TxId, Key, ValueList]),
                             NewValueList = delete_version(ValueList, TxId), 
+                            lager:info("after deletion list is ~p", [NewValueList]),
                             ets:insert(Table, {Key, NewValueList})
                     end 
                   end, KeySet).
