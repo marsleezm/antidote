@@ -46,7 +46,7 @@
         is_empty/1,
         delete/1,
     
-        check_prepared/5,
+        check_prepared/3,
 	    check_tables_ready/0,
 	    check_prepared_empty/0,
         print_stat/0]).
@@ -633,17 +633,21 @@ async_send_msg(Delay, Msg, To) ->
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
 prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
-    PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
-    case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], 0, IfCertify) of
-	    {false, InsertedKeys} ->
+    KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
+    case check_and_insert(TxId, KeySet, CommittedTxs, PreparedTxs, 0, IfCertify) of
+        false ->
+	    %{false, InsertedKeys} ->
             %lager:info("~w failed, has inserted ~p", [TxId, InsertedKeys]),
-            lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
+        %    lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
 	        {error, write_conflict};
         0 ->
             %lager:info("Passed"),
             %PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
             %lager:info("~w passed", [TxId]),
-		    KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
+            PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
+            lists:foreach(fun({K, V}) -> 
+                    ets:insert(PreparedTxs, {K, [{TxId, PrepareTime, PrepareTime, V, []}]})
+                    end, TxWriteSet),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
             %lager:info("Inserting key sets ~w, ~w", [TxId, KeySet]),
 		    {ok, PrepareTime};
@@ -651,6 +655,16 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
             %lager:info("~w passed but has ~w deps", [TxId, N]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             %lager:info("Key set is ~w", [KeySet]),
+            PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
+            lists:foreach(fun({K, V}) -> 
+                          case ets:lookup(PreparedTxs, K) of
+                          [] ->
+                              ets:insert(PreparedTxs, {K, [{TxId, PrepareTime, PrepareTime, V, []}]});
+                          [{K, [{PrepTxId, OldPPTime, _, PrepValue, RWaiter}|PWaiter]}] ->
+                                      ets:insert(PreparedTxs, {K, [{PrepTxId, OldPPTime, PrepareTime, PrepValue, RWaiter}|
+                                               (PWaiter++[{TxId, PrepareTime, V}])]})
+                          end
+                    end, TxWriteSet),
             true = ets:insert(PreparedTxs, {{waiting, TxId}, TxWriteSet}),
             {wait, N, PrepareTime}
     end.
@@ -809,12 +823,11 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 
 %% @doc Performs a certification check when a transaction wants to move
 %%      to the prepared state.
-check_and_insert(_, _, _, _, _, _, _, false) ->
+check_and_insert(_, _, _, _, _, false) ->
     0;
-check_and_insert(_, _, [], _, _, _, NumDeps, true) ->
-    NumDeps;
-check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, NumDeps, true) ->
-    {Key, Value} = H,
+check_and_insert(_, [], _, _, NumBlocked, true) ->
+    NumBlocked;
+check_and_insert(TxId, [Key|T], CommittedTxs, PreparedTxs, NumBlocked, true) ->
     %lager:info("Certifying key ~w", [Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(CommittedTxs, Key) of
@@ -823,50 +836,51 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, N
             case CommitTime > SnapshotTime of
                 true ->
                     %lager:info("~w: False for committed key ~p, Commit time is ~w", [TxId, Key, CommitTime]),
-                    {false, InsertedKeys};
+                    false;
+                    %{false, InsertedKeys};
                 false ->
-                    case check_prepared(PPTime, TxId, PreparedTxs, Key, Value) of
+                    case check_prepared(TxId, PreparedTxs, Key) of
                         true ->
-                            check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs,  
-                                [Key|InsertedKeys], NumDeps, true);
+                            check_and_insert(TxId, T, CommittedTxs, PreparedTxs,  
+                                NumBlocked, true);
                         wait ->
-                            check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, 
-                                NumDeps+1, true);
+                            check_and_insert(TxId, T, CommittedTxs, PreparedTxs, NumBlocked+1, 
+                                true);
                         false ->
                             %lager:info("~w: False of prepared for ~p", [TxId, Key]),
-                            {false, InsertedKeys}
+                            false
                     end
             end;
         [] ->
-            case check_prepared(PPTime, TxId, PreparedTxs, Key, Value) of
+            case check_prepared(TxId, PreparedTxs, Key) of
                 true ->
-                    check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, 
-                        [Key|InsertedKeys], NumDeps, true); 
+                    check_and_insert(TxId, T, CommittedTxs, PreparedTxs, 
+                        NumBlocked, true); 
                 wait ->
-                    check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, 
-                          NumDeps+1, true);
+                    check_and_insert(TxId, T, CommittedTxs, PreparedTxs, NumBlocked+1, 
+                          true);
                 false ->
                     %lager:info("~w: False of prepared", [TxId]),
-                    {false, InsertedKeys}
+                    false
             end
     end.
 
-check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
+check_prepared(TxId, PreparedTxs, Key) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             %lager:info("No one has prepared so inserted ~w, ~w for key ~p", [TxId, PPTime, Key]),
-            ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, Value, []}]}),
+            %ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, Value, []}]}),
             true;
-        [{Key, [{PrepTxId, PrepareTime, _, PrepValue, RWaiter}|PWaiter]}] ->
+        [{Key, [{_PrepTxId, PrepareTime, _, _PrepValue, _RWaiter}|_PWaiter]}] ->
             case PrepareTime > SnapshotTime of
                 true ->
                     %lager:info("~w fail because prepare time is ~w, PWaiters are ~p", [TxId, PrepareTime, PWaiter]),
                     false;
                 false ->
                     %lager:info("~p: ~w waits for ~w with ~w, which is ~p", [Key, TxId, PrepTxId, PrepareTime, PWaiter]),
-                    ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, PPTime, PrepValue, RWaiter}|
-                             (PWaiter++[{TxId, PPTime, Value}])]}),
+                    %ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, PPTime, PrepValue, RWaiter}|
+                    %         (PWaiter++[{TxId, PPTime, Value}])]}),
                     wait
             end
             %lager:info("Something exists ~p, ~w failes for key ~p", [Record, TxId, Key]),
