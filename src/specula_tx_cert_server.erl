@@ -100,10 +100,16 @@ start_link(Name) ->
 
 init([]) ->
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
-    Lists = antidote_config:get(to_repl),
-    [RepNodes] = [Reps || {Node, Reps} <- Lists, Node == node()],
-    RepDict = lists:foldl(fun(N, D) -> dict:store(N, 
-        list_to_atom(atom_to_list(node())++"repl"++atom_to_list(N)), D) end, dict:new(), RepNodes), 
+    DoRepl = antidote_config:get(do_repl),
+    RepDict = case DoRepl of
+                true ->
+                    Lists = antidote_config:get(to_repl),
+                    [RepNodes] = [Reps || {Node, Reps} <- Lists, Node == node()],
+                    lists:foldl(fun(N, D) -> dict:store(N, 
+                        list_to_atom(atom_to_list(node())++"repl"++atom_to_list(N)), D) end, dict:new(), RepNodes);
+                false ->
+                    dict:new()
+    end,
     PendingTxs = tx_utilities:open_private_table(pending_txs), 
     %SpeculaData = tx_utilities:open_private_table(specula_data),
     {ok, #state{pending_txs=PendingTxs, rep_dict=RepDict, dep_dict=dict:new(), invalid_ts=0,

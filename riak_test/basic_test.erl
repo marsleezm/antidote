@@ -52,7 +52,7 @@ basic_test1(Nodes) ->
     TxId3 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
     RUps = [{Part1, [{t1_k1, 2}, {t1_k2, 4}, {t1_k3, 6}]}],
     {ok, Result2} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId3, [], RUps]),
-    ?assertMatch({specula_commit, _}, Result2),
+    ?assertMatch({_, _}, Result2),
     timer:sleep(100),
 
     TxId4 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
@@ -92,7 +92,7 @@ basic_test3(Nodes) ->
     ?assertEqual({ok, []}, ReadResult1),
     lager:info("After first read"),
 
-    TxId2 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
+    TxId2 = rpc:call(Node1, tx_utilities, create_tx_id, [1]),
     lager:info("Before spawnning!"),
     spawn(specula_test, spawn_receive, [self(), Node1, clocksi_vnode, read_data_item, [Part1, t3_k1, TxId2]]),
     lager:info("Before do reply! TxId is ~w", [TxId1]),

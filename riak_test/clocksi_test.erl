@@ -25,7 +25,7 @@
 -define(HARNESS, (rt_config:get(rt_harness))).
 
 confirm() ->
-    [Nodes] = rt:build_clusters([3]),
+    [Nodes] = rt:build_clusters([4]),
     lager:info("Nodes: ~p", [Nodes]),
     PartList = get_part_list(5, hd(Nodes)), 
     clocksi_test1(Nodes, PartList),
@@ -43,18 +43,21 @@ clocksi_test1(Nodes, PartList) ->
     %% Update some keys and try to read
     Part1 = hd(PartList),
     Part2 = lists:nth(2, PartList),
-    TxId1 = rpc:call(Node1, tx_utilities, create_transaction_record, [0]),
+    TxId1 = rpc:call(Node1, tx_utilities, create_tx_id, [0]),
     WS1 = [{Part1, [{t1_key1,1}, {t1_key2, 2}]}, {Part2, [{t1_key3,3},{t1_key4,4}]}],
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS1, TxId1, local, self()]), 
+    lager:info("Waiting for first prep"),
     receive
         Msg1 ->
             ?assertMatch({prepared, TxId1, _, local}, parse_msg(Msg1))
     end,
+    lager:info("Waiting for second prep"),
     receive
         Msg2 ->
             ?assertMatch({prepared, TxId1, _, local}, parse_msg(Msg2))
     end,
     {tx_id, SnapshotTime, _} = TxId1,
+    lager:info("Trying to commit first txn"),
     rpc:call(Node1, clocksi_vnode, commit, [[Part1, Part2], TxId1, SnapshotTime+10]), 
     {ok, Result1} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, t1_key1, {tx_id, SnapshotTime+10, self()}]),
     ?assertEqual(Result1, 1),
@@ -74,7 +77,7 @@ clocksi_test2(Nodes, PartList) ->
     K1 = t2_k1, K2 = t2_k2, K3 = t2_k3, K4 = t2_k4,
     Part1 = hd(PartList),
     Part2 = lists:nth(2, PartList),
-    TxId1 = rpc:call(Node1, tx_utilities, create_transaction_record, [0]),
+    TxId1 = rpc:call(Node1, tx_utilities, create_tx_id, [0]),
     WS1 = [{Part1, [{K1,1}, {K2, 2}]}, {Part2, [{K3,3},{K4,4}]}],
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS1, TxId1, local, self()]),
     receive
@@ -122,7 +125,7 @@ clocksi_test3(Nodes, PartList) ->
     K1 = t3_k1, K2 = t3_k2, K3 = t3_k3, K4 = t3_k4,
     Part1 = hd(PartList),
     Part2 = lists:nth(2, PartList),
-    TxId1 = rpc:call(Node1, tx_utilities, create_transaction_record, [0]),
+    TxId1 = rpc:call(Node1, tx_utilities, create_tx_id, [0]),
     {tx_id, SnapshotTime, _} = TxId1,
     lager:info("TxId 1 is ~w", [TxId1]),
     TxId2 = {tx_id, SnapshotTime+10, self()}, 
@@ -272,7 +275,7 @@ clocksi_test4(Nodes, PartList) ->
     K1 = t4_k1, K2 =t4_k2, K3 = t4_k3, K4 = t4_k4,
     Part1 = hd(PartList),
     Part2 = lists:nth(2, PartList),
-    TxId1 = rpc:call(Node1, tx_utilities, create_transaction_record, [0]),
+    TxId1 = rpc:call(Node1, tx_utilities, create_tx_id, [0]),
     {tx_id, SnapshotTime, _} = TxId1,
     lager:info("TxId 1 is ~w", [TxId1]),
     TxId2 = {tx_id, SnapshotTime-5, self()},

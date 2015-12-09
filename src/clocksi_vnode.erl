@@ -142,7 +142,7 @@ debug_prepare(Updates, TxId, Type, Sender) ->
     lists:foreach(fun({Node, WriteSet}) ->
 			riak_core_vnode_master:command(Node,
 						       {prepare, TxId, WriteSet, Type},
-                               {debug, Sender},
+                               Sender,
 						       ?CLOCKSI_MASTER)
 		end, Updates).
 
@@ -357,7 +357,7 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max
     end;
 
 handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_blocked=NumBlocked,
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS, if_specula=IfSpecula}) ->
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS}) ->
     %lager:info("Got relay read from ~w of Reader ~w", [Sender, Reader]),
     %clock_service:update_ts(TxId#tx_id.snapshot_time),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
@@ -373,28 +373,16 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_bl
                     {noreply, SD0#state{max_ts=MaxTS1}}
             end;
         specula ->
-            case IfSpecula of
-                true ->
-                    case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
-                        not_ready->
-                            {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
-                        {specula, Value} ->
-                            gen_server:reply(Reader, {ok, Value}), 
-                            {noreply, SD0#state{max_ts=MaxTS1}};
-                        ready ->
-                            Result = read_value(Key, TxId, InMemoryStore),
-                            gen_server:reply(Reader, Result), 
-                            {noreply, SD0#state{max_ts=MaxTS1}}
-                    end;
-                false ->
-                    case ready_or_block(TxId, Key, PreparedTxs, {relay, Reader}) of
-                        not_ready->
-                            {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
-                        ready ->
-                            Result = read_value(Key, TxId, InMemoryStore),
-                            gen_server:reply(Reader, Result), 
-                            {noreply, SD0#state{max_ts=MaxTS1}}
-                    end
+            case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
+                not_ready->
+                    {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
+                {specula, Value} ->
+                    gen_server:reply(Reader, {ok, Value}), 
+                    {noreply, SD0#state{max_ts=MaxTS1}};
+                ready ->
+                    Result = read_value(Key, TxId, InMemoryStore),
+                    gen_server:reply(Reader, Result), 
+                    {noreply, SD0#state{max_ts=MaxTS1}}
             end
     end;
 
@@ -1083,20 +1071,20 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
         {ok, {1, PrepareTime, Sender, IfLocal}} ->
             case Partition of
                 ignore ->
-                    lager:info("No more dependency, sending reply back for ~w", [TxId]),
+                    %lager:info("No more dependency, sending reply back for ~w", [TxId]),
                     gen_server:cast(Sender, {prepared, TxId, PrepareTime, IfLocal});
                 _ ->
                     [{{waiting, TxId}, WriteSet}] = ets:lookup(PreparedTxs, {waiting, TxId}),
                     ets:delete(PreparedTxs, {waiting, TxId}),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
-                    lager:info("~w unblocked, replicating writeset to ~w", [TxId, WriteSet]),
+                    %lager:info("~w unblocked, replicating writeset to ~w", [TxId, WriteSet]),
                     PendingRecord = {Sender,
                         IfLocal, WriteSet, PrepareTime},
                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
             end,
             dict:erase(TxId, DepDict);
         {ok, {N, PrepareTime, Sender, Type}} ->
-            lager:info("~w updates dep to ~w", [TxId, N-1]),
+            %lager:info("~w updates dep to ~w", [TxId, N-1]),
             dict:store(TxId, {N-1, PrepareTime, Sender, Type}, DepDict)
     end.  
 

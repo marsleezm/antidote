@@ -144,7 +144,7 @@ handle_call({read, Key, TxId}, _Sender,
             case find_version(ValueList, MyClock) of
                 {SpeculaTxId, Value} ->
                     ets:insert(dependency, {SpeculaTxId, TxId}),
-                    lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
+                    %lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
                     ets:insert(anti_dep, {TxId, SpeculaTxId}),
                     {reply, {ok, Value}, SD0};
                 [] ->
@@ -236,9 +236,9 @@ delete_keys(Table, KeySet, TxId) ->
                         [] -> %% TODO: this can not happen 
                             ok;
                         [{Key, ValueList}] ->
-                            lager:info("Delete version ~w, key is ~w, list is ~p", [TxId, Key, ValueList]),
+                            %lager:info("Delete version ~w, key is ~w, list is ~p", [TxId, Key, ValueList]),
                             NewValueList = delete_version(ValueList, TxId), 
-                            lager:info("after deletion list is ~p", [NewValueList]),
+                            %lager:info("after deletion list is ~p", [NewValueList]),
                             ets:insert(Table, {Key, NewValueList})
                     end 
                   end, KeySet).

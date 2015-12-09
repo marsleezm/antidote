@@ -150,6 +150,13 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
             case Mode of
                 quorum ->
                     case IfLocal of
+                        %% This is for non-specula version
+                        {remote, ignore} ->
+                            ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
+                                    PrepareTime, WriteSet, remote}, ReplFactor}}),
+                            quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
+                        %% This is for specula.. So no need to replicate the msg to the partition that sent the prepare(because due to specula,
+                        %% the msg is replicated already).
                         {remote, SenderName} ->
                             %lager:info("IfLocal is ~w", [IfLocal]),
                             case dict:find(SenderName, ExceptReplicas) of
@@ -166,7 +173,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                                             PrepareTime, WriteSet, remote}, ReplFactor}}),
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                             end;
-                        _ ->
+                        local ->
                             %lager:info("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, WriteSet, local}, ReplFactor}}),
