@@ -270,11 +270,11 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
     case Type of
         prepared ->
             ets:insert(PendingLog, {{TxId, Partition}, {WriteSet, TimeStamp}}),
-            %lager:info("Got repl prepare for {~w, ~w}, replying to ~w", [TxId, Partition, Sender]),
+            lager:info("Got repl prepare for {~w, ~w}, replying to ~w", [TxId, Partition, Sender]),
             gen_server:cast({global, Sender}, {ack, Partition, TxId}), 
             {noreply, SD0};
         single_commit ->
-            %lager:info("Got single commit.. Replying to ~w", [Sender]),
+            lager:info("Data repl Got single commit.. Replying to ~w", [Sender]),
             AppendFun = fun({Key, Value}) ->
                 case ets:lookup(ReplicatedLog, Key) of
                     [] ->
