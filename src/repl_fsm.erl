@@ -131,13 +131,13 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, pending_log=PendingLog, except_replicas=ExceptReplicas, 
             my_name=MyName, mode=Mode, repl_factor=ReplFactor}) ->
-    lager:info("Repl prepare ~w", [TxId]),
+    %lager:info("Repl prepare ~w", [TxId]),
     case PrepType of
         single_commit ->
             {Sender, WriteSet, CommitTime} = LogContent,
             case Mode of
                 quorum ->
-                    lager:info("Got single_commit request for ~w, ~p, Sending to ~w", [TxId, LogContent, Replicas]),
+                    %lager:info("Got single_commit request for ~w, ~p, Sending to ~w", [TxId, LogContent, Replicas]),
                     ets:insert(PendingLog, {{TxId, Partition}, {{single_commit, Sender, 
                             CommitTime, WriteSet, ignore}, ReplFactor}}),
                     quorum_replicate(Replicas, single_commit, TxId, Partition, WriteSet, CommitTime, MyName);
@@ -231,7 +231,7 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
         %ToReply = {prepared, TxId, PrepareTime, remote},
 %                    ets:insert(PendingLog, {{TxId, Partition}, {{Prep, Sender,
 %                            PrepareTime, WriteSet, IfLocal}, ReplFactor-1}}),
-            lager:info("Got req from ~w for ~w, done", [Partition, TxId]),
+            %lager:info("Got req from ~w for ~w, done", [Partition, TxId]),
             {PrepType, Sender, Timestamp, _, IfLocal} = R,
             case PrepType of
                 prepared ->
@@ -239,12 +239,12 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     gen_server:cast(Sender, {prepared, TxId, Timestamp, IfLocal});
                 single_commit ->
-                    lager:info("Single commit got enough replies, replying to ~w", [Sender]),
+                    %lager:info("Single commit got enough replies, replying to ~w", [Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     gen_server:reply(Sender, {ok, {committed, Timestamp}})
             end;
         [{{TxId, Partition}, {R, N}}] ->
-            lager:info("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
+            %lager:info("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
             %lager:info("Accumulating"),
             ets:insert(PendingLog, {{TxId, Partition}, {R, N-1}});
         [] -> %%The record is appended already, do nothing
