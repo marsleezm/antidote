@@ -985,21 +985,21 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
 
 %% TODO: allowing all speculative read now! Maybe should not be so aggressive
 specula_read(TxId, Key, PreparedTxs, Sender) ->
-    lager:info("Check if ready or block for ~w, key ~w", [TxId, Key]),
+    %lager:info("Check if ready or block for ~w, key ~w", [TxId, Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
-            lager:info("Ready now!!"),
+            %lager:info("Ready now!!"),
             ready;
         [{Key, [{PreparedTxId, PrepareTime, LastPPTime, Value, PendingReader}| PendingPrepare]}] ->
-            lager:info("~p Not ready.. ~w waits for ~w with ~w, others are ~w",
-                    [Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
+            %lager:info("~p Not ready.. ~w waits for ~w with ~w, others are ~w",
+                    %[Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
             case PrepareTime =< SnapshotTime of
                 true ->
                     %% The read is not ready, may read from speculative version 
                     Result =
                         find_appr_version(PrepareTime, LastPPTime, SnapshotTime, PendingPrepare),
-                    lager:info("Result is ~w", [Result]),
+                    %lager:info("Result is ~w", [Result]),
                     {ApprTxId, ApprPPTime, ApprPPValue} = 
                         case Result of first -> {PreparedTxId, PrepareTime, Value};
                                              _ -> Result end,
@@ -1008,7 +1008,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                             %% There is more than one speculative version
                             ets:insert(dependency, {ApprTxId, TxId}),
                             ets:insert(anti_dep, {TxId, ApprTxId}),
-                            lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, ApprTxId, Key]),
+                            %lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, ApprTxId, Key]),
                             {specula, ApprPPValue};
                         _ ->
                             ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastPPTime, Value,
