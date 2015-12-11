@@ -127,7 +127,7 @@ init([Name]) ->
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
-%% IfLocal can only be prepared for now.
+%% RepMode can only be prepared for now.
 handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, pending_log=PendingLog, except_replicas=ExceptReplicas, 
             my_name=MyName, mode=Mode, repl_factor=ReplFactor}) ->
@@ -146,10 +146,10 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                     chain_replicate(Replicas, TxId, WriteSet, CommitTime, {Sender, ToReply})
             end;
         prepared ->
-            {Sender, IfLocal, WriteSet, PrepareTime} = LogContent,
+            {Sender, RepMode, WriteSet, PrepareTime} = LogContent,
             case Mode of
                 quorum ->
-                    case IfLocal of
+                    case RepMode of
                         %% This is for non-specula version
                         {remote, ignore} ->
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
@@ -158,7 +158,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                         %% This is for specula.. So no need to replicate the msg to the partition that sent the prepare(because due to specula,
                         %% the msg is replicated already).
                         {remote, SenderName} ->
-                            %lager:info("IfLocal is ~w", [IfLocal]),
+                            %lager:info("RepMode is ~w", [RepMode]),
                             case dict:find(SenderName, ExceptReplicas) of
                                 {ok, R} -> 
                                     %lager:info("Remote prepared request for {~w, ~w}, Sending to ~w", 
@@ -173,14 +173,14 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                                             PrepareTime, WriteSet, remote}, ReplFactor}}),
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                             end;
-                        local ->
+                        _ ->
                             %lager:info("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
-                                    PrepareTime, WriteSet, local}, ReplFactor}}),
+                                    PrepareTime, WriteSet, RepMode}, ReplFactor}}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                     end;
                 chain ->
-                    ToReply = {prepared, TxId, PrepareTime, IfLocal},
+                    ToReply = {prepared, TxId, PrepareTime, RepMode},
                     chain_replicate(Replicas, TxId, WriteSet, PrepareTime, {Sender, ToReply})
             end
     end,
@@ -230,19 +230,19 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
         [{{TxId, Partition}, {R, 1}}] ->
         %ToReply = {prepared, TxId, PrepareTime, remote},
 %                    ets:insert(PendingLog, {{TxId, Partition}, {{Prep, Sender,
-%                            PrepareTime, WriteSet, IfLocal}, ReplFactor-1}}),
+%                            PrepareTime, WriteSet, RepMode}, ReplFactor-1}}),
             %lager:info("Got req from ~w for ~w, done", [Partition, TxId]),
-            {PrepType, Sender, Timestamp, _, IfLocal} = R,
+            {PrepType, Sender, Timestamp, _, RepMode} = R,
             case PrepType of
                 prepared ->
-                    %lager:info("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, IfLocal, TxId, Sender]),
+                    %lager:info("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
-                    case IfLocal of
+                    case RepMode of
                         false ->
                             %% In this case, no need to reply
                             ok;
                         _ ->
-                            gen_server:cast(Sender, {prepared, TxId, Timestamp, IfLocal})
+                            gen_server:cast(Sender, {prepared, TxId, Timestamp, RepMode})
                     end;
                 single_commit ->
                     %lager:info("Single commit got enough replies, replying to ~w", [Sender]),

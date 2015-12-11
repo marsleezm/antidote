@@ -389,7 +389,7 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_bl
             end
     end;
 
-handle_command({prepare, TxId, WriteSet, IfLocal}, RawSender,
+handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                State = #state{partition=Partition,
                               if_replicate=IfReplicate,
                               committed_txs=CommittedTxs,
@@ -403,7 +403,7 @@ handle_command({prepare, TxId, WriteSet, IfLocal}, RawSender,
                               max_ts=MaxTS,
                               debug=Debug
                               }) ->
-    %lager:info("~w: Got prepare of ~w, ~w", [Partition, TxId, IfLocal]),
+    %lager:info("~w: Got prepare of ~w, ~w", [Partition, TxId, RepMode]),
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
     Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify),
     case Result of
@@ -415,18 +415,20 @@ handle_command({prepare, TxId, WriteSet, IfLocal}, RawSender,
                 true ->
                     case Debug of
                         false ->
-                            case FastReply of
+                            case (FastReply == true) and (RepMode == local) of
                                 true ->
                                     PendingRecord = {Sender, false, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
-                                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, IfLocal});
+                                    %lager:info("Replying to sender of ~w, ~w", [TxId, RepMode]),
+                                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode});
                                 false ->
-                                    PendingRecord = {Sender, IfLocal, WriteSet, PrepareTime},
+                                    %lager:info("Not fast replying for ~w, ~w", [TxId, RepMode]),
+                                    PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
                             end,
                             {noreply, State#state{total_time=TotalTime+UsedTime, max_ts=PrepareTime, prepare_count=PrepareCount+1}};
                         true ->
-                            PendingRecord = {Sender, IfLocal, WriteSet, PrepareTime},
+                            PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                             %lager:info("Inserting pending log for replicate and debug ~w:~w", [TxId, PendingRecord]),
                             ets:insert(PreparedTxs, {{pending, TxId}, PendingRecord}),
                             {noreply, State#state{max_ts=PrepareTime}}
@@ -436,17 +438,17 @@ handle_command({prepare, TxId, WriteSet, IfLocal}, RawSender,
                     case Debug of
                         false ->
                             %lager:info("~w prepared with ~w", [TxId, PrepareTime]),
-                            gen_server:cast(Sender, {prepared, TxId, PrepareTime, IfLocal}),
+                            gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode}),
                             {noreply, State#state{total_time=TotalTime+UsedTime, max_ts=PrepareTime, 
                                 prepare_count=PrepareCount+1}};
                         true ->
-                            ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {prepared, TxId, PrepareTime, IfLocal}}}),
+                            ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {prepared, TxId, PrepareTime, RepMode}}}),
                             {noreply, State#state{max_ts=PrepareTime}}
                     end 
             end;
         {wait, NumDeps, PrepareTime} ->
             %lager:info("~w waiting with ~w", [TxId, PrepareTime]),
-            NewDepDict = dict:store(TxId, {NumDeps, PrepareTime, Sender, IfLocal}, DepDict),
+            NewDepDict = dict:store(TxId, {NumDeps, PrepareTime, Sender, RepMode}, DepDict),
             {noreply, State#state{max_ts=PrepareTime, dep_dict=NewDepDict}};
         {error, write_conflict} ->
             %lager:info("~w: ~w cerfify abort", [Partition, TxId]),
@@ -458,13 +460,13 @@ handle_command({prepare, TxId, WriteSet, IfLocal}, RawSender,
                     %        {noreply, 
                     %            State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1}};
                     %    _ ->
-                            %lager:info("Replying to ~w of abort for ~w, ~w", [Sender, TxId, IfLocal]),
-                            gen_server:cast(Sender, {abort, TxId, IfLocal}),
+                            %lager:info("Replying to ~w of abort for ~w, ~w", [Sender, TxId, RepMode]),
+                            gen_server:cast(Sender, {abort, TxId, RepMode}),
                             {noreply, State#state{num_cert_fail=NumCertFail+1,
                                 prepare_count=PrepareCount+1}};
                     %end;
                 true ->
-                    ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {abort, TxId, IfLocal}}}),
+                    ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {abort, TxId, RepMode}}}),
                     {noreply, State}
             end 
     end;
@@ -1080,18 +1082,18 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
 unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
     %lager:info("Unblocking transaction ~w", [TxId]),
     case dict:find(TxId, DepDict) of
-        {ok, {1, PrepareTime, Sender, IfLocal}} ->
+        {ok, {1, PrepareTime, Sender, RepMode}} ->
             case Partition of
                 ignore ->
                     %lager:info("No more dependency, sending reply back for ~w", [TxId]),
-                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, IfLocal});
+                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode});
                 _ ->
                     [{{waiting, TxId}, WriteSet}] = ets:lookup(PreparedTxs, {waiting, TxId}),
                     ets:delete(PreparedTxs, {waiting, TxId}),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
                     %lager:info("~w unblocked, replicating writeset to ~w", [TxId, WriteSet]),
                     PendingRecord = {Sender,
-                        IfLocal, WriteSet, PrepareTime},
+                        RepMode, WriteSet, PrepareTime},
                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
             end,
             dict:erase(TxId, DepDict);
