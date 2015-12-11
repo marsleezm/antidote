@@ -1,16 +1,22 @@
 #!/bin/bash
 
-if [ $# -eq 1 ]
+if [ $# -eq 2 ]
 then
     DoSpecula=$1
+    FastReply=$2
 else
     DoSpecula=true
+    FastReply=true
 fi
 
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev1/antidote.config
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev2/antidote.config
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev3/antidote.config
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev4/antidote.config
+sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev1/antidote.config
+sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev2/antidote.config
+sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev3/antidote.config
+sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev4/antidote.config
 
 ./dev/dev1/bin/antidote stop
 ./dev/dev2/bin/antidote stop
