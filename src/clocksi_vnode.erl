@@ -81,6 +81,7 @@
                 if_certify :: boolean(),
                 if_replicate :: boolean(),
                 if_specula :: boolean(),
+                fast_reply :: boolean(),
                 inmemory_store :: cache_id(),
                 dep_dict :: dict(),
                 %Statistics
@@ -195,6 +196,7 @@ init([Partition]) ->
     IfCertify = antidote_config:get(do_cert),
     IfReplicate = antidote_config:get(do_repl), 
     IfSpecula = antidote_config:get(do_specula), 
+    FastReply = antidote_config:get(fast_reply),
 
     _ = case IfReplicate of
                     true ->
@@ -209,6 +211,7 @@ init([Partition]) ->
                 if_certify = IfCertify,
                 if_replicate = IfReplicate,
                 if_specula = IfSpecula,
+                fast_reply = FastReply,
                 inmemory_store=InMemoryStore,
                 dep_dict = DepDict,
                 max_ts=0,
@@ -391,6 +394,7 @@ handle_command({prepare, TxId, WriteSet, IfLocal}, RawSender,
                               if_replicate=IfReplicate,
                               committed_txs=CommittedTxs,
                               if_certify=IfCertify,
+                              fast_reply=FastReply,
                               total_time=TotalTime,
                               prepare_count=PrepareCount,
                               num_cert_fail=NumCertFail,
@@ -409,12 +413,20 @@ handle_command({prepare, TxId, WriteSet, IfLocal}, RawSender,
             %    [Partition, TxId, IfReplicate, Debug]),
             case IfReplicate of
                 true ->
-                    PendingRecord = {Sender, IfLocal, WriteSet, PrepareTime},
                     case Debug of
                         false ->
-                            repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
+                            case FastReply of
+                                true ->
+                                    PendingRecord = {Sender, false, WriteSet, PrepareTime},
+                                    repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
+                                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, IfLocal});
+                                false ->
+                                    PendingRecord = {Sender, IfLocal, WriteSet, PrepareTime},
+                                    repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
+                            end,
                             {noreply, State#state{total_time=TotalTime+UsedTime, max_ts=PrepareTime, prepare_count=PrepareCount+1}};
                         true ->
+                            PendingRecord = {Sender, IfLocal, WriteSet, PrepareTime},
                             %lager:info("Inserting pending log for replicate and debug ~w:~w", [TxId, PendingRecord]),
                             ets:insert(PreparedTxs, {{pending, TxId}, PendingRecord}),
                             {noreply, State#state{max_ts=PrepareTime}}

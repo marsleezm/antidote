@@ -237,7 +237,13 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                 prepared ->
                     %lager:info("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, IfLocal, TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
-                    gen_server:cast(Sender, {prepared, TxId, Timestamp, IfLocal});
+                    case IfLocal of
+                        false ->
+                            %% In this case, no need to reply
+                            ok;
+                        _ ->
+                            gen_server:cast(Sender, {prepared, TxId, Timestamp, IfLocal})
+                    end;
                 single_commit ->
                     %lager:info("Single commit got enough replies, replying to ~w", [Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
