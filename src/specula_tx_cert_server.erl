@@ -121,7 +121,7 @@ handle_call({single_commit, Node, Key, Value}, Sender, SD0) ->
 
 handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D}) ->
     TxId = tx_utilities:create_tx_id(0),
-    %lager:info("Starting txid ~w", [TxId]),
+    lager:info("Starting txid ~w", [TxId]),
     D1 = dict:store(TxId, {0, [], 0}, D),
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read}};
 
