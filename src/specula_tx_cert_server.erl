@@ -683,6 +683,7 @@ try_to_abort(PendingList, ToAbortTxs, DepDict, RepDict, PendingTxs, DoRepl, Read
 
 %% Same reason, no need for RemoteParts
 commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict) ->
+    lager:info("Committing tx ~w", [TxId]),
     DepList = ets:lookup(dependency, TxId),
     %lager:info("~w: My read dependncy are ~w", [TxId, DepList]),
     {DepDict1, ToAbortTxs} = solve_read_dependency(CommitTime, DepDict, DepList),
@@ -694,6 +695,7 @@ commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict) ->
     {DepDict1, ToAbortTxs}.
 
 commit_specula_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict, RepDict) ->
+    lager:info("Committing specula tx ~w", [TxId]),
     DepList = ets:lookup(dependency, TxId),
     %lager:info("~w: My read dependncy are ~w", [TxId, DepList]),
     {DepDict1, ToAbortTxs} = solve_read_dependency(CommitTime, DepDict, DepList),
@@ -708,12 +710,14 @@ commit_specula_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict, Re
     {DepDict1, ToAbortTxs}.
 
 abort_specula_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs, RepDict, DepDict) ->
+    lager:info("Aborting specula tx ~w", [TxId]),
     %lager:info("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     abort_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs),
     abort_to_table(RemoteParts, TxId, RepDict),
     dict:erase(TxId, DepDict).
 
 abort_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs) ->
+    lager:info("Aborting tx ~w", [TxId]),
     %lager:info("Trying to abort ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     true = ets:delete(PendingTxs, TxId),
     %lager:info("Deleting ~w", [TxId]),
