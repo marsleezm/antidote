@@ -166,7 +166,7 @@ specula_test2(Nodes) ->
     ?assertMatch({specula_commit, _}, Result2),
     lager:info("Specula commit for t2"),
     IntDep = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, read_dep, TxId2]),
-    ?assertEqual(1, IntDep),
+    ?assertEqual([TxId1], IntDep),
     
     TxId3 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
     ReadR4 = rpc:call(Node1, data_repl_serv, read, [DataRepl2, K3, TxId3]),
@@ -188,7 +188,7 @@ specula_test2(Nodes) ->
     {ok, Result3} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId3, LUp3, RUp3]),
     ?assertMatch({specula_commit, _}, Result3),
     IntDep2 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, read_dep, TxId3]),
-    ?assertEqual(2, IntDep2),
+    ?assertEqual([TxId1, TxId2], IntDep2),
 
     %% This txn will not read anything from the previous txn. And its previous txn
     %% will commit with larger ts then its snapshot, but since it has no read dependency
@@ -246,7 +246,7 @@ specula_test2(Nodes) ->
     %% Tx2 gets committed
     lager:info("Commit t2"),
     ReadDep1 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, read_dep, TxId2]),
-    ?assertEqual(0, ReadDep1),
+    ?assertEqual([], ReadDep1),
     ok = rpc:call(Node1, clocksi_vnode, do_reply, [PartNode3, TxId2]),
     timer:sleep(500),
     read_txn_data(Node1, LUp2, RUp2),
@@ -263,7 +263,7 @@ specula_test2(Nodes) ->
     %% Tx4 gets committed, before committing check that TxId5 still depends on Tx4
     lager:info("Commit t4"),
     ReadDep2 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, read_dep, TxId5]),
-    ?assertEqual(1, ReadDep2),
+    ?assertEqual([TxId4], ReadDep2),
     {tx_id, T1, _} =TxId5,
     rpc:call(Node1, tx_cert_sup, set_internal_data, [1, last_commit_time, T1+10]),
 
