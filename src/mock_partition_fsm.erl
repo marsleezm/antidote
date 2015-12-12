@@ -50,7 +50,7 @@
         repl_abort/3,
         abort/2,
         commit/3,
-        read_valid/2,
+        read_valid/3,
         read_invalid/3,
         if_applied/2,
         specula_prepare/5,
@@ -92,8 +92,8 @@ repl_abort(UpdatedParts, TxId, true) ->
 repl_abort(UpdatedParts, TxId, true, _) ->
     gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
 
-read_valid(_, TxId) ->
-    gen_server:cast(test_fsm, {read_valid, TxId}).
+read_valid(_, RTxId, WTxId) ->
+    gen_server:cast(test_fsm, {read_valid, RTxId, WTxId}).
 
 read_invalid(_, _, TxId) ->
     gen_server:cast(test_fsm, {read_invalid, TxId}).
@@ -146,8 +146,8 @@ handle_cast({abort_specula, ServName, TxId, Partition}, State=#state{table=Table
     io:format(user, "abort_specula ~w ~w ~w ~n", [ServName, TxId, Partition]),
     {noreply, State#state{table=dict:store({abort_specula, ServName, TxId, Partition}, nothing, Table)}};
 
-handle_cast({read_valid, TxId}, State=#state{table=Table}) ->
-    {noreply, State#state{table=dict:store({read_valid, TxId}, nothing, Table)}};
+handle_cast({read_valid, RTxId, WTxId}, State=#state{table=Table}) ->
+    {noreply, State#state{table=dict:store({read_valid, RTxId}, WTxId, Table)}};
 
 handle_cast({read_invalid, TxId}, State=#state{table=Table}) ->
     {noreply, State#state{table=dict:store({read_invalid, TxId}, nothing, Table)}};
