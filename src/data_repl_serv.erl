@@ -37,7 +37,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--define(NUM_VERSIONS, 20).
+-define(NUM_VERSIONS, 10).
 %% API
 -export([start_link/1]).
 
