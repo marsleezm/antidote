@@ -59,6 +59,7 @@
         abort_specula/3,
         if_prepared/3,
         if_bulk_prepared/3,
+        num_specula_read/1,
         read/3]).
 
 %% Spawn
@@ -68,6 +69,8 @@
         replicated_log :: cache_id(),
         pending_log :: cache_id(),
         delay :: non_neg_integer(),
+        num_specula_read=0 :: non_neg_integer(),
+        num_read=0 :: non_neg_integer(),
         name :: atom(),
 		self :: atom()}).
 
@@ -81,6 +84,9 @@ start_link(Name) ->
 
 read(Name, Key, TxId) ->
     gen_server:call({global, Name}, {read, Key, TxId}).
+
+num_specula_read(Node) ->
+    gen_server:call({global, Node}, {num_specula_read}).
 
 debug_read(Name, Key, TxId) ->
     gen_server:call({global, Name}, {debug_read, Key, TxId}).
@@ -125,6 +131,9 @@ handle_call({retrieve_log, LogName},  _Sender,
             {reply, [], SD0}
     end;
 
+handle_call({num_specula_read}, _Sender, SD0=#state{num_specula_read=NumSpeculaRead, num_read=NumRead}) ->
+    {reply, {NumSpeculaRead, NumRead}, SD0};
+
 handle_call({debug_read, Key, TxId}, _Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
     %lager:info("Got debug read for ~w", [Key]),
@@ -143,25 +152,27 @@ handle_call({debug_read, Key, TxId}, _Sender,
     end;
 
 handle_call({read, Key, TxId}, _Sender, 
-	    SD0=#state{replicated_log=ReplicatedLog}) ->
-    %lager:info("Reading for ~w , key ~w", [TxId, Key]),
+	    SD0=#state{replicated_log=ReplicatedLog, num_read=NumRead,
+                num_specula_read=NumSpeculaRead}) ->
+    %lager:info("DataRepl Reading for ~w , key ~p", [TxId, Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
-            %lager:info("Nothing!"),
-            {reply, {ok, []}, SD0};
+            lager:info("Nothing!"),
+            {reply, {ok, []}, SD0#state{num_read=NumRead+1}};
         [{Key, ValueList}] ->
-            %lager:info("Value list is ~w", [ValueList]),
+            %lager:info("Value list is ~p", [ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
             case find_version(ValueList, MyClock) of
                 {specula, SpeculaTxId, Value} ->
-                    %lager:info("Found specula value ~w from ~w", [ValueList, SpeculaTxId]),
+                    %lager:info("Found specula value ~p from ~w", [ValueList, SpeculaTxId]),
                     ets:insert(dependency, {SpeculaTxId, TxId}),         
                     ets:insert(anti_dep, {TxId, SpeculaTxId}),        
-                    %lager:info("Inserting antidep from ~w to ~w for key ~w", [TxId, SpeculaTxId, Key]),
-                    {reply, {ok, Value}, SD0};
+                    lager:info("Inserting antidep from ~w to ~w for key ~w", [TxId, SpeculaTxId, Key]),
+                    {reply, {ok, Value}, SD0#state{num_specula_read=NumSpeculaRead+1, num_read=NumRead+1}};
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
                 Value ->
-                    {reply, {ok, Value}, SD0}
+                    %lager:info("Found value ~p", [Value]),
+                    {reply, {ok, Value}, SD0#state{num_read=NumRead+1}}
             end
     end;
 
@@ -274,10 +285,10 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
             gen_server:cast({global, Sender}, {ack, Partition, TxId}), 
             {noreply, SD0};
         single_commit ->
-            %lager:info("Data repl Got single commit.. Replying to ~w", [Sender]),
             AppendFun = fun({Key, Value}) ->
                 case ets:lookup(ReplicatedLog, Key) of
                     [] ->
+                        %lager:info("Data repl inserting ~p, ~p of ~w to table", [Key, Value, TimeStamp]),
                         true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value}]});
                     [{Key, ValueList}] ->
                         {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),

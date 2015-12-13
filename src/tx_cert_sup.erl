@@ -26,7 +26,7 @@
 
 -export([start_link/0]).
 
--export([init/1, certify/4, get_stat/1, get_internal_data/3, start_tx/1, 
+-export([init/1, certify/4, get_stat/0, get_internal_data/3, start_tx/1, 
             set_internal_data/3, read/4, single_commit/4]).
 
 start_link() ->
@@ -84,13 +84,25 @@ read(Name, TxId, Key, Node) ->
             gen_server:call({global, Name}, {read, Key, TxId, Node})
     end.
 
-get_stat(Name) ->
-    case is_integer(Name) of
-        true ->
-            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {get_stat});
-        false ->
-            gen_server:call({global, Name}, {get_stat})
-    end.
+get_stat() ->
+    SPL = lists:seq(1, ?NUM_SUP),
+    {R1, R2, R3, R4, SpeculaReadTxns} = lists:foldl(fun(N, {A1, A2, A3, A4, A5}) ->
+                            {T1, T2, T3, T4, T5} = gen_server:call({global, generate_module_name(N rem ?NUM_SUP)}, {get_stat}),
+                            {A1+T1, A2+T2, A3+T3, A4+T4, A5+T5} end, {0,0,0,0,0}, SPL),
+    LocalServ = hash_fun:get_local_servers(),
+    PRead = lists:foldl(fun(S, Acc) ->
+                        Num = clocksi_vnode:num_specula_read(S), Num+Acc
+                        end, 0, LocalServ), 
+    Lists = antidote_config:get(to_repl),
+    [LocalRepList] = [LocalReps || {Node, LocalReps} <- Lists, Node == node()],
+    LocalRepNames = [list_to_atom(atom_to_list(node())++"repl"++atom_to_list(L))  || L <- LocalRepList ],
+    {DSpeculaRead, DTotalRead} = lists:foldl(fun(S, {Acc1, Acc2}) ->
+                        {Num1, Num2} = data_repl_serv:num_specula_read(S), {Num1+Acc1, Num2+Acc2}
+                        end, {0, 0}, LocalRepNames), 
+    lager:info("Data replica specula read is ~w, Data replica read is ~w", [DSpeculaRead, DTotalRead]),
+    {CacheSpeculaRead, CacheAttemptRead} = cache_serv:num_specula_read(),
+    {R1, R2, R3, R4, SpeculaReadTxns, PRead,  
+        DSpeculaRead, DTotalRead, CacheSpeculaRead, CacheAttemptRead}.
 
 generate_module_name(N) ->
     list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list(N)).

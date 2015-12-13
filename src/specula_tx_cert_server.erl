@@ -77,8 +77,8 @@
         pending_txs :: cache_id(),
         do_repl :: boolean(),
         read_aborted=0 :: non_neg_integer(),
-        hit_cache=0 :: non_neg_integer(),
         committed=0 :: non_neg_integer(),
+        num_specula_read=0 :: non_neg_integer(),
         aborted=0 :: non_neg_integer(),
         speculated=0 :: non_neg_integer(),
         specula_length :: non_neg_integer(),
@@ -121,20 +121,20 @@ handle_call({single_commit, Node, Key, Value}, Sender, SD0) ->
 
 handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D}) ->
     TxId = tx_utilities:create_tx_id(0),
-    lager:info("Starting txid ~w", [TxId]),
+    %lager:info("Starting txid ~w", [TxId]),
     D1 = dict:store(TxId, {0, [], 0}, D),
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read}};
 
-handle_call({get_stat}, _Sender, SD0=#state{aborted=Aborted, committed=Committed, read_aborted=ReadAborted, hit_cache=HitCache,
-        speculated=Speculated}) ->
-    lager:info("Hit cache is ~w, Num of read aborted ~w, Num of aborted is ~w, Num of committed is ~w, Speculated ~w", 
-                [HitCache, ReadAborted, Aborted, Committed, Speculated]),
-    {reply, {HitCache, ReadAborted, Aborted, Committed, Speculated}, SD0};
+handle_call({get_stat}, _Sender, SD0=#state{aborted=Aborted, committed=Committed, read_aborted=ReadAborted, 
+        speculated=Speculated, num_specula_read=NumSpeculaRead}) ->
+    lager:info("Num of read aborted ~w, Num of aborted is ~w, Num of committed is ~w, Speculated ~w, NumSpeculaRead is ~w", 
+                [ReadAborted, Aborted, Committed, Speculated, NumSpeculaRead]),
+    {reply, {ReadAborted, Aborted, Committed, Speculated, NumSpeculaRead}, SD0};
 
 handle_call({set_internal_data, Type, Param}, _Sender, SD0)->
     case Type of
         last_commit_time ->
-            lager:info("Set lct to ~w", [Param]),
+            %lager:info("Set lct to ~w", [Param]),
             {noreply, SD0#state{last_commit_ts=Param}}
     end;
 
@@ -184,56 +184,62 @@ handle_call({get_internal_data, Type, Param}, _Sender, SD0=#state{pending_list=P
             {reply, ReadAborted, SD0}
     end;
 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{rep_dict=RepDict, 
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{rep_dict=RepDict, aborted=Aborted, 
             pending_txs=PendingTxs, last_commit_ts=LastCommitTs, tx_id=TxId, invalid_ts=InvalidTs, specula_length=SpeculaLength, 
-            pending_list=PendingList, speculated=Speculated, dep_dict=DepDict}) ->
+            pending_list=PendingList, speculated=Speculated, dep_dict=DepDict, num_specula_read=NumSpeculaRead}) ->
     %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
     %% If there was a legacy ongoing transaction.
     %lager:info("Certifying, txId is ~w, local num is ~w, remote num is ~w", 
     %        [TxId, length(LocalUpdates), length(RemoteUpdates)]),
-    lager:info("Got req: txid ~w, localUpdates ~p, remote updates ~p", [TxId, LocalUpdates, RemoteUpdates]),
+    %lager:info("Got req: txid ~w, localUpdates ~p, remote updates ~p", [TxId, LocalUpdates, RemoteUpdates]),
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
     %OldReadDeps = dict:find(TxId, DepDict),
-    lager:info("Start certifying ~w, readDepTxs is ~w", [TxId, ReadDepTxs]),
+    %lager:info("Start certifying ~w, readDepTxs is ~w", [TxId, ReadDepTxs]),
     case InvalidTs == 0 of
         false -> 
             %% Some read is invalid even before the txn starts.. If invalid_ts is larger than 0, it can possibly be saved.
-            lager:info("Aborting txn due to invalidTS ~w!", [TxId]),
-            {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict)}};
+            %lager:info("Aborting txn due to invalidTS ~w!", [TxId]),
+            {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict), aborted=Aborted+1}};
         true ->
             case length(LocalUpdates) of
                 0 ->
                     RemotePartitions = [P || {P, _} <- RemoteUpdates],
                     DepDict1 = dict:update(TxId, 
-                        fun({_, B, _}) ->  lager:info("Previous readdep is ~w", [B]),
+                        fun({_, B, _}) ->  %lager:info("Previous readdep is ~w", [B]),
                             {length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1} end, DepDict),
+                    NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
+                                                        _ -> NumSpeculaRead+1
+                                      end, 
                     %lager:info("Trying to prepare ~w", [TxId]),
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                     case length(PendingList) >= SpeculaLength of
                         true -> %% Wait instead of speculate.
-                            {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, local_updates=[], 
+                            {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, local_updates=[], num_specula_read=NumSpeculaRead1, 
                                         remote_updates=RemoteUpdates, sender=Sender, stage=remote_cert}};
                         false -> %% Can speculate. After replying, removing TxId
-                            lager:info("Speculating directly for ~w", [TxId]),
+                            %lager:info("Speculating directly for ~w", [TxId]),
                             gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs}}),
                             %% Update specula data structure, and clean the txid so we know current txn is already replied
                             add_to_table(RemoteUpdates, TxId, LastCommitTs+1, RepDict),
                             PendingList1 = PendingList ++ [TxId],
                             ets:insert(PendingTxs, {TxId, {[], RemotePartitions}}),
                             {noreply, SD0#state{tx_id=?NO_TXN, speculated=Speculated+1, dep_dict=DepDict1,
-                                    pending_list=PendingList1}}
+                                    pending_list=PendingList1, num_specula_read=NumSpeculaRead1}}
                     end;
                 _ ->
                     %lager:info("Local updates are ~w", [LocalUpdates]),
                     LocalPartitions = [P || {P, _} <- LocalUpdates],
                     DepDict1 = dict:update(TxId, 
-                            fun({_, B, _}) ->   lager:info("Previous readdep is ~w", [B]),
+                            fun({_, B, _}) ->   %lager:info("Previous readdep is ~w", [B]),
                              {length(LocalUpdates), ReadDepTxs--B, LastCommitTs+1} end, DepDict),
                     %lager:info("Prepare ~w", [TxId]),
                     ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local),
+                    NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
+                                                        _ -> NumSpeculaRead+1
+                                      end,
                     {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, sender=Sender, local_updates=LocalPartitions,
-                        remote_updates=RemoteUpdates, stage=local_cert}}
+                        remote_updates=RemoteUpdates, stage=local_cert, num_specula_read=NumSpeculaRead1}}
             end
     end;
 
@@ -252,7 +258,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
             remote_updates=RemoteUpdates, sender=Sender, dep_dict=DepDict, pending_list=PendingList,
              speculated=Speculated, last_commit_ts=LastCommitTs, specula_length=SpeculaLength,
             pending_txs=PendingTxs, committed=Committed, rep_dict=RepDict}) ->
-    lager:info("Got local prepare for ~w", [TxId]),
+    %lager:info("Got local prepare for ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         %% Maybe can commit already.
         {ok, {1, ReadDepTxs, OldPrepTime}} ->
@@ -263,7 +269,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
                   and (PendingList == []) of
                 true ->
                     CommitTime = max(NewMaxPrep, LastCommitTs+1),
-                    lager:info("Committing ~w with ~w", [TxId, CommitTime]),
+                    %lager:info("Committing ~w with ~w", [TxId, CommitTime]),
                     %% TODO: remember to remove entry of tx in dict and ets
                     true = ets:delete(PendingTxs, TxId),
                     {DepDict1, _} = commit_tx(TxId, NewMaxPrep, LocalParts, [], DoRepl,
@@ -275,13 +281,13 @@ handle_cast({prepared, TxId, PrepareTime, local},
                     case length(PendingList) >= SpeculaLength of
                         true -> 
                             %%In wait stage, only prepare and doesn't add data to table
-                            lager:info("Decided to wait and prepare ~w!!", [TxId]),
+                            %lager:info("Decided to wait and prepare ~w!!", [TxId]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                             DepDict1 = dict:store(TxId, {RemoteToAck, ReadDepTxs, NewMaxPrep}, DepDict),
                             {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert}};
                         false ->
-                            lager:info("Speculate current tx with ~w, remote parts are ~w, Num is ~w", 
-                                [TxId, RemoteParts, length(RemoteParts)]),
+                            %lager:info("Speculate current tx with ~w, remote parts are ~w, Num is ~w", 
+                                %[TxId, RemoteParts, length(RemoteParts)]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                             %% Add dependent data into the table
                             gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
@@ -293,7 +299,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
                     end
                 end;
         {ok, {N, ReadDeps, OldPrepTime}} ->
-            lager:info("~w needs ~w local prep replies", [TxId, N-1]),
+            %lager:info("~w needs ~w local prep replies", [TxId, N-1]),
             DepDict1 = dict:store(TxId, {N-1, ReadDeps, max(PrepareTime, OldPrepTime)}, DepDict),
             {noreply, SD0#state{dep_dict=DepDict1}};
         error ->
@@ -310,7 +316,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
             pending_list=PendingList, do_repl=DoRepl, read_aborted=ReadAborted, tx_id=CurrentTxId, committed=Committed,
             last_commit_ts=LastCommitTS, sender=Sender, stage=Stage, speculated=Speculated, 
             local_updates=LocalParts, remote_updates=RemoteUpdates}) ->
-    lager:info("Got read valid for ~w", [PendingTxId]),
+    %lager:info("Got read valid for ~w", [PendingTxId]),
     case dict:find(PendingTxId, DepDict) of
         {ok, {0, ReadDepTxs, 0}} -> 
             %% Txn is still reading!!
@@ -318,8 +324,8 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
         {ok, {0, [PendedTxId], OldPrepTime}} -> %% Maybe the transaction can commit 
             case PendingList of
                  [] ->
-                    lager:info("Committing current txn... Current txn id ~w should be the same as  pending id~w", 
-                            [CurrentTxId, PendingTxId]),
+                    %lager:info("Committing current txn... Current txn id ~w should be the same as  pending id~w", 
+                            %[CurrentTxId, PendingTxId]),
                     CurCommitTime = max(LastCommitTS+1, OldPrepTime),
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
                     DepDict2 = dict:erase(PendingTxId, DepDict),
@@ -402,7 +408,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
 handle_cast({read_invalid, MyCommitTime, TxId}, SD0=#state{tx_id=TxId, sender=Sender, 
         invalid_ts=InvalidTS, do_repl=DoRepl, dep_dict=DepDict, stage=Stage, remote_updates=RemoteParts,
         local_updates=LocalParts, pending_txs=PendingTxs}) ->
-    lager:info("Got read invalid for ~w", [TxId]),
+    %lager:info("Got read invalid for ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         {ok, _} -> %% Has
             %% TODO: Replace to read verification
@@ -434,7 +440,7 @@ handle_cast({read_invalid, MyCommitTime, TxId}, SD0=#state{tx_id=TxId, sender=Se
 handle_cast({read_invalid, _MyCommitTime, PendingTxId}, SD0=#state{tx_id=CurrentTxId, sender=Sender, 
         do_repl=DoRepl, dep_dict=DepDict, pending_list=PendingList, aborted=Aborted, stage=Stage, 
         rep_dict=RepDict, local_updates=LocalParts, remote_updates=RemoteUpdates, pending_txs=PendingTxs}) ->
-    lager:info("Got read invalid for ~w", [PendingTxId]),
+    %lager:info("Got read invalid for ~w", [PendingTxId]),
     case start_from(PendingTxId, PendingList) of
         [] ->
             %lager:info("Not aborting anything"),
@@ -480,10 +486,10 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
             sender=Sender, tx_id=CurrentTxId, rep_dict=RepDict, last_commit_ts=LastCommitTS,
             committed=Committed, read_aborted=ReadAborted, remote_updates=RemoteUpdates,
             local_updates=LocalParts, dep_dict=DepDict, stage=Stage, speculated=Speculated}) ->
-    lager:info("Got remote prepare for ~w", [PendingTxId]),
+    %lager:info("Got remote prepare for ~w", [PendingTxId]),
     case dict:find(PendingTxId, DepDict) of
         {ok, {1, [], OldPrepTime}} -> %% Maybe the transaction can commit 
-            lager:info("Has all remote prep"),
+            %lager:info("Has all remote prep"),
             case PendingList of
                 [] -> %% This is the just speculated txn.. But new txn has not come yet.
                     %lager:info("Pending list is ~w", [PendingList]),
@@ -683,9 +689,9 @@ try_to_abort(PendingList, ToAbortTxs, DepDict, RepDict, PendingTxs, DoRepl, Read
 
 %% Same reason, no need for RemoteParts
 commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict) ->
-    lager:info("Committing tx ~w", [TxId]),
+    %lager:info("Committing tx ~w", [TxId]),
     DepList = ets:lookup(dependency, TxId),
-    lager:info("~w: My read dependncy are ~w", [TxId, DepList]),
+    %lager:info("~w: My read dependncy are ~w", [TxId, DepList]),
     {DepDict1, ToAbortTxs} = solve_read_dependency(CommitTime, DepDict, DepList),
     %lager:info("Commit ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     ?CLOCKSI_VNODE:commit(LocalParts, TxId, CommitTime),
@@ -695,9 +701,9 @@ commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict) ->
     {DepDict1, ToAbortTxs}.
 
 commit_specula_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict, RepDict) ->
-    lager:info("Committing specula tx ~w", [TxId]),
+    %lager:info("Committing specula tx ~w", [TxId]),
     DepList = ets:lookup(dependency, TxId),
-    lager:info("~w: My read dependncy are ~w", [TxId, DepList]),
+    %lager:info("~w: My read dependncy are ~w", [TxId, DepList]),
     {DepDict1, ToAbortTxs} = solve_read_dependency(CommitTime, DepDict, DepList),
 
     ?CLOCKSI_VNODE:commit(LocalParts, TxId, CommitTime),
@@ -710,17 +716,17 @@ commit_specula_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict, Re
     {DepDict1, ToAbortTxs}.
 
 abort_specula_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs, RepDict, DepDict) ->
-    lager:info("Aborting specula tx ~w", [TxId]),
-    lager:info("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
+    %lager:info("Aborting specula tx ~w", [TxId]),
+    %lager:info("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     abort_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs),
     abort_to_table(RemoteParts, TxId, RepDict),
     dict:erase(TxId, DepDict).
 
 abort_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs) ->
-    lager:info("Trying to abort ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
+    %lager:info("Trying to abort ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     true = ets:delete(PendingTxs, TxId),
     DepList = ets:lookup(dependency, TxId),
-    lager:info("~w: My read dependncy are ~w", [TxId, DepList]),
+    %lager:info("~w: My read dependncy are ~w", [TxId, DepList]),
     Self = self(),
     lists:foreach(fun({_, DepTxId}) ->
                             TxServer = DepTxId#tx_id.server_pid,
@@ -729,7 +735,7 @@ abort_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs) ->
                                 Self ->
                                     ok;
                                 _ ->
-                                    lager:info("~w is not my own, read invalid", [DepTxId]),
+                                    %lager:info("~w is not my own, read invalid", [DepTxId]),
                                     ?READ_INVALID(TxServer, -1, DepTxId)
                             end
                     end, DepList),
@@ -830,25 +836,25 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                     case DepTxId#tx_id.snapshot_time >= CommitTime of
                         %% This read is still valid
                         true ->
-                            lager:info("Read still valid for ~w", [DepTxId]),
+                            %lager:info("Read still valid for ~w", [DepTxId]),
                             case TxServer of
                                 Self ->
-                                    lager:info("~w is my own, read valid", [DepTxId]),
+                                    %lager:info("~w is my own, read valid", [DepTxId]),
                                     case dict:find(DepTxId, RD) of
                                         {ok, {0, [], 0}} -> %% Local transaction is still reading
-                                            ets:delete_object(anti_dependency, {DepTxId, TxId}), 
+                                            ets:delete_object(anti_dep, {DepTxId, TxId}), 
                                             {RD, ToAbort};
                                         {ok, {PrepDeps, ReadDeps, PrepTime}} ->
-                                            lager:info("Storing ~w for ~w", [lists:delete(TxId, ReadDeps), DepTxId]),
+                                            %lager:info("Storing ~w for ~w", [lists:delete(TxId, ReadDeps), DepTxId]),
                                             {dict:store(DepTxId, {PrepDeps, lists:delete(TxId, ReadDeps), 
                                                 PrepTime}, RD), ToAbort};
                                         error -> %% This txn hasn't even started certifying 
                                                  %% or has been aborted already
-                                            lager:info("This txn has not even started"),
+                                            %lager:info("This txn has not even started"),
                                             {RD, ToAbort}
                                     end;
                                 _ ->
-                                    lager:info("~w is not my own, read valid", [DepTxId]),
+                                    %lager:info("~w is not my own, read valid", [DepTxId]),
                                     ?READ_VALID(TxServer, DepTxId, TxId),
                                     {RD, ToAbort}
                             end;
@@ -856,10 +862,10 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                             %% Read is not valid
                             case TxServer of
                                 Self ->
-                                    lager:info("~w is my own, read invalid", [DepTxId]),
+                                    %lager:info("~w is my own, read invalid", [DepTxId]),
                                     {RD, [DepTxId|ToAbort]};
                                 _ ->
-                                    lager:info("~w is not my own, read invalid", [DepTxId]),
+                                    %lager:info("~w is not my own, read invalid", [DepTxId]),
                                     ?READ_INVALID(TxServer, CommitTime, DepTxId),
                                     {RD, ToAbort}
                             end

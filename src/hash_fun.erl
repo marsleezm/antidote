@@ -159,26 +159,36 @@ get_partitions() ->
     end.
 
 get_hash_fun() ->
-    case ets:lookup(meta_info, node_list) of
-        [{node_list, List}] ->
-            case antidote_config:get(do_repl) of
-                true ->
-                    {List, antidote_config:get(to_repl)};
-                false ->
-                    {List, []}
-            end;
-        [] ->
-            init_hash_fun(),
-            case ets:lookup(meta_info, node_list) of
-                [{node_list, List}] ->
-                    case antidote_config:get(do_repl) of
-                        true ->
-                            {List, antidote_config:get(to_repl)};
-                        false ->
-                            {List, []}
+    %case ets:lookup(meta_info, node_list) of
+    %    [{node_list, List}] ->
+    %        case antidote_config:get(do_repl) of
+    %            true ->
+    %                {List, antidote_config:get(to_repl)};
+    %            false ->
+    %                {List, []}
+    %        end;
+    %    [] ->
+            %case ets:lookup(meta_info, node_list) of
+            %    [{node_list, List}] ->
+                init_hash_fun(),
+                Partitions = get_partitions(),
+                Dict1 = lists:foldl(fun({Index, Node}, Dict) ->
+                    case dict:find(Node, Dict) of
+                        error ->
+                            dict:store(Node, [{Index,Node}], Dict);
+                        {ok, List} ->
+                            dict:store(Node, List++[{Index, Node}], Dict)
                     end
-            end
-    end.
+                end, dict:new(), Partitions),
+                List = lists:reverse(dict:to_list(Dict1)),
+                case antidote_config:get(do_repl) of
+                    true ->
+                        {List, antidote_config:get(to_repl)};
+                    false ->
+                        {List, []}
+                end.
+            %end.
+    %end.
 
 init_hash_fun() ->
     Partitions = get_partitions(),
@@ -190,18 +200,14 @@ init_hash_fun() ->
                             dict:store(Node, List++[{Index, Node}], Dict)
                     end 
                 end, dict:new(), Partitions),
-    PartitionListByNode = dict:to_list(Dict1),
+    PartitionListByNode = lists:reverse(dict:to_list(Dict1)),
     ets:insert(meta_info, {node_list, PartitionListByNode}),
     lists:foreach(fun({Node, PartList}) ->
         case node() of
             Node ->
-    %             lager:info("Inserting node ~w, PartList ~w", [Node, PartList]),
-    %             ets:insert(meta_info, {Node, PartList}),
                  ets:insert(meta_info, {local_node, PartList});
             _ ->
                  ok
-    %             lager:info("Inserting node ~w, PartList ~w", [Node, PartList]),
-    %             ets:insert(meta_info, {Node, PartList})
         end end, PartitionListByNode),
     PartitionListByNode.
 
