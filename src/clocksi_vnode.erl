@@ -21,7 +21,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(NUM_VERSION, 10).
--define(SPECULA_TIMEOUT, 50).
+-define(SPECULA_TIMEOUT, 10).
 
 -export([start_vnode/1,
 	    read_data_item/3,
@@ -415,14 +415,13 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                               max_ts=MaxTS,
                               debug=Debug
                               }) ->
-    %lager:info("~w: Got prepare of ~w, ~w", [Partition, TxId, RepMode]),
+    lager:info("~w: Got prepare of ~w, ~w", [Partition, TxId, RepMode]),
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
     Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify),
     case Result of
         {ok, PrepareTime} ->
             UsedTime = tx_utilities:now_microsec() - PrepareTime,
-            %lager:info("~w: ~w certification check prepred, ifRep is ~w, debug is ~w", 
-             %   [Partition, TxId, IfReplicate, Debug]),
+            lager:info("~w: ~w certification check prepred, ifRep is ~w, debug is ~w", [Partition, TxId, IfReplicate, Debug]),
             case IfReplicate of
                 true ->
                     case Debug of
@@ -527,7 +526,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
                       num_committed=NumCommitted,
                       if_specula=IfSpecula
                       } = State) ->
-    %lager:info("~w: Got commit req for ~w", [Partition, TxId]),
+    lager:info("~w: Got commit req for ~w", [Partition, TxId]),
     Result = 
         case IfReplicate of
             true ->
@@ -557,14 +556,14 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
 handle_command({abort, TxId}, _Sender,
                State = #state{partition=Partition, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore,
                 num_aborted=NumAborted, dep_dict=DepDict, if_replicate=IfReplicate, if_specula=IfSpecula}) ->
-    %lager:info("~w: Aborting ~w", [Partition, TxId]),
+    lager:info("~w: Aborting ~w", [Partition, TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             case IfSpecula of
                 true -> specula_utilities:deal_abort_deps(TxId);
                 false -> ok
             end,
-            %lager:info("Found key set"),
+            lager:info("Found key set"),
             true = ets:delete(PreparedTxs, TxId),
             DepDict1 = case IfReplicate of
                         true ->
@@ -656,13 +655,13 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
         0 ->
             %lager:info("Passed"),
             %PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
-            %lager:info("~w passed", [TxId]),
+            lager:info("~w passed", [TxId]),
 		    KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
             %lager:info("Inserting key sets ~w, ~w", [TxId, KeySet]),
 		    {ok, PrepareTime};
         N ->
-            %lager:info("~w passed but has ~w deps", [TxId, N]),
+            lager:info("~w passed but has ~w deps", [TxId, N]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             %lager:info("Key set is ~w", [KeySet]),
             true = ets:insert(PreparedTxs, {{waiting, TxId}, TxWriteSet}),
@@ -732,7 +731,7 @@ set_prepared(PreparedTxs,[{Key, Value} | Rest],TxId,Time, KeySet) ->
     set_prepared(PreparedTxs,Rest,TxId,Time, [Key|KeySet]).
 
 commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula)->
-    %lager:info("Before commit, DepDict is ~w", [dict:to_list(DepDict)]),
+    lager:info("Before commit ~w, DepDict is ~w", [TxId, dict:to_list(DepDict)]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             case IfSpecula of
@@ -829,11 +828,10 @@ check_and_insert(_, _, [], _, _, _, NumDeps, true) ->
     NumDeps;
 check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, NumDeps, true) ->
     {Key, Value} = H,
-    %lager:info("Certifying key ~w", [Key]),
+    lager:info("Certifying key ~w", [Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(CommittedTxs, Key) of
         [{Key, CommitTime}] ->
-            %lager:info("~w: ~p committed! ~w", [TxId, Key, CommitTime]),
             case CommitTime > SnapshotTime of
                 true ->
                     lager:info("~w: False for committed key ~p, Commit time is ~w", [TxId, Key, CommitTime]),
@@ -869,7 +867,7 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
-            %lager:info("No one has prepared so inserted ~w, ~w for key ~p", [TxId, PPTime, Key]),
+            lager:info("No one has prepared so inserted ~w, ~w for key ~p", [TxId, PPTime, Key]),
             ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, Value, []}]}),
             true;
         [{Key, [{PrepTxId, PrepareTime, _, PrepValue, RWaiter}|PWaiter]}] ->
@@ -878,7 +876,7 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
                     lager:info("~w fail because prepare time is ~w, PWaiters are ~p", [TxId, PrepareTime, PWaiter]),
                     false;
                 false ->
-                    %lager:info("~p: ~w waits for ~w with ~w, which is ~p", [Key, TxId, PrepTxId, PrepareTime, PWaiter]),
+                    lager:info("~p: ~w waits for ~w with ~w, which is ~p", [Key, TxId, PrepTxId, PrepareTime, PWaiter]),
                     ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, PPTime, PrepValue, RWaiter}|
                              (PWaiter++[{TxId, PPTime, Value}])]}),
                     wait
@@ -894,10 +892,10 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
 update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs, DepDict, _Partition) ->
     DepDict;
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition) ->
-    %lager:info("Trying to insert key ~p with for ~w", [Key, TxId]),
+    lager:info("Trying to insert key ~p with for ~w", [Key, TxId]),
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, _Time, _, Value, []}|Deps] }] ->		
-            %lager:info("No pending reader! Waiter is ~p", [Deps]),
+            lager:info("No pending reader! Waiter is ~p", [Deps]),
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]});
@@ -915,14 +913,14 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
 								 PreparedTxs, DepDict1, Partition);
                 _ ->
-                    %lager:info("Record is ~w!", [Record]),
+                    lager:info("Record is ~w!", [Record]),
 					true = ets:insert(PreparedTxs, {Key, Record}),
                     DepDict2 = unblock_prepare(PPTxId, DepDict1, PreparedTxs, Partition),
 					update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
 						PreparedTxs, DepDict2, Partition)
             end;
         [{Key, [{TxId, _Time, _LastPPTime, Value, PendingReaders}|Deps]}] ->
-            %lager:info("Pending readers are ~w! Pending writers are ~p", [PendingReaders, Deps]),
+            lager:info("Pending readers are ~w! Pending writers are ~p", [PendingReaders, Deps]),
             ets:insert(CommittedTxs, {Key, TxCommitTime}),
             Values = case ets:lookup(InMemoryStore, Key) of
                         [] ->
@@ -999,32 +997,33 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
 
 %% TODO: allowing all speculative read now! Maybe should not be so aggressive
 specula_read(TxId, Key, PreparedTxs, Sender) ->
-    %lager:info("Check if ready or block for ~w, key ~w", [TxId, Key]),
+    lager:info("Check if ready or block for ~w, key ~w", [TxId, Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
-            %lager:info("Ready now!!"),
+            lager:info("Nothing prepared!!"),
             ready;
         [{Key, [{PreparedTxId, PrepareTime, LastPPTime, Value, PendingReader}| PendingPrepare]}] ->
-            %lager:info("~p Not ready.. ~w waits for ~w with ~w, others are ~w",
-                    %[Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
+            lager:info("~p Not ready.. ~w waits for ~w with ~w, lastpp time is ~w, others are ~w",[Key, TxId, PreparedTxId, PrepareTime, LastPPTime, PendingReader]),
             case PrepareTime =< SnapshotTime of
                 true ->
                     %% The read is not ready, may read from speculative version 
                     Result =
                         find_appr_version(PrepareTime, LastPPTime, SnapshotTime, PendingPrepare),
-                    %lager:info("Result is ~w", [Result]),
+                    lager:info("Result is ~w", [Result]),
                     {ApprTxId, ApprPPTime, ApprPPValue} = 
                         case Result of first -> {PreparedTxId, PrepareTime, Value};
-                                             _ -> Result end,
+                                        [] -> {PreparedTxId, PrepareTime, Value};
+                                        _ -> Result end,
                     case SnapshotTime >= ApprPPTime + ?SPECULA_TIMEOUT of
                         true ->
                             %% There is more than one speculative version
                             ets:insert(dependency, {ApprTxId, TxId}),
                             ets:insert(anti_dep, {TxId, ApprTxId}),
-                            %lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, ApprTxId, Key]),
+                            lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, ApprTxId, Key]),
                             {specula, ApprPPValue};
                         _ ->
+                            lager:info("Wait as pending reader"),
                             ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastPPTime, Value,
                                 [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
                             not_ready
