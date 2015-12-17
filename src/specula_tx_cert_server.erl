@@ -673,7 +673,7 @@ decide_after_cascade(PendingList, DepDict, NumAborted, TxId, Stage) ->
                                     case PendingList of 
                                         [] -> 
                                             case R of            
-                                                {ok, {0, 0, PrepTime}} -> {commit, PrepTime};
+                                                {ok, {0, [], PrepTime}} -> {commit, PrepTime};
                                                  _ -> specula
                                             end;
                                         _ -> specula 
