@@ -119,6 +119,10 @@ handle_call({single_commit, Node, Key, Value}, Sender, SD0) ->
     clocksi_vnode:single_commit(Node,[{Key, Value}], Sender),
     {noreply, SD0};
 
+handle_call({start_read_tx}, _Sender, SD0) ->
+    TxId = tx_utilities:create_tx_id(0),
+    {reply, TxId, SD0};
+
 handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D}) ->
     TxId = tx_utilities:create_tx_id(0),
     lager:info("Starting txid ~w", [TxId]),

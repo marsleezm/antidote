@@ -27,7 +27,7 @@
 -export([start_link/0]).
 
 -export([init/1, certify/4, get_stat/0, get_internal_data/3, start_tx/1, 
-            set_internal_data/3, read/4, single_commit/4]).
+            start_read_tx/1, set_internal_data/3, read/4, single_commit/4]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
@@ -48,6 +48,14 @@ start_tx(Name) ->
             gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {start_tx});
         false ->
             gen_server:call({global, Name}, {start_tx})
+    end.
+
+start_read_tx(Name) ->
+    case is_integer(Name) of
+        true ->
+            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {start_read_tx});
+        false ->
+            gen_server:call({global, Name}, {start_read_tx})
     end.
 
 certify(Name, TxId, LocalUpdates, RemoteUpdates) ->

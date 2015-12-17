@@ -83,6 +83,10 @@ handle_call({start_tx}, _Sender, SD0) ->
     TxId = tx_utilities:create_tx_id(0),
     {reply, TxId, SD0};
 
+handle_call({start_read_tx}, _Sender, SD0) ->
+    TxId = tx_utilities:create_tx_id(0),
+    {reply, TxId, SD0};
+
 handle_call({read, Key, TxId, Node}, Sender, SD0) ->
     clocksi_vnode:relay_read(Node, Key, TxId, Sender, no_specula),
     {noreply, SD0};
