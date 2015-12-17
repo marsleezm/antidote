@@ -358,7 +358,7 @@ handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{max_ts=MaxTS,
     {reply, Result, SD0#state{max_ts=MaxTS1}};
 
 handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max_ts=MaxTS,
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=_Partition}) ->
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=Partition}) ->
     lager:info("Got read for ~w of ~w, part is ~w", [Key, TxId, Partition]),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
     lager:info("tx ~w, upgraded ts to ~w", [TxId, MaxTS1]),
@@ -373,7 +373,7 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max
 
 handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_blocked=NumBlocked,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS, num_specula_read=NumSpeculaRead}) ->
-    lager:info("Got relay read from ~w of Reader ~w", [Sender, Reader]),
+    lager:info("Got relay read from Reader ~w", [Reader]),
     %clock_service:update_ts(TxId#tx_id.snapshot_time),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
     lager:info("tx ~w, upgraded ts to ~w", [TxId, MaxTS1]),
@@ -594,7 +594,6 @@ handle_command({abort, TxId}, _Sender,
                     {noreply, State}
             end
     end;
-    lager:info("~w: Aborted ~w", [Partition, TxId]),
 
 handle_command({start_read_servers}, _Sender, State) ->
     {reply, ok, State};
@@ -663,7 +662,6 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
         N ->
             lager:info("~w passed but has ~w deps", [TxId, N]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
-            lager:info("Key set is ~w", [KeySet]),
             true = ets:insert(PreparedTxs, {{waiting, TxId}, TxWriteSet}),
             {wait, N, PrepareTime}
     end.
@@ -881,7 +879,6 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
                              (PWaiter++[{TxId, PPTime, Value}])]}),
                     wait
             end
-            lager:info("Something exists ~p, ~w failes for key ~p", [Record, TxId, Key]),
     end.
 
 -spec update_store(Keys :: [{key()}],
@@ -983,8 +980,7 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
             lager:info("Ready now!!"),
             ready;
         [{Key, [{PreparedTxId, PrepareTime, LastPPTime, Value, PendingReader}| PendingPrepare]}] ->
-            lager:info("~p Not ready.. ~w waits for ~w with ~w, others are ~w",
-            %        [Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
+            lager:info("~p Not ready.. ~w waits for ~w with ~w, others are ~w", [Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
             case PrepareTime =< SnapshotTime of
                 true ->
                     ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastPPTime, Value,
@@ -1141,7 +1137,6 @@ find_version([{TS, Value}|Rest], SnapshotTime) ->
 reply({relay, Sender}, Result) ->
     lager:info("Replying ~p to ~w", [Result, Sender]),
     gen_server:reply(Sender, Result);
-    lager:info("Replied ~p to ~w", [Result, Sender]);
 reply(Sender, Result) ->
     riak_core_vnode:reply(Sender, Result).
 
