@@ -109,8 +109,8 @@ init([]) ->
                 cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}}.
 
 handle_call({num_specula_read}, _Sender, 
-	    SD0=#state{num_specula_read=NumSpeculaRead}) ->
-    {reply, NumSpeculaRead, SD0};
+	    SD0=#state{num_specula_read=NumSpeculaRead, num_attempt_read=NumAttemptRead}) ->
+    {reply, {NumSpeculaRead, NumAttemptRead}, SD0};
 
 handle_call({read, Key, TxId, Node}, Sender, 
 	    SD0=#state{do_specula=false}) ->
