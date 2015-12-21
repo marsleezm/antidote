@@ -125,7 +125,7 @@ handle_call({start_read_tx}, _Sender, SD0) ->
 
 handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D}) ->
     TxId = tx_utilities:create_tx_id(0),
-    %lager:info("Starting txid ~w", [TxId]),
+    lager:info("Starting txid ~w", [TxId]),
     D1 = dict:store(TxId, {0, [], 0}, D),
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read}};
 
@@ -137,7 +137,7 @@ handle_call({get_stat}, _Sender, SD0=#state{aborted=Aborted, committed=Committed
 handle_call({set_internal_data, Type, Param}, _Sender, SD0)->
     case Type of
         last_commit_time ->
-            lager:info("Set lct to ~w", [Param]),
+            %lager:info("Set lct to ~w", [Param]),
             {noreply, SD0#state{last_commit_ts=Param}}
     end;
 
@@ -192,7 +192,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
             pending_list=PendingList, speculated=Speculated, dep_dict=DepDict, num_specula_read=NumSpeculaRead}) ->
     %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
     %% If there was a legacy ongoing transaction.
-    %lager:info("Got req: txid ~w, localUpdates ~p, remote updates ~p", [TxId, LocalUpdates, RemoteUpdates]),
+    lager:info("Got req: txid ~w, localUpdates ~p, remote updates ~p", [TxId, LocalUpdates, RemoteUpdates]),
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
     %OldReadDeps = dict:find(TxId, DepDict),
@@ -259,7 +259,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
             remote_updates=RemoteUpdates, sender=Sender, dep_dict=DepDict, pending_list=PendingList,
              speculated=Speculated, last_commit_ts=LastCommitTs, specula_length=SpeculaLength,
             pending_txs=PendingTxs, committed=Committed, rep_dict=RepDict}) ->
-    %lager:info("Got local prepare for ~w", [TxId]),
+    lager:info("Got local prepare for ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         %% Maybe can commit already.
         {ok, {1, ReadDepTxs, OldPrepTime}} ->
@@ -316,7 +316,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
             pending_list=PendingList, do_repl=DoRepl, read_aborted=ReadAborted, tx_id=CurrentTxId, committed=Committed,
             last_commit_ts=LastCommitTS, sender=Sender, stage=Stage, speculated=Speculated, 
             local_updates=LocalParts, remote_updates=RemoteUpdates}) ->
-    %lager:info("Got read valid for ~w of ~w", [PendingTxId, PendedTxId]),
+    lager:info("Got read valid for ~w of ~w", [PendingTxId, PendedTxId]),
     case dict:find(PendingTxId, DepDict) of
         {ok, {0, SolvedReadDeps, 0}} -> 
             %% Txn is still reading!!
@@ -411,7 +411,7 @@ handle_cast({read_invalid, MyCommitTime, TxId}, SD0=#state{tx_id=CurrentTxId, se
         do_repl=DoRepl, dep_dict=DepDict, pending_list=PendingList, aborted=Aborted, stage=Stage, 
         rep_dict=RepDict, local_updates=LocalParts, remote_updates=RemoteParts, pending_txs=PendingTxs,
         invalid_ts=InvalidTS}) ->
-    %lager:info("Got read invalid for ~w", [TxId]),
+    lager:info("Got read invalid for ~w", [TxId]),
     case start_from(TxId, PendingList) of
         [] ->
             case TxId of
@@ -495,7 +495,7 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
             sender=Sender, tx_id=CurrentTxId, rep_dict=RepDict, last_commit_ts=LastCommitTS,
             committed=Committed, read_aborted=ReadAborted, remote_updates=RemoteUpdates,
             local_updates=LocalParts, dep_dict=DepDict, stage=Stage, speculated=Speculated}) ->
-    %lager:info("Got remote prepare for ~w", [PendingTxId]),
+    lager:info("Got remote prepare for ~w", [PendingTxId]),
     case dict:find(PendingTxId, DepDict) of
         {ok, {1, [], OldPrepTime}} -> %% Maybe the transaction can commit 
            %lager:info("Has all remote prep"),
@@ -646,7 +646,7 @@ handle_sync_event(_Event, _From, _StateName, StateData) ->
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 terminate(Reason, _SD) ->
-    lager:info("Cert server terminated with ~w", [Reason]),
+    lager:error("Cert server terminated with ~w", [Reason]),
     ok.
 
 %%%%%%%%%%%%%%%%%%%%%
@@ -724,14 +724,14 @@ commit_specula_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict, Re
     {DepDict1, ToAbortTxs}.
 
 abort_specula_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs, RepDict, DepDict) ->
-    %lager:info("Aborting specula tx ~w", [TxId]),
+    lager:info("Aborting specula tx ~w", [TxId]),
     %lager:info("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     abort_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs),
     abort_to_table(RemoteParts, TxId, RepDict),
     dict:erase(TxId, DepDict).
 
 abort_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs) ->
-    %lager:info("Trying to abort ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
+    lager:info("Trying to abort ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     true = ets:delete(PendingTxs, TxId),
     DepList = ets:lookup(dependency, TxId),
     %lager:info("~w: My read dependncy are ~w", [TxId, DepList]),
