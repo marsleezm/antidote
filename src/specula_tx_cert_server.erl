@@ -258,7 +258,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
 	    SD0=#state{tx_id=TxId, local_updates=LocalParts, do_repl=DoRepl, 
             remote_updates=RemoteUpdates, sender=Sender, dep_dict=DepDict, pending_list=PendingList,
              speculated=Speculated, last_commit_ts=LastCommitTs, specula_length=SpeculaLength,
-            pending_txs=PendingTxs, committed=Committed, rep_dict=RepDict}) ->
+            pending_txs=PendingTxs, rep_dict=RepDict}) ->
     %lager:info("Got local prepare for ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         %% Maybe can commit already.
@@ -276,8 +276,8 @@ handle_cast({prepared, TxId, PrepareTime, local},
                     {DepDict1, _} = commit_tx(TxId, NewMaxPrep, LocalParts, [], DoRepl,
                                     dict:erase(TxId, DepDict)),
                     gen_server:reply(Sender, {ok, {committed, NewMaxPrep}}),
-                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id=?NO_TXN, pending_list=[], committed=Committed+1,
-                        speculated=Speculated+1, dep_dict=DepDict1}};
+                    {noreply, SD0#state{last_commit_ts=CommitTime, tx_id=?NO_TXN, pending_list=[], 
+                        dep_dict=DepDict1}};
                 false ->
                     case length(PendingList) >= SpeculaLength of
                         true -> 
@@ -378,7 +378,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                                 dict:erase(CurrentTxId, DepDict2)),
                             gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
                             {noreply, SD0#state{last_commit_ts=CurCommitTime, tx_id=?NO_TXN, read_aborted=NewReadAborted, 
-                                pending_list=[], committed=NewCommitted+1, dep_dict=DepDict3}};
+                                pending_list=[], committed=NewCommitted, dep_dict=DepDict3}};
                         specula -> %% Can not commit, but can specualte (due to the number of specula txns decreased)
                             %%lager:info("Specula current txn ~w", [CurrentTxId]),
                             {ok, {Prep, Read, OldCurPrepTime}} = dict:find(CurrentTxId, DepDict2), 
@@ -455,14 +455,14 @@ handle_cast({read_invalid, MyCommitTime, TxId}, SD0=#state{tx_id=CurrentTxId, se
                             RD1 = dict:erase(CurrentTxId, RD),
                             {noreply, SD0#state{dep_dict=RD1, tx_id=?NO_TXN, 
                                 pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
-                                aborted=Aborted+length(L)+1}};
+                                aborted=Aborted+length(L)}};
                         remote_cert -> 
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, DoRepl, PendingTxs),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             RD1 = dict:erase(CurrentTxId, RD),
                             {noreply, SD0#state{dep_dict=RD1, tx_id=?NO_TXN, 
                                 pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
-                                aborted=Aborted+length(L)+1}};
+                                aborted=Aborted+length(L)}};
                         read ->
                             case (MyCommitTime == -1) or (InvalidTS == -1) of
                                 true ->
@@ -510,7 +510,7 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
                         DepDict2, RepDict),
                     gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
                     {noreply, SD0#state{last_commit_ts=CurCommitTime, tx_id=?NO_TXN,
-                         pending_list=[], committed=Committed+1, dep_dict=DepDict3}};
+                         pending_list=[], dep_dict=DepDict3}};
                 [PendingTxId|_] ->
                     DepDict1 = dict:store(PendingTxId, {0, [], max(PendingPT, OldPrepTime)}, DepDict),
                     %%lager:info("got all replies, Can try to commit"),
@@ -554,7 +554,7 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
                                 dict:erase(CurrentTxId, DepDict2)),
                             gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
                             {noreply, SD0#state{last_commit_ts=CurCommitTime, tx_id=?NO_TXN, read_aborted=NewReadAborted,
-                                  pending_list=[], committed=NewCommitted+1, dep_dict=DepDict3}};
+                                  pending_list=[], committed=NewCommitted, dep_dict=DepDict3}};
                         specula -> %% Can not commit, but can specualte (due to the number of specula txns decreased)
                             %%lager:info("Specula current txn ~w", [CurrentTxId]),
                             {ok, {Prep, Read, OldCurPrepTime}} = dict:find(CurrentTxId, DepDict2),
@@ -585,14 +585,14 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
 %% Aborting the current transaction
 handle_cast({abort, TxId, {remote,_}}, 
 	    SD0=#state{tx_id=TxId, pending_txs=PendingTxs,  do_repl=DoRepl, local_updates=LocalParts, 
-            remote_updates=RemoteUpdates, aborted=Aborted, dep_dict=DepDict, sender=Sender}) ->
+            remote_updates=RemoteUpdates, dep_dict=DepDict, sender=Sender}) ->
     %%lager:info("Aborting ~w remote", [TxId]),
     RemoteParts = [P || {P, _} <- RemoteUpdates],
     abort_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs),
     DepDict1 = dict:erase(PendingTxs, DepDict),
     gen_server:reply(Sender, {aborted, TxId}),
     %%lager:info("Abort remote"),
-    {noreply, SD0#state{tx_id=?NO_TXN, aborted=Aborted+1, dep_dict=DepDict1}};
+    {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1}};
 %% Not aborting current transaction
 handle_cast({abort, PendingTxId, {remote, _}}, 
 	    SD0=#state{pending_list=PendingList, rep_dict=RepDict, tx_id=CurrentTxId, sender=Sender,
@@ -626,7 +626,7 @@ handle_cast({abort, PendingTxId, {remote, _}},
                             %% The current transaction is aborted! So replying to client.
                             {noreply, SD0#state{dep_dict=DepDict2, tx_id=?NO_TXN, 
                                 pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
-                                aborted=Aborted+length(L)+1}}
+                                aborted=Aborted+length(L)}}
                     end
             end
     end;
