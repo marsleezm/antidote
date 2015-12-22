@@ -429,10 +429,10 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                                 true ->
                                     PendingRecord = {Sender, false, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
-                                    %lager:warning("Replying to sender of ~w, ~w", [TxId, RepMode]),
+                                    lager:warning("Fast replying to sender of ~w, ~w", [TxId, RepMode]),
                                     gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode});
                                 false ->
-                                    %lager:warning("Not fast replying for ~w, ~w", [TxId, RepMode]),
+                                    lager:warning("Not fast replying for ~w, ~w", [TxId, RepMode]),
                                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
                             end,
