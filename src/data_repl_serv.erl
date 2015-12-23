@@ -291,7 +291,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 	    case ets:lookup(ReplicatedLog, {TxId, Partition}) of
 		[] ->
             	    ets:insert(PendingLog, {{TxId, Partition}, {WriteSet, TimeStamp}});
-		_ ->
+		[{{TxId, Partition}, CommitTime}] ->
             	    lager:warning("Something is wrong!!! Remove log for ~w, ~w", [TxId, Partition]),
 		    ets:delete(PendingLog, {TxId, Partition}),
 		    AppendFun = fun({Key, Value}) ->
@@ -402,7 +402,7 @@ append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
             lists:foreach(AppendFun, WriteSet),
             ets:delete(PendingLog, {TxId, Part});
         [] ->
-	    ets:insert(PendingLog, {{TxId, Part}, committed})
+	    ets:insert(PendingLog, {{TxId, Part}, CommitTime})
     end,
     append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, Rest). 
 
