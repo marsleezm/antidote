@@ -288,7 +288,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog}) ->
     case Type of
         prepared ->
-	    case ets:lookup(ReplicatedLog, {TxId, Partition}) of
+	    case ets:lookup(PendingLog, {TxId, Partition}) of
 		[] ->
             	    ets:insert(PendingLog, {{TxId, Partition}, {WriteSet, TimeStamp}});
 		[{{TxId, Partition}, to_abort}] ->
