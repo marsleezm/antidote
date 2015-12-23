@@ -138,8 +138,8 @@ handle_call({retrieve_log, LogName},  _Sender,
 handle_call({num_specula_read}, _Sender, SD0=#state{num_specula_read=NumSpeculaRead, num_read=NumRead}) ->
     {reply, {NumSpeculaRead, NumRead}, SD0};
 
-handle_call({check_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
-    lager:info("Log info: ~w", [ets:tab2list(ReplicatedLog)]),
+handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
+    lager:info("Log info: ~w", [ets:tab2list(PendingLog)]),
     {reply, ok, SD0};
 
 handle_call({debug_read, Key, TxId}, _Sender, 
