@@ -53,6 +53,7 @@
 
 %% States
 -export([relay_read/4,
+	check_table/1,
         debug_read/3,
         prepare_specula/5,
         commit_specula/4,
@@ -84,6 +85,9 @@ start_link(Name) ->
 
 read(Name, Key, TxId) ->
     gen_server:call({global, Name}, {read, Key, TxId}).
+
+check_table(Name) ->
+    gen_server:call({global, Name}, {check_table}).
 
 num_specula_read(Node) ->
     gen_server:call({global, Node}, {num_specula_read}).
@@ -133,6 +137,10 @@ handle_call({retrieve_log, LogName},  _Sender,
 
 handle_call({num_specula_read}, _Sender, SD0=#state{num_specula_read=NumSpeculaRead, num_read=NumRead}) ->
     {reply, {NumSpeculaRead, NumRead}, SD0};
+
+handle_call({check_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
+    lager:info("Log info: ~w", [ets:tab2list(ReplicatedLog)]),
+    {reply, ok, SD0};
 
 handle_call({debug_read, Key, TxId}, _Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
@@ -284,6 +292,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 		[] ->
             	    ets:insert(PendingLog, {{TxId, Partition}, {WriteSet, TimeStamp}});
 		_ ->
+            	    lager:warning("Something is wrong!!! Remove log for ~w, ~w", [TxId, Partition]),
 		    ets:delete(PendingLog, {TxId, Partition}),
 		    AppendFun = fun({Key, Value}) ->
                             %lager:info("Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
@@ -393,7 +402,6 @@ append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
             lists:foreach(AppendFun, WriteSet),
             ets:delete(PendingLog, {TxId, Part});
         [] ->
-            lager:warning("Something is wrong!!! Remove log for ~w, ~w", [TxId, Part]),
 	    ets:insert(PendingLog, {{TxId, Part}, committed})
     end,
     append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, Rest). 
