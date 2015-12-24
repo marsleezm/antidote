@@ -43,6 +43,7 @@
 %% States
 -export([repl_prepare/4,
          repl_abort/3,
+	 check_table/0,
          repl_commit/4,
          repl_abort/4,
          repl_commit/5,
@@ -76,6 +77,9 @@ start_link() ->
 
 repl_prepare(Partition, PrepType, TxId, LogContent) ->
     gen_server:cast({global, get_repl_name()}, {repl_prepare, Partition, PrepType, TxId, LogContent}).
+
+check_table() ->
+    gen_server:call({global, get_repl_name()}, {check_table}).
 
 repl_abort(UpdatedParts, TxId, DoRepl) ->
     repl_abort(UpdatedParts, TxId, DoRepl, false). 
@@ -125,7 +129,11 @@ init([Name]) ->
                 pending_log=PendingLog, my_name=Name, except_replicas=NewDict}}.
 
 handle_call({go_down},_Sender,SD0) ->
-    {stop,shutdown,ok,SD0}.
+    {stop,shutdown,ok,SD0};
+
+handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
+    lager:info("Log info: ~w", [ets:tab2list(PendingLog)]),
+    {reply, ok, SD0}.
 
 %% RepMode can only be prepared for now.
 handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent}, 

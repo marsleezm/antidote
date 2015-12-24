@@ -25,6 +25,7 @@
 
 -export([start_vnode/1,
 	    read_data_item/3,
+	relay_read_stat/1,
         debug_read/3,
 	    relay_read/5,
         set_prepared/5,
@@ -90,6 +91,7 @@
                 debug = false :: boolean(),
                 total_time :: non_neg_integer(),
                 prepare_count :: non_neg_integer(),
+		relay_read :: {non_neg_integer(), non_neg_integer()},
                 num_specula_read :: non_neg_integer(),
                 num_aborted :: non_neg_integer(),
                 num_blocked :: non_neg_integer(),
@@ -112,6 +114,11 @@ set_debug(Node, Debug) ->
 do_reply(Node, TxId) ->
     riak_core_vnode_master:sync_command(Node,
                            {do_reply, TxId},
+                           ?CLOCKSI_MASTER, infinity).
+
+relay_read_stat(Node) ->
+    riak_core_vnode_master:sync_command(Node,
+                           {relay_read_stat},
                            ?CLOCKSI_MASTER, infinity).
 
 %% @doc Sends a read request to the Node that is responsible for the Key
@@ -210,6 +217,7 @@ init([Partition]) ->
     {ok, #state{partition=Partition,
                 committed_txs=CommittedTxs,
                 prepared_txs=PreparedTxs,
+		relay_read={0,0},
                 if_certify = IfCertify,
                 if_replicate = IfReplicate,
                 if_specula = IfSpecula,
@@ -291,6 +299,11 @@ handle_command({set_debug, Debug},_Sender,SD0=#state{partition=Partition}) ->
     lager:info("~w: Setting debug to be ~w", [Partition, Debug]),
     {reply, ok, SD0#state{debug=Debug}};
 
+handle_command({relay_read_stat},_Sender,SD0=#state{relay_read=RelayRead}) ->
+    {N, R} = RelayRead,
+    lager:info("Relay read value is ~w, ~w, ~w", [N, R, R div N]),
+    {reply, R div N, SD0};
+
 handle_command({num_specula_read},_Sender,SD0=#state{num_specula_read=NumSpeculaRead}) ->
     {reply, NumSpeculaRead, SD0};
 
@@ -370,10 +383,12 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max
             {reply, Result, SD0#state{max_ts=MaxTS1}}
     end;
 
-handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_blocked=NumBlocked,
+handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_blocked=NumBlocked, relay_read=RelayRead,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS, num_specula_read=NumSpeculaRead}) ->
+    {NumRR, AccRR} = RelayRead,
     %lager:warning("Got relay read from Reader ~w", [Reader]),
     %clock_service:update_ts(TxId#tx_id.snapshot_time),
+    T1 = os:timestamp(),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
     %lager:warning("tx ~w, upgraded ts to ~w", [TxId, MaxTS1]),
     case From of
@@ -384,7 +399,8 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_bl
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
                     gen_server:reply(Reader, Result), 
-                    {noreply, SD0#state{max_ts=MaxTS1}}
+    		    T2 = os:timestamp(),
+                    {noreply, SD0#state{max_ts=MaxTS1, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         specula ->
             case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
@@ -392,11 +408,15 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_bl
                     {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
                 {specula, Value} ->
                     gen_server:reply(Reader, {ok, Value}), 
-                    {noreply, SD0#state{max_ts=MaxTS1, num_specula_read=NumSpeculaRead+1}};
+    		    T2 = os:timestamp(),
+                    {noreply, SD0#state{max_ts=MaxTS1, num_specula_read=NumSpeculaRead+1,
+				relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
                     gen_server:reply(Reader, Result), 
-                    {noreply, SD0#state{max_ts=MaxTS1}}
+    		    T2 = os:timestamp(),
+                    {noreply, SD0#state{max_ts=MaxTS1, 
+				relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end
     end;
 
@@ -1162,3 +1182,6 @@ find(SnapshotTime, [{TxId, Time, Value}|Rest], ToReturn) ->
         _ ->
             find(SnapshotTime, Rest, {TxId, Time, Value}) 
     end.
+
+get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->
+    ((A2-A1)*1000000+ (B2-B1))*1000000+ C2-C1.
