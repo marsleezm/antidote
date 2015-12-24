@@ -140,7 +140,7 @@ handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
 %% RepMode can only be prepared for now.
 handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, pending_log=PendingLog, except_replicas=ExceptReplicas, 
-            my_name=MyName, mode=Mode, repl_factor=ReplFactor, fast_reply=FastReply}) ->
+            my_name=MyName, mode=Mode, repl_factor=ReplFactor}) -> %, fast_reply=FastReply}) ->
     %lager:info("Repl prepare ~w", [TxId]),
     case PrepType of
         single_commit ->
@@ -185,12 +185,12 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                             %lager:info("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, RepMode}, ReplFactor}}),
-                            case FastReply of 
-                                true ->
-                                    ets:delete(PendingLog, {TxId, Partition});
-                                false ->
+                            %case FastReply of 
+                            %    true ->
+                            %        ets:delete(PendingLog, {TxId, Partition});
+                            %    false ->
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
-                            end
+                            %end
                     end;
                 chain ->
                     ToReply = {prepared, TxId, PrepareTime, RepMode},
