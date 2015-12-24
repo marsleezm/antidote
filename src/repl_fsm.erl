@@ -176,13 +176,13 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                                 error ->
                                     lager:info("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                                     ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
-                                            PrepareTime, WriteSet, remote}, ReplFactor}}),
+                                            PrepareTime, remote}, ReplFactor}}),
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                             end;
                         _ ->
                             lager:info("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
-                                    PrepareTime, WriteSet, RepMode}, ReplFactor}}),
+                                    PrepareTime, RepMode}, ReplFactor}}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                     end;
                 chain ->
