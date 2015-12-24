@@ -162,7 +162,7 @@ handle_call({debug_read, Key, TxId}, _Sender,
 handle_call({read, Key, TxId}, _Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog, num_read=NumRead,
                 num_specula_read=NumSpeculaRead}) ->
-    %lager:info("DataRepl Reading for ~w , key ~p", [TxId, Key]),
+    lager:info("DataRepl Reading for ~w , key ~p", [TxId, Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
             lager:info("Nothing!"),
@@ -298,7 +298,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 		    lager:warning("Prep ~w ~w arrived late! Committed", [TxId, Partition]),
 		    ets:delete(PendingLog, {TxId, Partition}),
 		    AppendFun = fun({Key, Value}) ->
-                            %lager:info("Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
+                            lager:info("DataRepl Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
                             case ets:lookup(ReplicatedLog, Key) of
                                 [] ->
                                     true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
@@ -308,7 +308,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                             end end,
             	    lists:foreach(AppendFun, WriteSet)
 	    end,
-            %lager:info("Got repl prepare for {~w, ~w}, replying to ~w", [TxId, Partition, Sender]),
+            lager:info("Got repl prepare for {~w, ~w}, replying to ~w", [TxId, Partition, Sender]),
             gen_server:cast({global, Sender}, {ack, Partition, TxId}), 
             {noreply, SD0};
         single_commit ->
