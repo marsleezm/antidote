@@ -169,18 +169,18 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                             %lager:info("RepMode is ~w", [RepMode]),
                             case dict:find(SenderName, ExceptReplicas) of
                                 {ok, R} -> 
-                                    lager:info("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
+                                    %lager:info("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
                                     ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                             PrepareTime, remote}, ReplFactor-1}}),
                                     quorum_replicate(R, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
                                 error ->
-                                    lager:info("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
+                                    %lager:info("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                                     ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                             PrepareTime, remote}, ReplFactor}}),
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                             end;
                         _ ->
-                            lager:info("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
+                            %lager:info("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, RepMode}, ReplFactor}}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
@@ -237,11 +237,11 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
         %ToReply = {prepared, TxId, PrepareTime, remote},
 %                    ets:insert(PendingLog, {{TxId, Partition}, {{Prep, Sender,
 %                            PrepareTime, WriteSet, RepMode}, ReplFactor-1}}),
-            lager:info("Got req from ~w for ~w, done", [Partition, TxId]),
+            %lager:info("Got req from ~w for ~w, done", [Partition, TxId]),
             {PrepType, Sender, Timestamp, RepMode} = R,
             case PrepType of
                 prepared ->
-                    lager:info("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
+                    %lager:info("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     case RepMode of
                         false ->
@@ -257,8 +257,8 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                     gen_server:reply(Sender, {ok, {committed, Timestamp}})
             end;
         [{{TxId, Partition}, {R, N}}] ->
-            lager:info("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
-            lager:info("Accumulating"),
+            %lager:info("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
+            %lager:info("Accumulating"),
             ets:insert(PendingLog, {{TxId, Partition}, {R, N-1}});
         [] -> %%The record is appended already, do nothing
             lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
