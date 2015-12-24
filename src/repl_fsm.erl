@@ -183,7 +183,8 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                             %lager:info("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, RepMode}, ReplFactor}}),
-                            ets:delete(PendingLog, {TxId, Partition})
+                            ets:delete(PendingLog, {TxId, Partition}),
+                            gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode})
                             %quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                     end;
                 chain ->
