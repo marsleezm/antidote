@@ -520,7 +520,7 @@ handle_command({single_commit, WriteSet}, Sender,
             case IfReplicate of
                 true ->
                     PendingRecord = {Sender, WriteSet, CommitTime},
-                    lager:warning("Trying to replicate single commit for ~p", [TxId]),
+                    %lager:warning("Trying to replicate single commit for ~p", [TxId]),
                     repl_fsm:repl_prepare(Partition, single_commit, TxId, PendingRecord),
                     {noreply, State#state{max_ts=CommitTime, 
                             num_committed=NumCommitted+1}};
