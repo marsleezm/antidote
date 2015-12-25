@@ -144,7 +144,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
             {Sender, WriteSet, CommitTime} = LogContent,
             case Mode of
                 quorum ->
-                    lager:warning("Got single_commit request for ~w, ~p, Sending to ~w", [TxId, LogContent, Replicas]),
+                    lager:warning("Got single_commit request for ~w, Sending to ~w", [TxId, Replicas]),
                     ets:insert(PendingLog, {{TxId, Partition}, {{single_commit, Sender, 
                             CommitTime, ignore}, ReplFactor}}),
                     quorum_replicate(Replicas, single_commit, TxId, Partition, WriteSet, CommitTime, MyName);
@@ -236,7 +236,7 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
         %ToReply = {prepared, TxId, PrepareTime, remote},
 %                    ets:insert(PendingLog, {{TxId, Partition}, {{Prep, Sender,
 %                            PrepareTime, WriteSet, RepMode}, ReplFactor-1}}),
-            lager:warning("Got req from ~w for ~w, done", [Partition, TxId]),
+            %lager:warning("Got req from ~w for ~w, done", [Partition, TxId]),
             {PrepType, Sender, Timestamp, RepMode} = R,
             case PrepType of
                 prepared ->
