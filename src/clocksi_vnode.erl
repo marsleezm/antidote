@@ -512,7 +512,7 @@ handle_command({single_commit, WriteSet}, Sender,
                               max_ts=MaxTS,
                               num_committed=NumCommitted
                               }) ->
-    lager:warning("Got single commit for ~p", [WriteSet]),
+    %lager:warning("Got single commit for ~p", [WriteSet]),
     TxId = tx_utilities:create_tx_id(0),
     Result = prepare_and_commit(TxId, WriteSet, CommittedTxs, PreparedTxs, InMemoryStore, MaxTS, IfCertify), 
     case Result of
@@ -520,7 +520,7 @@ handle_command({single_commit, WriteSet}, Sender,
             case IfReplicate of
                 true ->
                     PendingRecord = {Sender, WriteSet, CommitTime},
-                    lager:warning("Trying to replicate for ~p", [WriteSet]),
+                    lager:warning("Trying to replicate single commit for ~p", [TxId]),
                     repl_fsm:repl_prepare(Partition, single_commit, TxId, PendingRecord),
                     {noreply, State#state{max_ts=CommitTime, 
                             num_committed=NumCommitted+1}};
@@ -701,10 +701,10 @@ prepare_and_commit(TxId, [{Key, Value}], CommittedTxs, PreparedTxs, InMemoryStor
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(CommittedTxs, Key) of
           [{Key, CommitTime}] ->
-              lager:warning("~w: There is committed! ~w", [TxId, CommitTime]),
+              %lager:warning("~w: There is committed! ~w", [TxId, CommitTime]),
               case CommitTime > SnapshotTime of
                   true ->
-                      lager:warning("~w: False because there is committed", [TxId]),
+                      %lager:warning("~w: False because there is committed", [TxId]),
                     {error, write_conflict};
                   false ->
                       case ets:lookup(PreparedTxs, Key) of
@@ -845,7 +845,7 @@ check_and_insert(_, _, [], _, _, _, NumDeps, true) ->
     NumDeps;
 check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, NumDeps, true) ->
     {Key, Value} = H,
-    lager:warning("Certifying key ~w", [Key]),
+    %lager:warning("Certifying key ~w", [Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(CommittedTxs, Key) of
         [{Key, CommitTime}] ->
@@ -1108,25 +1108,25 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
 %% Update its entry in DepDict.. If the transaction can be prepared already, prepare it
 %% (or just replicate it).. Otherwise just update and do nothing. 
 unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
-    lager:warning("Unblocking transaction ~w", [TxId]),
+    %lager:warning("Unblocking transaction ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         {ok, {1, PrepareTime, Sender, RepMode}} ->
             case Partition of
                 ignore ->
-                    lager:warning("No more dependency, sending reply back for ~w", [TxId]),
+                    %lager:warning("No more dependency, sending reply back for ~w", [TxId]),
                     gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode});
                 _ ->
                     [{{waiting, TxId}, WriteSet}] = ets:lookup(PreparedTxs, {waiting, TxId}),
                     ets:delete(PreparedTxs, {waiting, TxId}),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
-                    lager:warning("~w unblocked, replicating writeset to ~w", [TxId, WriteSet]),
+                    %lager:warning("~w unblocked, replicating writeset to ~w", [TxId, WriteSet]),
                     PendingRecord = {Sender,
                         RepMode, WriteSet, PrepareTime},
                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
             end,
             dict:erase(TxId, DepDict);
         {ok, {N, PrepareTime, Sender, Type}} ->
-            lager:warning("~w updates dep to ~w", [TxId, N-1]),
+            %lager:warning("~w updates dep to ~w", [TxId, N-1]),
             dict:store(TxId, {N-1, PrepareTime, Sender, Type}, DepDict)
     end.  
 

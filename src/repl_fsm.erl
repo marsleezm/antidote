@@ -257,7 +257,6 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
             end;
         [{{TxId, Partition}, {R, N}}] ->
             lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
-            lager:warning("Accumulating"),
             ets:insert(PendingLog, {{TxId, Partition}, {R, N-1}});
         [] -> %%The record is appended already, do nothing
             lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
