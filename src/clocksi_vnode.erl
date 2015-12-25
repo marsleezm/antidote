@@ -291,7 +291,7 @@ check_prepared_empty([{Partition,Node}|Rest]) ->
 	    true ->
             ok;
 	    false ->
-            %lager:warning("Prepared not empty!")
+            lager:info("Prepared not empty!")
     end,
 	check_prepared_empty(Rest).
 
@@ -360,7 +360,7 @@ handle_command({check_servers_ready},_Sender,SD0) ->
     {reply, true, SD0};
 
 handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{max_ts=MaxTS,
-            inmemory_store=InMemoryStore, partition=Partition}) ->
+            inmemory_store=InMemoryStore, partition=_Partition}) ->
     %lager:warning("Got read for ~w of ~w, part is ~w", [Key, TxId, Partition]),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
     %lager:warning("tx ~w, upgraded ts to ~w", [TxId, MaxTS1]),
@@ -370,7 +370,7 @@ handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{max_ts=MaxTS,
     {reply, Result, SD0#state{max_ts=MaxTS1}};
 
 handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max_ts=MaxTS,
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=Partition}) ->
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=_Partition}) ->
     %lager:warning("Got read for ~w of ~w, part is ~w", [Key, TxId, Partition]),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
     %lager:warning("tx ~w, upgraded ts to ~w", [TxId, MaxTS1]),
