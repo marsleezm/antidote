@@ -62,6 +62,7 @@
 
         mode :: atom(),
         repl_factor :: non_neg_integer(),
+        fast_reply :: boolean(),
         delay :: non_neg_integer(),
         my_name :: atom(),
 		self :: atom()}).
@@ -122,11 +123,12 @@ init([Name]) ->
     PendingLog = tx_utilities:open_private_table(pending_log),
     NewDict = generate_except_replicas(Replicas),
     Lists = antidote_config:get(to_repl),
+    FastReply = antidote_config:get(fast_reply),
     [LocalRepList] = [LocalReps || {Node, LocalReps} <- Lists, Node == node()],
     LocalRepNames = [list_to_atom(atom_to_list(node())++"repl"++atom_to_list(L))  || L <- LocalRepList ],
     lager:info("NewDict is ~w, LocalRepNames is ~w", [NewDict, LocalRepNames]),
     {ok, #state{replicas=Replicas, mode=quorum, repl_factor=length(Replicas), local_rep_set=sets:from_list(LocalRepNames), 
-                pending_log=PendingLog, my_name=Name, except_replicas=NewDict}}.
+                pending_log=PendingLog, my_name=Name, except_replicas=NewDict, fast_reply=FastReply}}.
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0};
@@ -138,7 +140,7 @@ handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
 %% RepMode can only be prepared for now.
 handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, pending_log=PendingLog, except_replicas=ExceptReplicas, 
-            my_name=MyName, mode=Mode, repl_factor=ReplFactor}) ->
+            my_name=MyName, mode=Mode, repl_factor=ReplFactor, fast_reply=FastReply}) ->
     case PrepType of
         single_commit ->
             {Sender, WriteSet, CommitTime} = LogContent,
@@ -182,7 +184,12 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                             %lager:warning("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, RepMode}, ReplFactor}}),
-                            quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
+                            case FastReply of
+                                true ->
+                                    ets:delete(PendingLog, {TxId, Partition});
+                                false ->
+                                    quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
+                            end
                     end;
                 chain ->
                     ToReply = {prepared, TxId, PrepareTime, RepMode},
