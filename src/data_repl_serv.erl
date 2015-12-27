@@ -413,7 +413,7 @@ append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
 abort_by_parts(_, _, []) ->
     ok;
 abort_by_parts(PendingLog, TxId, [Part|Rest]) ->
-    case ets:lookp(PendingLog, {TxId, Part}) of
+    case ets:lookup(PendingLog, {TxId, Part}) of
 	    [] ->
 	        lager:warning("Abort ~w ~w arrived early!", [TxId, Part]),
 	        ets:insert(PendingLog, {{TxId, Part}, to_abort});
