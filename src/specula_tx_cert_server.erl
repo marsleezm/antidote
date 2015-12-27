@@ -191,9 +191,10 @@ handle_call({get_internal_data, Type, Param}, _Sender, SD0=#state{pending_list=P
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{rep_dict=RepDict, aborted=Aborted, 
             pending_txs=PendingTxs, last_commit_ts=LastCommitTs, tx_id=TxId, invalid_ts=InvalidTs, specula_length=SpeculaLength, 
             pending_list=PendingList, speculated=Speculated, dep_dict=DepDict, num_specula_read=NumSpeculaRead}) ->
-    %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
+    RemoteKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, RemoteUpdates),
     %% If there was a legacy ongoing transaction.
-    lager:info("Got req: txid ~w, localUpdates ~p, remote updates ~p", [TxId, LocalUpdates, RemoteUpdates]),
+    %lager:info("Got req: txid ~w, localUpdates ~p, remote updates ~p", [TxId, LocalUpdates, RemoteUpdates]),
+    lager:info("Got req: txid ~w, remote keys are ~p", [TxId, RemoteKeys]),
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
     %OldReadDeps = dict:find(TxId, DepDict),
