@@ -292,10 +292,10 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 		[] ->
             	    ets:insert(PendingLog, {{TxId, Partition}, {WriteSet, TimeStamp}});
 		[{{TxId, Partition}, to_abort}] ->
-		    lager:warning("Prep ~w ~w arrived late! Aborted", [TxId, Partition]),
+		    %lager:warning("Prep ~w ~w arrived late! Aborted", [TxId, Partition]),
 		    ets:delete(PendingLog, {TxId, Partition});
 		[{{TxId, Partition}, CommitTime}] ->
-		    lager:warning("Prep ~w ~w arrived late! Committed", [TxId, Partition]),
+		    %lager:warning("Prep ~w ~w arrived late! Committed", [TxId, Partition]),
 		    ets:delete(PendingLog, {TxId, Partition}),
 		    AppendFun = fun({Key, Value}) ->
                             %lager:info("DataRepl Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
@@ -405,8 +405,8 @@ append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
             lists:foreach(AppendFun, WriteSet),
             ets:delete(PendingLog, {TxId, Part});
         [] ->
-	    lager:warning("Commit ~w ~w arrived early! Committing with ~w", [TxId, Part, CommitTime]),
-	    ets:insert(PendingLog, {{TxId, Part}, CommitTime})
+	    %lager:warning("Commit ~w ~w arrived early! Committing with ~w", [TxId, Part, CommitTime]),
+	        ets:insert(PendingLog, {{TxId, Part}, CommitTime})
     end,
     append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, Rest). 
 
@@ -414,10 +414,10 @@ abort_by_parts(_, _, []) ->
     ok;
 abort_by_parts(PendingLog, TxId, [Part|Rest]) ->
     case ets:lookp(PendingLog, {TxId, Part}) of
-	[] ->
-	    lager:warning("Abort ~w ~w arrived early!", [TxId, Part]),
-	    ets:insert(PendingLog, {{TxId, Part}, to_abort});
-	_ ->
+	    [] ->
+	        lager:warning("Abort ~w ~w arrived early!", [TxId, Part]),
+	        ets:insert(PendingLog, {{TxId, Part}, to_abort});
+	    _ ->
     	    ets:delete(PendingLog, {TxId, Part})
     end,
     abort_by_parts(PendingLog, TxId, Rest). 

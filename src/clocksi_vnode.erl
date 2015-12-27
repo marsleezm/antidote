@@ -851,7 +851,7 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, N
         [{Key, CommitTime}] ->
             case CommitTime > SnapshotTime of
                 true ->
-                    %lager:warning("~w: False for committed key ~p, Commit time is ~w", [TxId, Key, CommitTime]),
+                    lager:warning("~w: False for committed key ~p, Commit time is ~w", [TxId, Key, CommitTime]),
                     {false, InsertedKeys};
                 false ->
                     case check_prepared(PPTime, TxId, PreparedTxs, Key, Value) of
@@ -862,7 +862,7 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, N
                             check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, 
                                 NumDeps+1, true);
                         false ->
-                            %lager:warning("~w: False of prepared for ~p", [TxId, Key]),
+                            lager:warning("~w: False of prepared for ~p", [TxId, Key]),
                             {false, InsertedKeys}
                     end
             end;
@@ -875,7 +875,7 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, N
                     check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, 
                           NumDeps+1, true);
                 false ->
-                    %lager:warning("~w: False of prepared for ~p", [TxId, Key]),
+                    lager:warning("~w: False of prepared for ~p", [TxId, Key]),
                     {false, InsertedKeys}
             end
     end.
