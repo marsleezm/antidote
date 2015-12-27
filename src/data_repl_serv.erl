@@ -415,7 +415,7 @@ abort_by_parts(_, _, []) ->
 abort_by_parts(PendingLog, TxId, [Part|Rest]) ->
     case ets:lookup(PendingLog, {TxId, Part}) of
 	    [] ->
-	        lager:warning("Abort ~w ~w arrived early!", [TxId, Part]),
+	        %lager:warning("Abort ~w ~w arrived early!", [TxId, Part]),
 	        ets:insert(PendingLog, {{TxId, Part}, to_abort});
 	    _ ->
     	    ets:delete(PendingLog, {TxId, Part})
