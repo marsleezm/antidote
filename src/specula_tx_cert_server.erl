@@ -308,8 +308,8 @@ handle_cast({prepared, TxId, PrepareTime, local},
             {noreply, SD0}
     end;
 
-handle_cast({prepared, _OtherTxId, _, local}, SD0) ->
-    %lager:warning("Received prepared for ~w that has aborted!", [OtherTxId]),
+handle_cast({prepared, OtherTxId, _, local}, SD0) ->
+    lager:warning("Received prepared for ~w that has aborted!", [OtherTxId]),
     {noreply, SD0}; 
 
 %% TODO: if we don't direclty speculate after getting all local prepared, maybe we can wait a littler more
