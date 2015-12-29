@@ -53,6 +53,7 @@
 
 %% States
 -export([relay_read/4,
+	check_key/2,
 	check_table/1,
         debug_read/3,
         prepare_specula/5,
@@ -88,6 +89,9 @@ read(Name, Key, TxId) ->
 
 check_table(Name) ->
     gen_server:call({global, Name}, {check_table}).
+
+check_key(Name, Key) ->
+    gen_server:call({global, Name}, {check_key, Key}).
 
 num_specula_read(Node) ->
     gen_server:call({global, Node}, {num_specula_read}).
@@ -141,6 +145,10 @@ handle_call({num_specula_read}, _Sender, SD0=#state{num_specula_read=NumSpeculaR
 handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
     lager:info("Log info: ~w", [ets:tab2list(PendingLog)]),
     {reply, ok, SD0};
+
+handle_call({check_key, Key}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
+    Result = ets:lookup(ReplicatedLog, Key),
+    {reply, Result, SD0};
 
 handle_call({debug_read, Key, TxId}, _Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
