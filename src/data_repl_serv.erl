@@ -188,7 +188,7 @@ handle_call({read, Key, TxId}, _Sender,
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
                 Value ->
 		    case Value of 
-			[] -> lager:wanring("Value list is ~p, but there is nothing for ~p ~p", [ValueList, Key, TxId]);
+			[] -> lager:warning("Value list is ~p, but there is nothing for ~p ~p", [ValueList, Key, TxId]);
 			_ -> ok
 		    end,
                     %lager:info("Found value ~p", [Value]),
