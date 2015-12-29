@@ -191,7 +191,7 @@ handle_call({get_internal_data, Type, Param}, _Sender, SD0=#state{pending_list=P
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{rep_dict=RepDict, aborted=Aborted, 
             pending_txs=PendingTxs, last_commit_ts=LastCommitTs, tx_id=TxId, invalid_ts=InvalidTs, specula_length=SpeculaLength, 
             pending_list=PendingList, speculated=Speculated, dep_dict=DepDict, num_specula_read=NumSpeculaRead}) ->
-    RemoteKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, RemoteUpdates),
+    %RemoteKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, RemoteUpdates),
     %% If there was a legacy ongoing transaction.
     %lager:info("Got req: txid ~w, localUpdates ~p, remote updates ~p", [TxId, LocalUpdates, RemoteUpdates]),
     %lager:warning("Got req: txid ~w, remote keys are ~p", [TxId, RemoteKeys]),
