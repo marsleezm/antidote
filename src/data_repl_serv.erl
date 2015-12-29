@@ -173,7 +173,7 @@ handle_call({read, Key, TxId}, _Sender,
     %lager:info("DataRepl Reading for ~w , key ~p", [TxId, Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
-            %lager:info("Nothing!"),
+            lager:info("Nothing for ~p, ~w", [Key, TxId]),
             {reply, {ok, []}, SD0#state{num_read=NumRead+1}};
         [{Key, ValueList}] ->
             %lager:info("Value list is ~p", [ValueList]),
@@ -187,6 +187,10 @@ handle_call({read, Key, TxId}, _Sender,
                     {reply, {ok, Value}, SD0#state{num_specula_read=NumSpeculaRead+1, num_read=NumRead+1}};
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
                 Value ->
+		    case Value of 
+			[] -> lager:wanring("Value list is ~p, but there is nothing for ~p ~p", [ValueList, Key, TxId]);
+			_ -> ok
+		    end,
                     %lager:info("Found value ~p", [Value]),
                     {reply, {ok, Value}, SD0#state{num_read=NumRead+1}}
             end
