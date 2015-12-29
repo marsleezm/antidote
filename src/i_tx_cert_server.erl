@@ -49,6 +49,7 @@
         remote_parts :: [],
         do_repl :: boolean(),
         sender :: term(),
+        last_commit_ts :: non_neg_integer(),
         to_ack :: non_neg_integer()}).
 
 %%%===================================================================
@@ -66,7 +67,7 @@ start_link(Name) ->
 
 init([]) ->
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
-    {ok, #state{do_repl=antidote_config:get(do_repl)}}.
+    {ok, #state{do_repl=antidote_config:get(do_repl), last_commit_ts=0}}.
 
 handle_call({get_stat}, _Sender, SD0) ->
     {reply, {0, 0, 0, 0, 0}, SD0};
@@ -79,8 +80,8 @@ handle_call({get_hash_fun}, _Sender, SD0) ->
     L = hash_fun:get_hash_fun(),
     {reply, L, SD0};
 
-handle_call({start_tx}, _Sender, SD0) ->
-    TxId = tx_utilities:create_tx_id(0),
+handle_call({start_tx}, _Sender, SD0=#state{last_commit_ts=LastCommitTS}) ->
+    TxId = tx_utilities:create_tx_id(LastCommitTS),
     {reply, TxId, SD0};
 
 handle_call({start_read_tx}, _Sender, SD0) ->
@@ -134,7 +135,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
                     clocksi_vnode:commit(LocalParts, TxId, CommitTime),
                     repl_fsm:repl_commit(LocalParts, TxId, CommitTime, DoRepl),
                     gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-                    {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
+                    {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
                 L ->
                     MaxPrepTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
@@ -178,7 +179,7 @@ handle_cast({prepared, TxId, PrepareTime, remote},
             repl_fsm:repl_commit(LocalParts, TxId, CommitTime, DoRepl),
             repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, DoRepl),
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}}};
+            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
         N ->
             %lager:info("Need ~w more replies for ~w", [N-1, TxId]),
             {noreply, SD0#state{to_ack=N-1, prepare_time=max(MaxPrepTime, PrepareTime)}}
