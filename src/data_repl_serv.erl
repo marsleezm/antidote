@@ -321,6 +321,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
             {noreply, SD0};
         single_commit ->
             AppendFun = fun({Key, Value}) ->
+		lager:info("Data repl single committing ~p", [Key]),
                 case ets:lookup(ReplicatedLog, Key) of
                     [] ->
                         %lager:info("Data repl inserting ~p, ~p of ~w to table", [Key, Value, TimeStamp]),
