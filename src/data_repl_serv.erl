@@ -173,7 +173,7 @@ handle_call({read, Key, TxId}, _Sender,
     %lager:info("DataRepl Reading for ~w , key ~p", [TxId, Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
-            lager:info("Nothing for ~p, ~w", [Key, TxId]),
+            lager:warning("Nothing for ~p, ~w", [Key, TxId]),
             {reply, {ok, []}, SD0#state{num_read=NumRead+1}};
         [{Key, ValueList}] ->
             %lager:info("Value list is ~p", [ValueList]),
@@ -183,14 +183,10 @@ handle_call({read, Key, TxId}, _Sender,
                     %lager:info("Found specula value ~p from ~w", [ValueList, SpeculaTxId]),
                     ets:insert(dependency, {SpeculaTxId, TxId}),         
                     ets:insert(anti_dep, {TxId, SpeculaTxId}),        
-                    lager:info("Inserting antidep from ~w to ~w for key ~w", [TxId, SpeculaTxId, Key]),
+                    lager:warning("Inserting antidep from ~w to ~w for key ~w", [TxId, SpeculaTxId, Key]),
                     {reply, {ok, Value}, SD0#state{num_specula_read=NumSpeculaRead+1, num_read=NumRead+1}};
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
                 Value ->
-		    case Value of 
-			[] -> lager:warning("Value list is ~p, but there is nothing for ~p ~p", [ValueList, Key, TxId]);
-			_ -> ok
-		    end,
                     %lager:info("Found value ~p", [Value]),
                     {reply, {ok, Value}, SD0#state{num_read=NumRead+1}}
             end
