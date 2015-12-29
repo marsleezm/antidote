@@ -187,6 +187,9 @@ handle_call({read, Key, TxId}, _Sender,
                     {reply, {ok, Value}, SD0#state{num_specula_read=NumSpeculaRead+1, num_read=NumRead+1}};
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
                 Value ->
+                    case Value of [] -> lager:warning("No value for ~p, ~p, value list is ~p", [Key, TxId, ValueList]);
+                                _ -> ok
+                    end,
                     %lager:info("Found value ~p", [Value]),
                     {reply, {ok, Value}, SD0#state{num_read=NumRead+1}}
             end
@@ -321,7 +324,6 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
             {noreply, SD0};
         single_commit ->
             AppendFun = fun({Key, Value}) ->
-		lager:info("Data repl single committing ~p", [Key]),
                 case ets:lookup(ReplicatedLog, Key) of
                     [] ->
                         %lager:info("Data repl inserting ~p, ~p of ~w to table", [Key, Value, TimeStamp]),
