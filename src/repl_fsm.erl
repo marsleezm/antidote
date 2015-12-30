@@ -258,7 +258,7 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                             gen_server:cast(Sender, {prepared, TxId, Timestamp, RepMode})
                     end;
                 single_commit ->
-                    lager:warning("Single commit of ~w got enough replies, replying to ~w", [TxId, Sender]),
+                    %lager:warning("Single commit of ~w got enough replies, replying to ~w", [TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     gen_server:reply(Sender, {ok, {committed, Timestamp}})
             end;
