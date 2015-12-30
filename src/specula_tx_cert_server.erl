@@ -126,7 +126,7 @@ handle_call({start_read_tx}, _Sender, SD0) ->
     {reply, TxId, SD0};
 
 handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS}) ->
-    TxId = tx_utilities:create_tx_id(MinSnapshotTS+1),
+    TxId = tx_utilities:create_tx_id(),
     lager:warning("Starting txid ~w", [TxId]),
     D1 = dict:store(TxId, {0, [], 0}, D),
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=MinSnapshotTS}};
