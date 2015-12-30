@@ -41,7 +41,7 @@ create_tx_id(ClientClock) ->
 
 %% @doc converts a tuple {MegaSecs,Secs,MicroSecs} into microseconds
 now_microsec() ->
-    {MegaSecs, Secs, MicroSecs} = os:timestamp(),
+    {MegaSecs, Secs, MicroSecs} = now(),
     (MegaSecs * 1000000 + Secs) * 1000000 + MicroSecs.
 
 open_table(Partition, Name) ->
