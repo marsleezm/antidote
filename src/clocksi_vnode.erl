@@ -440,7 +440,7 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
     case Result of
         {ok, PrepareTime} ->
             UsedTime = tx_utilities:now_microsec() - PrepareTime,
-            lager:warning("~w: ~w certification check prepred, ifRep is ~w, debug is ~w", [Partition, TxId, IfReplicate, Debug]),
+            %lager:warning("~w: ~w certification check prepred, ifRep is ~w, debug is ~w", [Partition, TxId, IfReplicate, Debug]),
             case IfReplicate of
                 true ->
                     case Debug of
@@ -452,7 +452,7 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
                                     %lager:warning("Fast replying to sender of ~w, ~w", [TxId, RepMode]),
                                 false ->
-                                    lager:warning("Not fast replying for ~w, ~w", [TxId, RepMode]),
+                                    %lager:warning("Not fast replying for ~w, ~w", [TxId, RepMode]),
                                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
                             end,
@@ -884,7 +884,7 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
-            lager:warning("No one has prepared so inserted ~w, ~w for key ~p", [TxId, PPTime, Key]),
+            %lager:warning("No one has prepared so inserted ~w, ~w for key ~p", [TxId, PPTime, Key]),
             ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, Value, []}]}),
             true;
         [{Key, [{PrepTxId, PrepareTime, _, PrepValue, RWaiter}|PWaiter]}] ->
@@ -908,7 +908,7 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
 update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs, DepDict, _Partition) ->
     DepDict;
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition) ->
-    lager:warning("Trying to insert key ~p with for ~w", [Key, TxId]),
+    %lager:warning("Trying to insert key ~p with for ~w", [Key, TxId]),
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, _Time, _, Value, []}|Deps] }] ->		
             lager:warning("No pending reader! Waiter is ~p", [Deps]),
