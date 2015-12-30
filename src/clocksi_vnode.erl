@@ -28,6 +28,7 @@
 	relay_read_stat/1,
         debug_read/3,
 	    relay_read/5,
+        check_key_record/3,
         set_prepared/5,
         async_send_msg/3,
 
@@ -147,6 +148,11 @@ prepare(Updates, TxId, Type) ->
                                self(),
 						       ?CLOCKSI_MASTER)
 		end, Updates).
+
+check_key_record(Node, Key, Type) ->
+    riak_core_vnode_master:sync_command(Node,
+                       {check_key_record, Key, Type},
+                       ?CLOCKSI_MASTER, infinity).
 
 debug_prepare(Updates, TxId, Type, Sender) ->
     lists:foreach(fun({Node, WriteSet}) ->
@@ -306,6 +312,13 @@ handle_command({relay_read_stat},_Sender,SD0=#state{relay_read=RelayRead}) ->
 
 handle_command({num_specula_read},_Sender,SD0=#state{num_specula_read=NumSpeculaRead}) ->
     {reply, NumSpeculaRead, SD0};
+
+handle_command({check_key_record, Key, Type},_Sender,SD0=#state{prepared_txs=PreparedTxs, committed_txs=CommittedTxs}) ->
+    R = case Type of
+            prepared ->  ets:lookup(PreparedTxs, Key);
+            _ -> ets:lookup(CommittedTxs, Key)
+        end,
+    {reply, R, SD0};
 
 handle_command({do_reply, TxId}, _Sender, SD0=#state{prepared_txs=PreparedTxs, partition=Partition, if_replicate=IfReplicate}) ->
     [{{pending, TxId}, Result}] = ets:lookup(PreparedTxs, {pending, TxId}),
