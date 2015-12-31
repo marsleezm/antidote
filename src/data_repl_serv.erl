@@ -238,7 +238,7 @@ handle_cast({relay_read, Key, TxId, Reader},
 
 handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog}) ->
-    lager:info("Specula prepare for [~w, ~w]", [TxId, Partition]),
+    %lager:warning("Specula prepare for [~w, ~w]", [TxId, Partition]),
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
                     case ets:lookup(ReplicatedLog, Key) of
                         [] ->
@@ -261,7 +261,7 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp},
 handle_cast({abort_specula, TxId, Partition}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog}) ->
     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
-    lager:info("Aborting specula for ~w ~w", [TxId, Partition]),
+    %lager:warning("Aborting specula for ~w ~w", [TxId, Partition]),
     lists:foreach(fun(Key) ->
                     case ets:lookup(ReplicatedLog, Key) of
                         [] -> %% TODO: this can not happen 
@@ -277,7 +277,7 @@ handle_cast({abort_specula, TxId, Partition},
     
 handle_cast({commit_specula, TxId, Partition, CommitTime}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog}) ->
-    lager:info("Committing specula for ~w ~w", [TxId, Partition]),
+    %lager:warning("Committing specula for ~w ~w", [TxId, Partition]),
     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
     lists:foreach(fun(Key) ->
                     case ets:lookup(ReplicatedLog, Key) of
