@@ -181,7 +181,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                             end;
                         _ ->
-                            %lager:warning("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
+                            lager:warning("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, RepMode}, ReplFactor}}),
                             %case FastReply of
@@ -247,7 +247,7 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
             {PrepType, Sender, Timestamp, RepMode} = R,
             case PrepType of
                 prepared ->
-                    %lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
+                    lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     case RepMode of
                         false ->
@@ -263,7 +263,7 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                     gen_server:reply(Sender, {ok, {committed, Timestamp}})
             end;
         [{{TxId, Partition}, {R, N}}] ->
-            %lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
+            lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
             ets:insert(PendingLog, {{TxId, Partition}, {R, N-1}});
         [] -> %%The record is appended already, do nothing
             %lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
