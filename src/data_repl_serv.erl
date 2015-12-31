@@ -267,7 +267,7 @@ handle_cast({abort_specula, TxId, Partition},
                         [] -> %% TODO: this can not happen 
                             ok;
                         [{Key, ValueList}] ->
-                            lager:info("Deleting ~p of ~w, Value list is ~p", [Key, TxId, ValueList]),
+                            %lager:info("Deleting ~p of ~w, Value list is ~p", [Key, TxId, ValueList]),
                             NewValueList = delete_version(ValueList, TxId), 
                             ets:insert(ReplicatedLog, {Key, NewValueList})
                     end 
