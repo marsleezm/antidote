@@ -176,11 +176,11 @@ handle_call({read, Key, TxId}, _Sender,
             lager:warning("Nothing for ~p, ~w", [Key, TxId]),
             {reply, {ok, []}, SD0#state{num_read=NumRead+1}};
         [{Key, ValueList}] ->
-            lager:info("Value list is ~p", [ValueList]),
+            %lager:info("Value list is ~p", [ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
             case find_version(ValueList, MyClock) of
                 {specula, SpeculaTxId, Value} ->
-                    lager:info("Found specula value ~p from ~w", [ValueList, SpeculaTxId]),
+                    %lager:info("Found specula value ~p from ~w", [ValueList, SpeculaTxId]),
                     ets:insert(dependency, {SpeculaTxId, TxId}),         
                     ets:insert(anti_dep, {TxId, SpeculaTxId}),        
                     lager:warning("Inserting antidep from ~w to ~w for key ~w", [TxId, SpeculaTxId, Key]),
@@ -308,7 +308,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 		    %lager:warning("Prep ~w ~w arrived late! Committed", [TxId, Partition]),
 		    ets:delete(PendingLog, {TxId, Partition}),
 		    AppendFun = fun({Key, Value}) ->
-                            lager:info("DataRepl Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
+                            %lager:info("DataRepl Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
                             case ets:lookup(ReplicatedLog, Key) of
                                 [] ->
                                     true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
@@ -318,14 +318,14 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                             end end,
             	    lists:foreach(AppendFun, WriteSet)
 	    end,
-            lager:info("Got repl prepare for {~w, ~w}, replying to ~w", [TxId, Partition, Sender]),
+            %lager:info("Got repl prepare for {~w, ~w}, replying to ~w", [TxId, Partition, Sender]),
             gen_server:cast({global, Sender}, {ack, Partition, TxId}), 
             {noreply, SD0};
         single_commit ->
             AppendFun = fun({Key, Value}) ->
                 case ets:lookup(ReplicatedLog, Key) of
                     [] ->
-                        lager:info("Data repl inserting ~p, ~p of ~w to table", [Key, Value, TimeStamp]),
+                        %lager:info("Data repl inserting ~p, ~p of ~w to table", [Key, Value, TimeStamp]),
                         true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value}]});
                     [{Key, ValueList}] ->
                         {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
@@ -339,14 +339,14 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
 	    SD0=#state{replicated_log=ReplicatedLog,
             pending_log=PendingLog}) ->
-    lager:info("Got repl commit for ~w of partitions ~w", [TxId, Partitions]),
+    %lager:info("Got repl commit for ~w of partitions ~w", [TxId, Partitions]),
     append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, Partitions),
     {noreply, SD0};
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{
             pending_log=PendingLog}) ->
-    lager:info("Got repl commit for ~w", [TxId]),
+    %lager:info("Got repl commit for ~w", [TxId]),
     abort_by_parts(PendingLog, TxId, Partitions),
     {noreply, SD0};
 
