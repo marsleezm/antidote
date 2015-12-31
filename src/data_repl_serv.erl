@@ -170,7 +170,7 @@ handle_call({debug_read, Key, TxId}, _Sender,
 handle_call({read, Key, TxId}, _Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog, num_read=NumRead,
                 num_specula_read=NumSpeculaRead}) ->
-    lager:info("DataRepl Reading for ~w , key ~p", [TxId, Key]),
+    %lager:info("DataRepl Reading for ~w , key ~p", [TxId, Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
             lager:warning("Nothing for ~p, ~w", [Key, TxId]),
@@ -190,7 +190,7 @@ handle_call({read, Key, TxId}, _Sender,
                     case Value of [] -> lager:warning("No value for ~p, ~p, value list is ~p", [Key, TxId, ValueList]);
                                 _ -> ok
                     end,
-                    lager:info("Found value ~p", [Value]),
+                    %lager:info("Found value ~p", [Value]),
                     {reply, {ok, Value}, SD0#state{num_read=NumRead+1}}
             end
     end;
@@ -402,9 +402,9 @@ append_by_parts(_, _, _, _, []) ->
 append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
     case ets:lookup(PendingLog, {TxId, Part}) of
         [{{TxId, Part}, {WriteSet, _}}] ->
-            lager:info("For ~w ~w found writeset", [TxId, Part, WriteSet]),
+            %lager:info("For ~w ~w found writeset", [TxId, Part, WriteSet]),
             AppendFun = fun({Key, Value}) ->
-                            lager:info("Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
+                            %lager:info("Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
                             case ets:lookup(ReplicatedLog, Key) of
                                 [] ->
                                     true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
