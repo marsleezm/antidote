@@ -245,12 +245,12 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp},
                             %% Putting TxId in the record to mark the transaction as speculative 
                             %% and for dependency tracking that will happen later
                             true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value, TxId}]}),
-                            lager:info("Inserted for ~w, empty", [Key]),
+                            %lager:info("Inserted for ~w, empty", [Key]),
                             [Key|KS];
                         [{Key, ValueList}] ->
                             {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
                             true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value, TxId}|RemainList]}),
-                            lager:info("Inserted for ~w", [Key]),
+                            %lager:info("Inserted for ~w", [Key]),
                             [Key|KS]
                     end end, [], WriteSet),
     ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
@@ -282,12 +282,12 @@ handle_cast({commit_specula, TxId, Partition, CommitTime},
     lists:foreach(fun(Key) ->
                     case ets:lookup(ReplicatedLog, Key) of
                         [] -> %% TODO: this can not happen 
-                            lager:info("Found nothing for ~p, not possible", [Key]),
+                            lager:error("Found nothing for ~p, not possible", [Key]),
                             ok;
                         [{Key, ValueList}] ->
-                            lager:info("Commit specula for key ~p, TxId ~w with ~w, ValueList is ~p", [Key, TxId, CommitTime, ValueList]),
+                            %lager:info("Commit specula for key ~p, TxId ~w with ~w, ValueList is ~p", [Key, TxId, CommitTime, ValueList]),
                             NewValueList = replace_version(ValueList, TxId, CommitTime), 
-                            lager:info("NewValueList is ~w", [NewValueList]),
+                            %lager:info("NewValueList is ~w", [NewValueList]),
                             ets:insert(ReplicatedLog, {Key, NewValueList})
                     end 
                   end, KeySet),
