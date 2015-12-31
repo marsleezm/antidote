@@ -57,7 +57,7 @@
 %%%===================================================================
 
 start_link(Name) ->
-    lager:info("Normal tx cert started wit name ~w", [Name]),
+    %lager:info("Normal tx cert started wit name ~w", [Name]),
     gen_server:start_link({global, Name},
              ?MODULE, [], []).
 
@@ -81,8 +81,8 @@ handle_call({get_hash_fun}, _Sender, SD0) ->
     {reply, L, SD0};
 
 handle_call({start_tx}, _Sender, SD0=#state{last_commit_ts=LastCommitTS}) ->
-    TxId = tx_utilities:create_tx_id(LastCommitTS),
-    {reply, TxId, SD0};
+    TxId = tx_utilities:create_tx_id(LastCommitTS+1),
+    {reply, TxId, SD0#state{last_commit_ts=LastCommitTS+1}};
 
 handle_call({start_read_tx}, _Sender, SD0) ->
     TxId = tx_utilities:create_tx_id(0),
@@ -139,8 +139,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
                 L ->
                     MaxPrepTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
-                    %lager:info("~w: Updates are ~p, to ack is ~w, parts are ~w", [TxId, RemoteUpdates, 
-                        %length(RemoteParts), RemoteParts]),
+                    %lager:info("~w: Updates are ~p, to ack is ~w, parts are ~w", [TxId, RemoteUpdates, length(RemoteParts), RemoteParts]),
                     {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=L,
                         remote_parts=RemoteParts}}
                 end;
@@ -150,7 +149,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
             MaxPrepTime = max(OldPrepTime, PrepareTime),
             {noreply, SD0#state{to_ack=N-1, prepare_time=MaxPrepTime}}
     end;
-handle_cast({prepared, _, _, local}, 
+handle_cast({prepared, _OtherTxId, _, local}, 
 	    SD0) ->
     %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
     {noreply, SD0};
@@ -175,7 +174,6 @@ handle_cast({prepared, TxId, PrepareTime, remote},
             %lager:info("Decided to commit a txn ~w, prepare time is ~w", [TxId, PrepareTime]),
             CommitTime = max(MaxPrepTime, PrepareTime),
             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
-            lager:warning("Remote parts are ~w", [RemoteParts]),
             clocksi_vnode:commit(RemoteParts, TxId, CommitTime),
             repl_fsm:repl_commit(LocalParts, TxId, CommitTime, DoRepl),
             repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, DoRepl),
