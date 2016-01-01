@@ -1052,7 +1052,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                             %% There is more than one speculative version
                             ets:insert(dependency, {ApprTxId, TxId}),
                             ets:insert(anti_dep, {TxId, ApprTxId}),
-                            %%lager:warning("Inserting anti_dep from ~w to ~w for ~p", [TxId, ApprTxId, Key]),
+                            lager:warning("Inserting anti_dep from ~w to ~w for ~p", [TxId, ApprTxId, Key]),
                             {specula, ApprPPValue};
                         _ ->
                             %%lager:warning("Wait as pending reader"),
