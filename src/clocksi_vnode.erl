@@ -921,7 +921,7 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
 update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs, DepDict, _Partition) ->
     DepDict;
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition) ->
-    lager:warning("Trying to insert key ~p with for ~w", [Key, TxId]),
+    lager:warning("Trying to insert key ~p with for ~w, commit time is ~w", [Key, TxId, TxCommitTime]),
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, _Time, _, Value, []}|Deps] }] ->		
             lager:warning("No pending reader! Waiter is ~p", [Deps]),
@@ -968,8 +968,10 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                     lists:foreach(fun({SnapshotTime, Sender}) ->
                             case SnapshotTime >= TxCommitTime of
                                 true ->
+                                    lager:info("Replying to ~w of second value", [Sender]),
                                     reply(Sender, {ok, lists:nth(2,Values)});
                                 false ->
+                                    lager:info("Replying to ~w of first value", [Sender]),
                                     reply(Sender, {ok, hd(Values)})
                             end end,
                         PendingReaders),
@@ -984,6 +986,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                                     %% Larger snapshot means that the read is not safe.
                                     case SnapshotTime >= PPTime of
                                         true ->
+                                            lager:warning("Can not reply for ~w, pptime is ~w", [SnapshotTime, PPTime]),
                                             [{SnapshotTime, Sender}| PReaders];
                                         false ->
                                             reply(Sender, {ok, lists:nth(2,Values)}),
