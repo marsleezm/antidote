@@ -678,10 +678,14 @@ async_send_msg(Delay, Msg, To) ->
 
 prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
     PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
-    case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], 0, IfCertify) of
-	    {false, InsertedKeys} ->
-            %%lager:warning("~w failed, has inserted ~p", [TxId, InsertedKeys]),
+    case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0, IfCertify) of
+	    {false, InsertedKeys, WaitingKeys} ->
+            lager:warning("~w failed, has inserted ~p", [TxId, InsertedKeys]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
+            lists:foreach(fun(K) -> 
+                case ets:delete(PreparedTxs, K) of
+                    [{Key, Record}] -> ets:insert(PreparedTxs, {Key, lists:droplast(Record)})
+                end end, WaitingKeys),
 	        {error, write_conflict};
         0 ->
             %%lager:warning("Passed"),
@@ -853,11 +857,11 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 
 %% @doc Performs a certification check when a transaction wants to move
 %%      to the prepared state.
-check_and_insert(_, _, _, _, _, _, _, false) ->
-    0;
-check_and_insert(_, _, [], _, _, _, NumDeps, true) ->
-    NumDeps;
-check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, NumDeps, true) ->
+check_and_insert(_, _, _, _, _, _, _, _, false) ->
+    [];
+check_and_insert(_, _, [], _, _, _, WaitingKeys, _, true) ->
+    WaitingKeys;
+check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, WaitingKeys, NumWaiting, true) ->
     {Key, Value} = H,
     %%%lager:warning("Certifying key ~w", [Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
@@ -871,10 +875,10 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, N
                     case check_prepared(PPTime, TxId, PreparedTxs, Key, Value) of
                         true ->
                             check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs,  
-                                [Key|InsertedKeys], NumDeps, true);
+                                [Key|InsertedKeys], WaitingKeys, NumWaiting, true);
                         wait ->
                             check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, 
-                                NumDeps+1, true);
+                                [Key|WaitingKeys], NumWaiting+1, true);
                         false ->
                             %%lager:warning("~w: False of prepared for ~p", [TxId, Key]),
                             {false, InsertedKeys}
@@ -884,13 +888,13 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, N
             case check_prepared(PPTime, TxId, PreparedTxs, Key, Value) of
                 true ->
                     check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, 
-                        [Key|InsertedKeys], NumDeps, true); 
+                        [Key|InsertedKeys], WaitingKeys, NumWaiting, true); 
                 wait ->
-                    check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, 
-                          NumDeps+1, true);
+                    check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, [Key|WaitingKeys],
+                          NumWaiting+1, true);
                 false ->
                     %%lager:warning("~w: False of prepared for ~p", [TxId, Key]),
-                    {false, InsertedKeys}
+                    {false, InsertedKeys, WaitingKeys}
             end
     end.
 
@@ -1081,24 +1085,24 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict) -
                     NewDepDict = dict:erase(TxId, DepDict),
                     %%lager:warning("Prepare not valid anymore! For ~w, sending '~w' abort to ~w", [TxId, Type, Sender]),
                     gen_server:cast(Sender, {abort, TxId, Type}),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, NewDepDict);
-                error ->
-                    lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
-                    specula_utilities:deal_abort_deps(TxId),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict)
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, NewDepDict)
+                %error ->
+                %    lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
+                %    specula_utilities:deal_abort_deps(TxId),
+                %    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict)
             end;
         false ->
-            case dict:find(TxId, DepDict) of
-                error ->
-                    %% This transaction has been aborted already.
-                    specula_utilities:deal_abort_deps(TxId),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict);
-                _ ->
-                    %%lager:warning("Trying to abort ~w with PPtime ~w", [PWaiter, PPTime]),
+            %case dict:find(TxId, DepDict) of
+                %error ->
+                %    %% This transaction has been aborted already.
+                %    specula_utilities:deal_abort_deps(TxId),
+                %    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict);
+            %    _ ->
+                    lager:warning("Trying to abort ~w with PPtime ~w", [PWaiter, PPTime]),
                     {NewDepDict, Remaining, LastPPTime} = abort_others(PPTime, PWaiter, DepDict),
-                    %%lager:warning("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
+                    lager:warning("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
                     {TxId, [{TxId, PPTime, LastPPTime, Value, []}|Remaining], NewDepDict}
-            end
+            %end
     end.
 
 abort_others(PPTime, PWaiters, DepDict) ->
