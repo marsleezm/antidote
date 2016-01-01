@@ -942,7 +942,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
 								 PreparedTxs, DepDict1, Partition);
                 _ ->
-                    lager:warning("Record is ~w!", [Record]),
+                    lager:warning("Record is ~p!", [Record]),
 					true = ets:insert(PreparedTxs, {Key, Record}),
                     DepDict2 = unblock_prepare(PPTxId, DepDict1, PreparedTxs, Partition),
 					update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
@@ -1075,13 +1075,13 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict) -
             %% But the second step can be done by the coordinator..
             case dict:find(TxId, DepDict) of
                 {ok, {_, _, Sender, Type}} ->
-                    %%lager:warning("Aborting ~w", [TxId]),
+                    lager:warning("Aborting ~w", [TxId]),
                     NewDepDict = dict:erase(TxId, DepDict),
                     %%lager:warning("Prepare not valid anymore! For ~w, sending '~w' abort to ~w", [TxId, Type, Sender]),
                     gen_server:cast(Sender, {abort, TxId, Type}),
                     deal_with_prepare_deps(PWaiter, TxCommitTime, NewDepDict);
                 error ->
-                    %%lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
+                    lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
                     specula_utilities:deal_abort_deps(TxId),
                     deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict)
             end;
@@ -1124,18 +1124,18 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
 %% Update its entry in DepDict.. If the transaction can be prepared already, prepare it
 %% (or just replicate it).. Otherwise just update and do nothing. 
 unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
-    %%%lager:warning("Unblocking transaction ~w", [TxId]),
+    lager:warning("Unblocking transaction ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         {ok, {1, PrepareTime, Sender, RepMode}} ->
             case Partition of
                 ignore ->
-                    %%%lager:warning("No more dependency, sending reply back for ~w", [TxId]),
+                    lager:warning("No more dependency, sending reply back for ~w", [TxId]),
                     gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode});
                 _ ->
                     [{{waiting, TxId}, WriteSet}] = ets:lookup(PreparedTxs, {waiting, TxId}),
                     ets:delete(PreparedTxs, {waiting, TxId}),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
-                    %%%lager:warning("~w unblocked, replicating writeset to ~w", [TxId, WriteSet]),
+                    lager:warning("~w unblocked, replicating writeset to ~w", [TxId, WriteSet]),
                     PendingRecord = {Sender,
                         RepMode, WriteSet, PrepareTime},
                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
