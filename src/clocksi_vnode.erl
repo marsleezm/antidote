@@ -806,7 +806,7 @@ clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore, DepDict, _) ->
 clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Partition) ->
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, _, _, _, []}| PrepDeps]}] ->
-            lager:warning("clean abort: No reader"),
+            lager:warning("clean abort: for key ~p, No reader, prepdeps are ~p", [Key, PrepDeps]),
 			%% 0 for commit time means that the first prepared txs will just be prepared
             {PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict),
             case PPTxId of
@@ -819,7 +819,8 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 					clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition)
             end;
         [{Key, [{TxId, _, _, _, PendingReaders}|PrepDeps]}] ->
-            lager:warning("Clean abort: some reader"),
+            lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", 
+                [Key, PendingReaders, PrepDeps]),
 			{PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict),
             Value = case ets:lookup(InMemoryStore, Key) of
 		                [{Key, ValueList}] ->
@@ -1068,6 +1069,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
 deal_with_prepare_deps([], _, DepDict) ->
     {ignore, ignore, DepDict};
 deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict) ->
+    lager:warning("Dealing with ~p, ~p, commit time is ~w", [TxId, PPTime, TxCommitTime]),
     case TxCommitTime > TxId#tx_id.snapshot_time of
         true ->
             %% Abort the current transaction if it is not aborted yet.. (if dep dict still has its record)
