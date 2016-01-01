@@ -289,7 +289,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
                     case length(PendingList) >= SpeculaLength of
                         true -> 
                             %%In wait stage, only prepare and doesn't add data to table
-                           lager:warning("Decided to wait and prepare ~w!!", [TxId]),
+                           lager:warning("Decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                             DepDict1 = dict:store(TxId, {RemoteToAck, ReadDepTxs, NewMaxPrep}, DepDict),
                             {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert}};
@@ -338,8 +338,8 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
                     DepDict2 = dict:erase(PendingTxId, DepDict),
                     true = ets:delete(PendingTxs, PendingTxId),
-                    {DepDict3, _} = commit_specula_tx(PendingTxId, CurCommitTime, LocalParts, RemoteParts, DoRepl, 
-                        DepDict2, RepDict),
+                    {DepDict3, _} = commit_tx(PendingTxId, CurCommitTime, LocalParts, RemoteParts, DoRepl, 
+                        DepDict2),
                     gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
                     {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN, min_snapshot_ts=CurCommitTime,
                          pending_list=[], committed=Committed+1, dep_dict=DepDict3}};
@@ -417,7 +417,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
 
 handle_cast({read_invalid, MyCommitTime, TxId}, SD0=#state{tx_id=CurrentTxId, sender=Sender, 
         do_repl=DoRepl, dep_dict=DepDict, pending_list=PendingList, aborted=Aborted, stage=Stage, 
-        rep_dict=RepDict, local_updates=LocalParts, remote_updates=RemoteParts, pending_txs=PendingTxs,
+        rep_dict=RepDict, local_updates=LocalParts, remote_updates=RemoteUpdates, pending_txs=PendingTxs,
         invalid_ts=InvalidTS}) ->
    lager:warning("Got read invalid for ~w", [TxId]),
     case start_from(TxId, PendingList) of
@@ -431,6 +431,7 @@ handle_cast({read_invalid, MyCommitTime, TxId}, SD0=#state{tx_id=CurrentTxId, se
                             gen_server:reply(Sender, {aborted, TxId}),
                             {noreply, SD0#state{dep_dict=RD1, tx_id=?NO_TXN}};
                         remote_cert ->
+                            RemoteParts = [P||{P, _} <-RemoteUpdates],
                             abort_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs),
                             RD1 = dict:erase(TxId, DepDict),
                             gen_server:reply(Sender, {aborted, TxId}),
@@ -465,6 +466,7 @@ handle_cast({read_invalid, MyCommitTime, TxId}, SD0=#state{tx_id=CurrentTxId, se
                                 pending_list=lists:sublist(PendingList, length(PendingList)-length(L)),
                                 aborted=Aborted+length(L)}};
                         remote_cert -> 
+                            RemoteParts = [P||{P, _} <-RemoteUpdates],
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, DoRepl, PendingTxs),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             RD1 = dict:erase(CurrentTxId, RD),
@@ -514,8 +516,8 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
                     DepDict2 = dict:erase(PendingTxId, DepDict),
                     true = ets:delete(PendingTxs, PendingTxId),
-                    {DepDict3, _} = commit_specula_tx(PendingTxId, CurCommitTime, LocalParts, RemoteParts, DoRepl,
-                        DepDict2, RepDict),
+                    {DepDict3, _} = commit_tx(PendingTxId, CurCommitTime, LocalParts, RemoteParts, DoRepl,
+                        DepDict2),
                     gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
                     {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN, min_snapshot_ts=CurCommitTime,
                          pending_list=[], dep_dict=DepDict3}};
