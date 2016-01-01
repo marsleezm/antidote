@@ -684,7 +684,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:delete(PreparedTxs, K) of
-                    [{Key, Record}] -> ets:insert(PreparedTxs, {Key, lists:droplast(Record)})
+                    [{K, Record}] -> ets:insert(PreparedTxs, {K, lists:droplast(Record)})
                 end end, WaitingKeys),
 	        {error, write_conflict};
         0 ->
@@ -858,9 +858,9 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 %% @doc Performs a certification check when a transaction wants to move
 %%      to the prepared state.
 check_and_insert(_, _, _, _, _, _, _, _, false) ->
-    [];
-check_and_insert(_, _, [], _, _, _, WaitingKeys, _, true) ->
-    WaitingKeys;
+    0;
+check_and_insert(_, _, [], _, _, _, _, NumWaiting, true) ->
+    NumWaiting;
 check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, WaitingKeys, NumWaiting, true) ->
     {Key, Value} = H,
     %%%lager:warning("Certifying key ~w", [Key]),
