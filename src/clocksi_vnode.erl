@@ -683,7 +683,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
             lager:warning("~w failed, has inserted ~p", [TxId, InsertedKeys]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
-                case ets:delete(PreparedTxs, K) of
+                case ets:lookup(PreparedTxs, K) of
                     [{K, Record}] -> ets:insert(PreparedTxs, {K, lists:droplast(Record)})
                 end end, WaitingKeys),
 	        {error, write_conflict};
