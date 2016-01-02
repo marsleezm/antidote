@@ -696,7 +696,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
             %%lager:warning("Inserting key sets ~w, ~w", [TxId, KeySet]),
 		    {ok, PrepareTime};
         N ->
-            %%lager:warning("~w passed but has ~w deps", [TxId, N]),
+            lager:warning("~w passed but has ~w deps", [TxId, N]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {{waiting, TxId}, TxWriteSet}),
             {wait, N, PrepareTime}
@@ -881,7 +881,7 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, W
                                 [Key|WaitingKeys], NumWaiting+1, true);
                         false ->
                             %%lager:warning("~w: False of prepared for ~p", [TxId, Key]),
-                            {false, InsertedKeys}
+                            {false, InsertedKeys, WaitingKeys}
                     end
             end;
         [] ->
