@@ -1046,7 +1046,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                 true ->
                     %% The read is not ready, may read from speculative version 
                     Result =
-                        find_appr_version(PrepareTime, LastPPTime, SnapshotTime, PendingPrepare),
+                        find_appr_version(LastPPTime, SnapshotTime, PendingPrepare),
                     %%lager:warning("Result is ~w", [Result]),
                     {ApprTxId, ApprPPTime, ApprPPValue} = 
                         case Result of first -> {PreparedTxId, PrepareTime, Value};
@@ -1183,17 +1183,17 @@ reply(Sender, Result) ->
 increment_ts(SnapshotTS, MaxTS) ->
     max(SnapshotTS, MaxTS) + 1.
 
-find_appr_version(PrepareTime, LastPPTime, SnapshotTime, PendingPrepare) ->
-    case SnapshotTime >= LastPPTime of
-        true ->
-            case PrepareTime == LastPPTime of
+find_appr_version(LastPPTime, SnapshotTime, PendingPrepare) ->
+    case PendingPrepare of
+        [] ->
+            first;
+        _ ->
+            case SnapshotTime >= LastPPTime of
                 true ->
-                    first;
+                    lists:last(PendingPrepare);
                 false ->
-                    lists:last(PendingPrepare)
-            end;
-        false ->
-            find(SnapshotTime, PendingPrepare, [])
+                    find(SnapshotTime, PendingPrepare, [])
+            end
     end.
 
 find(SnapshotTime, [{TxId, Time, Value}|Rest], ToReturn) ->
