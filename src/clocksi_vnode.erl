@@ -590,6 +590,22 @@ handle_command({abort, TxId}, _Sender,
                 num_aborted=NumAborted, dep_dict=DepDict, if_replicate=IfReplicate, if_specula=IfSpecula}) ->
     lager:warning("~w: Aborting ~w", [Partition, TxId]),
     case ets:lookup(PreparedTxs, TxId) of
+        [{TxId, {waiting, WriteSet}}] ->
+            Keys = [Key || {Key, _} <- WriteSet],
+            case IfSpecula of
+                true -> specula_utilities:deal_abort_deps(TxId);
+                false -> ok 
+            end,
+            lager:warning("Found write set"),
+            DepDict1 = dict:erase(TxId, DepDict),
+            DepDict2 = case IfReplicate of
+                    true ->
+                        clean_abort_prepared(PreparedTxs, Keys, TxId, InMemoryStore, DepDict1, Partition);
+                    false ->
+                        clean_abort_prepared(PreparedTxs, Keys, TxId, InMemoryStore, DepDict1, ignore)
+                end,
+            true = ets:delete(PreparedTxs, TxId),
+            {noreply, State#state{num_aborted=NumAborted+1, dep_dict=DepDict2}};
         [{TxId, Keys}] ->
             case IfSpecula of
                 true -> specula_utilities:deal_abort_deps(TxId);
@@ -605,26 +621,8 @@ handle_command({abort, TxId}, _Sender,
                     end,
             {noreply, State#state{num_aborted=NumAborted+1, dep_dict=DepDict1}};
         [] ->
-            case ets:lookup(PreparedTxs, {waiting, TxId}) of
-                [{{waiting, TxId}, WriteSet}] ->
-                    Keys = [Key || {Key, _} <- WriteSet],
-                    case IfSpecula of
-                        true -> specula_utilities:deal_abort_deps(TxId);
-                        false -> ok 
-                    end,
-                    lager:warning("Found write set"),
-                    DepDict1 = case IfReplicate of
-                            true ->
-                                clean_abort_prepared(PreparedTxs, Keys, TxId, InMemoryStore, DepDict, Partition);
-                            false ->
-                                clean_abort_prepared(PreparedTxs, Keys, TxId, InMemoryStore, DepDict, ignore)
-                        end,
-                    true = ets:delete(PreparedTxs, {waiting, TxId}),
-                    {noreply, State#state{num_aborted=NumAborted+1, dep_dict=DepDict1}};
-                [] ->
-                    lager:warning("No key set at all"),
-                    {noreply, State}
-            end
+            lager:warning("No key set at all"),
+            {noreply, State}
     end;
 
 handle_command({start_read_servers}, _Sender, State) ->
@@ -684,7 +682,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of
-                    [{K, Record}] -> ets:insert(PreparedTxs, {K, lists:droplast(Record)})
+                    [{K, Record}] -> ets:insert(PreparedTxs, {K, droplast(Record)})
                 end end, WaitingKeys),
 	        {error, write_conflict};
         0 ->
@@ -698,7 +696,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
         N ->
             lager:warning("~w passed but has ~w deps", [TxId, N]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
-            true = ets:insert(PreparedTxs, {{waiting, TxId}, TxWriteSet}),
+            true = ets:insert(PreparedTxs, {TxId, {waiting, TxWriteSet}}),
             {wait, N, PrepareTime}
     end.
 
@@ -849,10 +847,13 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 					true = ets:insert(PreparedTxs, {Key, [{PPTxId, PPTime, LastPPTime, PValue, StillPReaders}|Remaining]}),
 					clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition)
             end;
-        _ ->
+        [{Key, [Preped|PrepDeps]}] ->
             %% Make TxId invalid so the txn coord can notice this later. Instead of going to delete one by one in the list.
-            DepDict1 = dict:erase(TxId, DepDict),
-            clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict1, Partition)
+            PrepDeps1 = lists:keydelete(TxId, 1, PrepDeps), 
+            ets:insert(PreparedTxs, {Key, [Preped|PrepDeps1]}),
+            clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict, Partition);
+        [] ->
+            clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict, Partition)
     end.
 
 %% @doc Performs a certification check when a transaction wants to move
@@ -870,7 +871,7 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, W
             case CommitTime > SnapshotTime of
                 true ->
                     %%lager:warning("~w: False for committed key ~p, Commit time is ~w", [TxId, Key, CommitTime]),
-                    {false, InsertedKeys};
+                    {false, InsertedKeys, WaitingKeys};
                 false ->
                     case check_prepared(PPTime, TxId, PreparedTxs, Key, Value) of
                         true ->
@@ -1082,10 +1083,10 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict) -
             case dict:find(TxId, DepDict) of
                 {ok, {_, _, Sender, Type}} ->
                     lager:warning("Aborting ~w", [TxId]),
-                    NewDepDict = dict:erase(TxId, DepDict),
+                    %NewDepDict = dict:erase(TxId, DepDict),
                     %%lager:warning("Prepare not valid anymore! For ~w, sending '~w' abort to ~w", [TxId, Type, Sender]),
                     gen_server:cast(Sender, {abort, TxId, Type}),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, NewDepDict)
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict)
                 %error ->
                 %    lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
                 %    specula_utilities:deal_abort_deps(TxId),
@@ -1098,7 +1099,6 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict) -
                 %    specula_utilities:deal_abort_deps(TxId),
                 %    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict);
             %    _ ->
-                    lager:warning("Trying to abort ~w with PPtime ~w", [PWaiter, PPTime]),
                     {NewDepDict, Remaining, LastPPTime} = abort_others(PPTime, PWaiter, DepDict),
                     lager:warning("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
                     {TxId, [{TxId, PPTime, LastPPTime, Value, []}|Remaining], NewDepDict}
@@ -1116,9 +1116,9 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
             case dict:find(TxId, DepDict) of
                 {ok, {_, _, Sender, Type}} ->
                     %%lager:warning("Aborting ~w, remaining is ~w ", [TxId, Remaining]),
-                    NewDepDict = dict:erase(TxId, DepDict),
+                    %NewDepDict = dict:erase(TxId, DepDict),
                     gen_server:cast(Sender, {abort, TxId, Type}),
-                    abort_others(PPTime, Rest, NewDepDict, Remaining, LastPPTime);
+                    abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime);
                 error ->
                     %%lager:warning("~w aborted already", [TxId]),
                     abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime)
@@ -1138,8 +1138,7 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
                     lager:warning("No more dependency, sending reply back for ~w", [TxId]),
                     gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode});
                 _ ->
-                    [{{waiting, TxId}, WriteSet}] = ets:lookup(PreparedTxs, {waiting, TxId}),
-                    ets:delete(PreparedTxs, {waiting, TxId}),
+                    [{TxId, {waiting, WriteSet}}] = ets:lookup(PreparedTxs, TxId),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
                     lager:warning("~w unblocked, replicating writeset", [TxId]),
                     PendingRecord = {Sender,
@@ -1207,3 +1206,6 @@ find(SnapshotTime, [{TxId, Time, Value}|Rest], ToReturn) ->
 
 get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->
     ((A2-A1)*1000000+ (B2-B1))*1000000+ C2-C1.
+
+droplast([_T])  -> [];
+droplast([H|T]) -> [H|droplast(T)].
