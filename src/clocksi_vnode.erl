@@ -954,7 +954,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
 					update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
 						PreparedTxs, DepDict2, Partition)
             end;
-        [{Key, [{TxId, _Time, _LastPPTime, Value, PendingReaders}|Deps]}] ->
+        [{Key, [{TxId, _, _, Value, PendingReaders}|Deps]}] ->
             lager:warning("Pending readers are ~w! Pending writers are ~p", [PendingReaders, Deps]),
             ets:insert(CommittedTxs, {Key, TxCommitTime}),
             Values = case ets:lookup(InMemoryStore, Key) of
@@ -984,7 +984,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                     true = ets:delete(PreparedTxs, Key),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
                         DepDict1, Partition);
-                [{PPTxId, PPTime, LastPPTime, Value, []}|Remaining] ->
+                [{PPTxId, PPTime, LastPPTime, PPValue, []}|Remaining] ->
                     DepDict2 = unblock_prepare(PPTxId, DepDict1, PreparedTxs, Partition),
                     NewPendingReaders = lists:foldl(fun({SnapshotTime, Sender}, PReaders) ->
                             case SnapshotTime >= TxCommitTime of
@@ -1003,7 +1003,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                                     PReaders
                             end end,
                         [], PendingReaders),
-                    true = ets:insert(PreparedTxs, {Key, [{PPTxId, PPTime, LastPPTime, Value, NewPendingReaders}|Remaining]}),
+                    true = ets:insert(PreparedTxs, {Key, [{PPTxId, PPTime, LastPPTime, PPValue, NewPendingReaders}|Remaining]}),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
                         DepDict2, Partition)
             end;
