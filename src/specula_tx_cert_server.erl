@@ -630,7 +630,7 @@ handle_cast({abort, PendingTxId, {remote, _}},
                     case Stage of
                         read ->
                             %% The current transaction is aborted! So replying to client.
-                            lager:info("~w txn is in reading !!", [CurrentTxId]),
+                            %lager:warning("~w txn is in reading !!", [CurrentTxId]),
                             {noreply, SD0#state{dep_dict=DepDict1, invalid_ts=?FLOW_ABORT, 
                                 pending_list=lists:sublist(PendingList, length(PendingList)-length(L))}};
                         _ ->
