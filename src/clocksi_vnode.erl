@@ -462,10 +462,10 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                                 true ->
                                     PendingRecord = {Sender, false, WriteSet, PrepareTime},
                                     gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode}),
-                                     lager:warning("Fast replying to sender of ~w, ~w", [TxId, RepMode]),
+                                    %lager:warning("Fast replying to sender of ~w, ~w", [TxId, RepMode]),
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
                                 false ->
-                                     lager:warning("Not fast replying for ~w, ~w", [TxId, RepMode]),
+                                    %lager:warning("Not fast replying for ~w, ~w", [TxId, RepMode]),
                                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
                             end,
@@ -566,7 +566,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
             false -> 
                 commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, ignore, IfSpecula)
         end,
-    lager:warning("~w: Commit finished!", [Partition]),
+    %lager:warning("~w: Commit finished!", [Partition]),
     case Result of
         {ok, committed, DepDict1} ->
             %case IfReplicate of
@@ -716,10 +716,10 @@ prepare_and_commit(TxId, [{Key, Value}], CommittedTxs, PreparedTxs, InMemoryStor
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(CommittedTxs, Key) of
           [{Key, CommitTime}] ->
-               lager:warning("~w: There is committed! ~w", [TxId, CommitTime]),
+              %lager:warning("~w: There is committed! ~w", [TxId, CommitTime]),
               case CommitTime > SnapshotTime of
                   true ->
-                       lager:warning("~w: False because there is committed", [TxId]),
+                    lager:warning("~w: False because there is committed", [TxId]),
                     {error, write_conflict};
                   false ->
                       case ets:lookup(PreparedTxs, Key) of
