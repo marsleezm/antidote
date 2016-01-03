@@ -863,7 +863,6 @@ check_and_insert(_, _, [], _, _, _, _, NumWaiting, true) ->
     NumWaiting;
 check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, WaitingKeys, NumWaiting, true) ->
     {Key, Value} = H,
-     lager:warning("Certifying key ~w", [Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(CommittedTxs, Key) of
         [{Key, CommitTime}] ->
@@ -902,7 +901,6 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
-             lager:warning("No one has prepared so inserted ~w, ~w for key ~p", [TxId, PPTime, Key]),
             ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, Value, []}]}),
             true;
         [{Key, [{PrepTxId, PrepareTime, _, PrepValue, RWaiter}|PWaiter]}] ->
