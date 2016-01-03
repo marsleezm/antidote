@@ -1191,7 +1191,7 @@ find_appr_version(LastPPTime, SnapshotTime, PendingPrepare) ->
                 true ->
                     lists:last(PendingPrepare);
                 false ->
-                    find(SnapshotTime, PendingPrepare, [])
+                    find(SnapshotTime, PendingPrepare, first)
             end
     end.
 
