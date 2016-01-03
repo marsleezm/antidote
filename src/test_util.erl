@@ -7,7 +7,30 @@
 
 -export([delete_1/2, delete_2/2,
          lookup_1/2, lookup_2/2,
+         check_node/1, check_list/1,
          pass1/1, pass2/1]).
+
+
+check_node(Times) ->
+    Seq = lists:seq(1, Times),
+    P = self(),
+    A = now_nsec(),
+    lists:map(fun(_) ->
+           node(P) == node()
+            end, Seq),
+    B = now_nsec(),
+    io:format("Used ~w", [B-A]).
+    
+check_list(Times) ->
+    Seq = lists:seq(1, Times),
+    P = self(),
+    A = now_nsec(),
+    lists:map(fun(_) ->
+        L = pid_to_list(P),
+        lists:nth(2, L) == 48 
+            end, Seq),
+    B = now_nsec(),
+    io:format("Used ~w", [B-A]).
 
 
 delete_1(Len, Elem) ->

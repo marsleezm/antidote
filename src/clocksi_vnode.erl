@@ -21,7 +21,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(NUM_VERSION, 10).
--define(SPECULA_TIMEOUT, 10).
+-define(SPECULA_THRESHOLD, 10).
 
 -export([start_vnode/1,
 	    read_data_item/3,
@@ -1046,18 +1046,32 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                     Result =
                         find_appr_version(LastPPTime, SnapshotTime, PendingPrepare),
                     % lager:warning("Result is ~w", [Result]),
-                    {ApprTxId, ApprPPTime, ApprPPValue} = 
-                        case Result of first -> {PreparedTxId, PrepareTime, Value};
-                                        [] -> {PreparedTxId, PrepareTime, Value};
-                                        _ -> Result end,
-                    case SnapshotTime >= ApprPPTime + ?SPECULA_TIMEOUT of
-                        true ->
+                    case Result of
+                        first ->
                             %% There is more than one speculative version
-                            ets:insert(dependency, {ApprTxId, TxId}),
-                            ets:insert(anti_dep, {TxId, ApprTxId}),
-                            lager:warning("Inserting anti_dep from ~w to ~w for ~p", [TxId, ApprTxId, Key]),
-                            {specula, ApprPPValue};
-                        _ ->
+                            case prepared_by_local(TxId) of
+                                true ->
+                                    add_read_dep(TxId, PreparedTxId, Key),
+                                    {specula, Value};
+                                false ->
+                                    ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastPPTime, Value,
+                                        [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
+                                    lager:warning("~w specula reads ~p is blocked because not prepared by local! PrepareTime is ~w", [TxId, Key, PrepareTime]),
+                                    not_ready
+                            end;
+                        {ApprTxId, _, ApprPPValue} ->
+                            %% There is more than one speculative version
+                            case prepared_by_local(TxId) of
+                                true ->
+                                    add_read_dep(TxId, ApprTxId, Key),
+                                    {specula, ApprPPValue};
+                                false ->
+                                    ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastPPTime, Value,
+                                        [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
+                                    lager:warning("~w specula reads ~p is blocked because not prepared by local! PrepareTime is ~w", [TxId, Key, PrepareTime]),
+                                    not_ready
+                            end;
+                        not_ready ->
                             % lager:warning("Wait as pending reader"),
                             ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastPPTime, Value,
                                 [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
@@ -1068,6 +1082,11 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                     ready
             end
     end.
+
+add_read_dep(ReaderTx, WriterTx, Key) ->
+    lager:warning("Inserting anti_dep from ~w to ~w for ~p", [ReaderTx, WriterTx, Key]),
+    ets:insert(dependency, {WriterTx, ReaderTx}),
+    ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
 %% Abort all transactions that can not prepare and return the record that should be inserted
 deal_with_prepare_deps([], _, DepDict) ->
@@ -1187,7 +1206,7 @@ find_appr_version(LastPPTime, SnapshotTime, PendingPrepare) ->
         [] ->
             first;
         _ ->
-            case SnapshotTime >= LastPPTime of
+            case SnapshotTime >= LastPPTime + ?SPECULA_THRESHOLD of
                 true ->
                     lists:last(PendingPrepare);
                 false ->
@@ -1198,7 +1217,17 @@ find_appr_version(LastPPTime, SnapshotTime, PendingPrepare) ->
 find(SnapshotTime, [{TxId, Time, Value}|Rest], ToReturn) ->
     case SnapshotTime < Time of
         true ->
-            ToReturn;
+            case ToReturn of
+                first ->
+                    first;
+                {_, RTime, _} ->
+                    case SnapshotTime >= RTime + ?SPECULA_THRESHOLD of
+                        true ->
+                            ToReturn;
+                        false ->
+                            not_ready
+                    end
+            end;
         _ ->
             find(SnapshotTime, Rest, {TxId, Time, Value}) 
     end.
@@ -1208,3 +1237,6 @@ get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->
 
 droplast([_T])  -> [];
 droplast([H|T]) -> [H|droplast(T)].
+
+prepared_by_local(TxId) ->
+    node(TxId#tx_id.server_pid) == node().
