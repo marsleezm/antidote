@@ -38,6 +38,7 @@
 -endif.
 
 -define(NUM_VERSIONS, 10).
+-define(SET_SIZE, 20).
 %% API
 -export([start_link/1]).
 
@@ -73,6 +74,8 @@
         delay :: non_neg_integer(),
         num_specula_read=0 :: non_neg_integer(),
         num_read=0 :: non_neg_integer(),
+        current_set :: set(),
+        backup_set :: set(),
         name :: atom(),
 		self :: atom()}).
 
@@ -127,8 +130,8 @@ init([Name]) ->
     ReplicatedLog = tx_utilities:open_private_table(repl_log),
     PendingLog = tx_utilities:open_private_table(pending_log),
     {ok, #state{name=Name,
-                pending_log = PendingLog,
-                replicated_log = ReplicatedLog}}.
+                pending_log = PendingLog, current_set = sets:new(),
+                backup_set = sets:new(), replicated_log = ReplicatedLog}}.
 
 handle_call({retrieve_log, LogName},  _Sender,
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
@@ -296,32 +299,34 @@ handle_cast({commit_specula, TxId, Partition, CommitTime},
     {noreply, SD0};
 
 handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender}, 
-	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog}) ->
+	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, current_set=CurrentSet, backup_set=BackupSet}) ->
     case Type of
         prepared ->
-	    case ets:lookup(PendingLog, {TxId, Partition}) of
-		[] ->
-            	    ets:insert(PendingLog, {{TxId, Partition}, {WriteSet, TimeStamp}});
-		[{{TxId, Partition}, to_abort}] ->
-		    %lager:warning("Prep ~w ~w arrived late! Aborted", [TxId, Partition]),
-		    ets:delete(PendingLog, {TxId, Partition});
-		[{{TxId, Partition}, CommitTime}] ->
-		    %lager:warning("Prep ~w ~w arrived late! Committed", [TxId, Partition]),
-		    ets:delete(PendingLog, {TxId, Partition}),
-		    AppendFun = fun({Key, Value}) ->
-                            %lager:info("DataRepl Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
-                            case ets:lookup(ReplicatedLog, Key) of
-                                [] ->
-                                    true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
-                                [{Key, ValueList}] ->
-                                    {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-                                    true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}|RemainList]})
-                            end end,
-            	    lists:foreach(AppendFun, WriteSet)
-	    end,
-            %lager:info("Got repl prepare for {~w, ~w}, replying to ~w", [TxId, Partition, Sender]),
-            gen_server:cast({global, Sender}, {ack, Partition, TxId}), 
-            {noreply, SD0};
+            case (sets:is_element({TxId, Partition}, CurrentSet) or sets:is_element({TxId, Partition}, BackupSet)) of
+                true ->
+                    {noreply, SD0};
+                false ->
+                    case ets:lookup(PendingLog, {TxId, Partition}) of
+                        [] ->
+                            ets:insert(PendingLog, {{TxId, Partition}, {WriteSet, TimeStamp}});
+                        [{{TxId, Partition}, CommitTime}] ->
+                            %lager:warning("Prep ~w ~w arrived late! Committed", [TxId, Partition]),
+                            ets:delete(PendingLog, {TxId, Partition}),
+                            AppendFun = fun({Key, Value}) ->
+                                            %lager:info("DataRepl Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
+                                            case ets:lookup(ReplicatedLog, Key) of
+                                                [] ->
+                                                    true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
+                                                [{Key, ValueList}] ->
+                                                    {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
+                                                    true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}|RemainList]})
+                                            end end,
+                                    lists:foreach(AppendFun, WriteSet)
+                            %lager:info("Got repl prepare for {~w, ~w}, replying to ~w", [TxId, Partition, Sender]),
+                    end,
+                    gen_server:cast({global, Sender}, {ack, Partition, TxId}), 
+                    {noreply, SD0}
+            end;
         single_commit ->
             AppendFun = fun({Key, Value}) ->
                 case ets:lookup(ReplicatedLog, Key) of
@@ -345,11 +350,15 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
     {noreply, SD0};
 
 handle_cast({repl_abort, TxId, Partitions}, 
-	    SD0=#state{
-            pending_log=PendingLog}) ->
+	    SD0=#state{current_set=CurrentSet, pending_log=PendingLog}) ->
     %lager:info("Got repl commit for ~w", [TxId]),
-    abort_by_parts(PendingLog, TxId, Partitions),
-    {noreply, SD0};
+    NewSet = abort_by_parts(PendingLog, TxId, Partitions, CurrentSet),
+    case sets:size(NewSet) > ?SET_SIZE of
+        true ->
+            {noreply, SD0#state{current_set=sets:new(), backup_set=NewSet}};
+        false ->
+            {noreply, SD0#state{current_set=NewSet}}
+    end;
 
 handle_cast(_Info, StateData) ->
     {noreply,StateData}.
@@ -421,17 +430,18 @@ append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
     end,
     append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, Rest). 
 
-abort_by_parts(_, _, []) ->
-    ok;
-abort_by_parts(PendingLog, TxId, [Part|Rest]) ->
+abort_by_parts(_, _, [], Set) ->
+    Set;
+abort_by_parts(PendingLog, TxId, [Part|Rest], Set) ->
     case ets:lookup(PendingLog, {TxId, Part}) of
 	    [] ->
 	        %lager:warning("Abort ~w ~w arrived early!", [TxId, Part]),
-	        ets:insert(PendingLog, {{TxId, Part}, to_abort});
+            Set1 = sets:add_element({TxId, Part}, Set),
+            abort_by_parts(PendingLog, TxId, Rest, Set1); 
 	    _ ->
-    	    ets:delete(PendingLog, {TxId, Part})
-    end,
-    abort_by_parts(PendingLog, TxId, Rest). 
+    	    ets:delete(PendingLog, {TxId, Part}),
+            abort_by_parts(PendingLog, TxId, Rest, Set) 
+    end.
 
 delete_version([{_, _, TxId}|Rest], TxId) -> 
     Rest;
