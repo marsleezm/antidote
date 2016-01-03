@@ -1214,6 +1214,19 @@ find_appr_version(LastPPTime, SnapshotTime, PendingPrepare) ->
             end
     end.
 
+find(SnapshotTime, [], ToReturn) ->
+    lager:warning("Now in last version. Snapshot time is ~w, ToReturn is ~w", [SnapshotTime, ToReturn]),
+    case ToReturn of
+                first ->
+                    first;
+                {_, RTime, _} ->
+                    case SnapshotTime >= RTime + ?SPECULA_THRESHOLD of
+                        true ->
+                            ToReturn;
+                        false ->
+                            not_ready
+                    end
+    end;
 find(SnapshotTime, [{TxId, Time, Value}|Rest], ToReturn) ->
     case SnapshotTime < Time of
         true ->
