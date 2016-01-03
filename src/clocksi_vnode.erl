@@ -1206,6 +1206,7 @@ find_appr_version(LastPPTime, SnapshotTime, PendingPrepare) ->
         [] ->
             first;
         _ ->
+            lager:warning("LastPPTime is ~w, PendingPrepare is ~p, SnapshotTime is ~w", [LastPPTime, PendingPrepare, SnapshotTime]),
             case SnapshotTime >= LastPPTime + ?SPECULA_THRESHOLD of
                 true ->
                     lists:last(PendingPrepare);
