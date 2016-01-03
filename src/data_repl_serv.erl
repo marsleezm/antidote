@@ -223,15 +223,16 @@ handle_call({go_down},_Sender,SD0) ->
 
 handle_cast({relay_read, Key, TxId, Reader}, 
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
+    lager:warning("~w, ~p data repl read", [TxId, Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
-            lager:info("Nothing!"),
+            lager:info("Nothing for ~p!", [Key]),
             gen_server:reply(Reader, {ok, []}),
             {noreply, SD0};
         [{Key, ValueList}] ->
-            lager:info("Value list is ~w", [ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
             Value = find_version(ValueList, MyClock),
+            lager:info("Got value for ~p", [ValueList, Key]),
             gen_server:reply(Reader, Value),
             {noreply, SD0}
     end;
