@@ -399,7 +399,7 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max
 handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_blocked=NumBlocked, relay_read=RelayRead,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS, num_specula_read=NumSpeculaRead}) ->
     {NumRR, AccRR} = RelayRead,
-     lager:warning("Got relay read of ~p for ~w", [Key, TxId]),
+    %lager:warning("Got relay read of ~p for ~w", [Key, TxId]),
     %clock_service:update_ts(TxId#tx_id.snapshot_time),
     T1 = os:timestamp(),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
@@ -413,6 +413,7 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_bl
                     Result = read_value(Key, TxId, InMemoryStore),
                     gen_server:reply(Reader, Result), 
     		        T2 = os:timestamp(),
+                    lager:warning("Non specula read finished: ~w, ~p", [TxId, Key]),
                     {noreply, SD0#state{max_ts=MaxTS1, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         specula ->
@@ -421,13 +422,15 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_bl
                     {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
                 {specula, Value} ->
                     gen_server:reply(Reader, {ok, Value}), 
-    		    T2 = os:timestamp(),
+    		        T2 = os:timestamp(),
+                    lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
                     {noreply, SD0#state{max_ts=MaxTS1, num_specula_read=NumSpeculaRead+1,
-				relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
+				        relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
                     gen_server:reply(Reader, Result), 
-    		    T2 = os:timestamp(),
+    		        T2 = os:timestamp(),
+                    lager:warning("Specula normal read finished: ~w, ~p", [TxId, Key]),
                     {noreply, SD0#state{max_ts=MaxTS1, 
 				relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end

@@ -120,7 +120,7 @@ handle_call({read, Key, TxId, Node}, Sender,
 handle_call({read, Key, TxId, Node}, Sender, 
 	    SD0=#state{cache_log=CacheLog, do_specula=true, 
             num_attempt_read=NumAttemptRead, num_specula_read=NumSpeculaRead}) ->
-    %lager:info("Read ~w of ~w", [Key, TxId]), 
+    lager:warning("Cache read ~w of ~w", [Key, TxId]), 
     case ets:lookup(CacheLog, Key) of
         [] ->
             %lager:info("Relaying read to ~w", [Node]),

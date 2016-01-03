@@ -252,6 +252,7 @@ handle_call({certify, TxId, _, _},  _Sender, SD0=#state{tx_id=?NO_TXN, dep_dict=
     {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict)}};
 
 handle_call({read, Key, TxId, Node}, Sender, SD0) ->
+    lager:warning("Relaying read of ~w for key ~p", [TxId, Key]),
     ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, specula),
     {noreply, SD0};
 
