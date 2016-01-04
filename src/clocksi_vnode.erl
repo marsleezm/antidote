@@ -507,12 +507,12 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                     %            State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1}};
                     %    _ ->
                             % lager:warning("Replying to ~w of abort for ~w, ~w", [Sender, TxId, RepMode]),
-                            gen_server:cast(Sender, {abort, TxId, RepMode}),
+                            gen_server:cast(Sender, {abort, TxId, RepMode, {Partition, node()}}),
                             {noreply, State#state{num_cert_fail=NumCertFail+1,
                                 prepare_count=PrepareCount+1}};
                     %end;
                 true ->
-                    ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {abort, TxId, RepMode, {Partition, node()}}}}),
+                    ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {abort, TxId, RepMode}}}),
                     {noreply, State}
             end 
     end;
