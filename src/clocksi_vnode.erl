@@ -399,7 +399,7 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max
 handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_blocked=NumBlocked, relay_read=RelayRead,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS, num_specula_read=NumSpeculaRead}) ->
     {NumRR, AccRR} = RelayRead,
-    %lager:warning("Got relay read of ~p for ~w", [Key, TxId]),
+    lager:warning("~w relay read ~p", [TxId, Key]),
     %clock_service:update_ts(TxId#tx_id.snapshot_time),
     T1 = os:timestamp(),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
