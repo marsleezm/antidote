@@ -512,7 +512,7 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                                 prepare_count=PrepareCount+1}};
                     %end;
                 true ->
-                    ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {abort, TxId, RepMode}}}),
+                    ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {abort, TxId, whatever, RepMode}}}),
                     {noreply, State}
             end 
     end;
@@ -547,7 +547,7 @@ handle_command({single_commit, WriteSet}, Sender,
                             num_committed=NumCommitted+1}}
             end;
         {error, write_conflict} ->
-            gen_server:cast(Sender, {abort, TxId}),
+            gen_server:cast(Sender, {abort, TxId, whatever, {Partition, node()}}),
             {noreply, State#state{num_cert_fail=NumCertFail+1}}
     end;
 
@@ -1142,7 +1142,7 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
                 {ok, {_, _, Sender, Type}} ->
                     lager:warning("Aborting ~w of others, remaining is ~w ", [TxId, Remaining]),
                     %NewDepDict = dict:erase(TxId, DepDict),
-                    gen_server:cast(Sender, {abort, TxId, Type}),
+                    gen_server:cast(Sender, {abort, TxId, Type, MyNode}),
                     abort([MyNode], TxId),
                     abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime, MyNode);
                 error ->
