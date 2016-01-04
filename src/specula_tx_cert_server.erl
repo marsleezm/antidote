@@ -489,12 +489,12 @@ handle_cast({read_invalid, MyCommitTime, TxId}, SD0=#state{tx_id=CurrentTxId, se
             end
     end;
 
-handle_cast({abort, ReceivedTxId, local}, SD0=#state{tx_id=TxId, local_updates=LocalUpdates, 
+handle_cast({abort, ReceivedTxId, local, FromNode}, SD0=#state{tx_id=TxId, local_updates=LocalParts, 
         do_repl=DoRepl, sender=Sender, pending_txs=PendingTxs, dep_dict=DepDict}) ->
     case ReceivedTxId of
         TxId ->
            lager:warning("Received local abort for ~w", [TxId]),
-            abort_tx(TxId, LocalUpdates, [], DoRepl, PendingTxs),
+            abort_tx(TxId, lists:delete(FromNode, LocalParts), [], DoRepl, PendingTxs),
             DepDict1 = dict:erase(TxId, DepDict),
             gen_server:reply(Sender, {aborted, TxId}),
             {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1}};
@@ -597,18 +597,18 @@ handle_cast({prepared, PendingTxId, PendingPT, remote},
     end;
             
 %% Aborting the current transaction
-handle_cast({abort, TxId, {remote,_}}, 
+handle_cast({abort, TxId, {remote,_}, FromNode}, 
 	    SD0=#state{tx_id=TxId, pending_txs=PendingTxs,  do_repl=DoRepl, local_updates=LocalParts, 
             remote_updates=RemoteUpdates, dep_dict=DepDict, sender=Sender}) ->
    lager:warning("Aborting ~w remote", [TxId]),
     RemoteParts = [P || {P, _} <- RemoteUpdates],
-    abort_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs),
+    abort_tx(TxId, LocalParts, lists:delete(FromNode, RemoteParts), DoRepl, PendingTxs),
     DepDict1 = dict:erase(PendingTxs, DepDict),
     gen_server:reply(Sender, {aborted, TxId}),
    lager:warning("Abort remote"),
     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1}};
 %% Not aborting current transaction
-handle_cast({abort, PendingTxId, {remote, _}}, 
+handle_cast({abort, PendingTxId, {remote, _}, FromNode}, 
 	    SD0=#state{pending_list=PendingList, rep_dict=RepDict, tx_id=CurrentTxId, sender=Sender,
             do_repl=DoRepl, dep_dict=DepDict, pending_txs=PendingTxs, stage=Stage,
             aborted=Aborted, local_updates=LocalParts, remote_updates=RemoteUpdates}) ->
@@ -619,7 +619,7 @@ handle_cast({abort, PendingTxId, {remote, _}},
             {noreply, SD0};
         L ->
            lager:warning("Abort remote again, Pending list is ~w, PendingTxId is ~w, List is ~w", [PendingList, PendingTxId, L]),
-            DepDict1 = abort_specula_list(L, RepDict, DepDict, DoRepl, PendingTxs),
+            DepDict1 = abort_specula_list(L, RepDict, DepDict, DoRepl, PendingTxs, FromNode),
             case CurrentTxId of
                 ?NO_TXN ->
                     {noreply, SD0#state{dep_dict=DepDict1, 
@@ -738,6 +738,13 @@ commit_specula_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict, Re
     commit_to_table(RemoteParts, TxId, CommitTime, RepDict),
     {DepDict1, ToAbortTxs}.
 
+abort_specula_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs, RepDict, DepDict, ExceptNode) ->
+   lager:warning("Aborting specula tx ~w", [TxId]),
+   lager:warning("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
+    abort_tx(TxId, LocalParts, lists:delete(ExceptNode, RemoteParts), DoRepl, PendingTxs),
+    abort_to_table(RemoteParts, TxId, RepDict),
+    dict:erase(TxId, DepDict).
+
 abort_specula_tx(TxId, LocalParts, RemoteParts, DoRepl, PendingTxs, RepDict, DepDict) ->
    lager:warning("Aborting specula tx ~w", [TxId]),
    lager:warning("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
@@ -840,6 +847,12 @@ try_to_commit(LastCommitTime, [H|Rest]=PendingList, RepDict, DepDict,
                     try_to_commit(CommitTime, PendingList1, RepDict, DepDict2, DoRepl, PendingTxs, ReadAborted1, Committed+1)
             end
     end.
+
+abort_specula_list([H|T], RepDict, DepDict, DoRepl, PendingTxs, ExceptNode) ->
+    lager:warning("Trying to abort ~w", [H]),
+    [{H, {LocalParts, RemoteParts}}] = ets:lookup(PendingTxs, H), 
+    DepDict1 = abort_specula_tx(H, LocalParts, RemoteParts, DoRepl, PendingTxs, RepDict, DepDict, ExceptNode),
+    abort_specula_list(T, RepDict, DepDict1, DoRepl, PendingTxs). 
 
 abort_specula_list([], _RepDict, DepDict, _, _) ->
     DepDict;

@@ -154,14 +154,15 @@ handle_cast({prepared, _OtherTxId, _, local},
     %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
     {noreply, SD0};
 
-handle_cast({abort, TxId, local}, SD0=#state{tx_id=TxId, local_parts=LocalParts, 
+handle_cast({abort, TxId, local, FromNode}, SD0=#state{tx_id=TxId, local_parts=LocalParts, 
             do_repl=DoRepl, sender=Sender}) ->
     %lager:info("Local abort ~w", [TxId]),
-    clocksi_vnode:abort(LocalParts, TxId),
-    repl_fsm:repl_abort(LocalParts, TxId, DoRepl),
+    LocalParts1 = lists:delete(FromNode, LocalParts), 
+    clocksi_vnode:abort(LocalParts1, TxId),
+    repl_fsm:repl_abort(LocalParts1, TxId, DoRepl),
     gen_server:reply(Sender, {aborted, TxId}),
     {noreply, SD0#state{tx_id={}}};
-handle_cast({abort, _, local}, SD0) ->
+handle_cast({abort, _, local, _}, SD0) ->
     %lager:info("Received abort for previous txn ~w", [OtherTxId]),
     {noreply, SD0};
 
@@ -187,18 +188,19 @@ handle_cast({prepared, _, _, remote},
 	    SD0) ->
     {noreply, SD0};
 
-handle_cast({abort, TxId, {remote,_}}, 
+handle_cast({abort, TxId, {remote,_}, FromNode}, 
 	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, 
         local_parts=LocalParts, do_repl=DoRepl}) ->
     %lager:info("Remote abort ~w", [TxId]),
+    RemoteParts1 = lists:delete(FromNode, RemoteParts),
     clocksi_vnode:abort(LocalParts, TxId),
-    clocksi_vnode:abort(RemoteParts, TxId),
+    clocksi_vnode:abort(RemoteParts1, TxId),
     repl_fsm:repl_abort(LocalParts, TxId, DoRepl),
-    repl_fsm:repl_abort(RemoteParts, TxId, DoRepl),
+    repl_fsm:repl_abort(RemoteParts1, TxId, DoRepl),
     gen_server:reply(Sender, {aborted, TxId}),
     {noreply, SD0#state{tx_id={}}};
 
-handle_cast({abort, _, {remote,_}}, 
+handle_cast({abort, _, {remote,_}, _}, 
 	    SD0) ->
     {noreply, SD0};
 
