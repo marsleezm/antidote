@@ -194,7 +194,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
             pending_list=PendingList, speculated=Speculated, dep_dict=DepDict, num_specula_read=NumSpeculaRead}) ->
     %RemoteKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, RemoteUpdates),
     %% If there was a legacy ongoing transaction.
-    lager:warning("Got req: txid ~w, localUpdates ~p, remote updates ~p", [TxId, LocalUpdates, RemoteUpdates]),
+    %lager:warning("Got req: txid ~w, localUpdates ~p, remote updates ~p", [TxId, LocalUpdates, RemoteUpdates]),
    lager:warning("Got req: txid ~w", [TxId]),
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
@@ -252,7 +252,7 @@ handle_call({certify, TxId, _, _},  _Sender, SD0=#state{tx_id=?NO_TXN, dep_dict=
     {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict)}};
 
 handle_call({read, Key, TxId, Node}, Sender, SD0) ->
-    lager:warning("Relaying read of ~w for key ~p", [TxId, Key]),
+    %lager:warning("Relaying read of ~w for key ~p", [TxId, Key]),
     ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, specula),
     {noreply, SD0};
 
