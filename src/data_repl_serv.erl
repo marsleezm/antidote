@@ -187,13 +187,13 @@ handle_call({read, Key, TxId}, _Sender,
                     %lager:info("Found specula value ~p from ~w", [ValueList, SpeculaTxId]),
                     ets:insert(dependency, {SpeculaTxId, TxId}),         
                     ets:insert(anti_dep, {TxId, SpeculaTxId}),        
-                    lager:warning("Inserting antidep from ~w to ~w for key ~w", [TxId, SpeculaTxId, Key]),
+                    %lager:warning("Inserting antidep from ~w to ~w for key ~w", [TxId, SpeculaTxId, Key]),
                     {reply, {ok, Value}, SD0#state{num_specula_read=NumSpeculaRead+1, num_read=NumRead+1}};
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
                 Value ->
-                    case Value of [] -> lager:warning("No value for ~p, ~p, value list is ~p", [Key, TxId, ValueList]);
-                                _ -> ok
-                    end,
+                    %case Value of [] -> lager:warning("No value for ~p, ~p, value list is ~p", [Key, TxId, ValueList]);
+                    %            _ -> ok
+                    %end,
                     %lager:info("Found value ~p", [Value]),
                     {reply, {ok, Value}, SD0#state{num_read=NumRead+1}}
             end
@@ -227,16 +227,16 @@ handle_call({go_down},_Sender,SD0) ->
 
 handle_cast({relay_read, Key, TxId, Reader}, 
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
-    lager:warning("~w, ~p data repl read", [TxId, Key]),
+    %lager:warning("~w, ~p data repl read", [TxId, Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
-            lager:info("Nothing for ~p!", [Key]),
+            %lager:info("Nothing for ~p!", [Key]),
             gen_server:reply(Reader, {ok, []}),
             {noreply, SD0};
         [{Key, ValueList}] ->
             MyClock = TxId#tx_id.snapshot_time,
             Value = find_version(ValueList, MyClock),
-            lager:info("Got value for ~p", [ValueList, Key]),
+            %lager:info("Got value for ~p", [ValueList, Key]),
             gen_server:reply(Reader, Value),
             {noreply, SD0}
     end;
