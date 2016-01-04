@@ -39,6 +39,7 @@
 
 -define(NUM_VERSIONS, 10).
 -define(SET_SIZE, 20).
+-define(READ_TIMEOUT, 5000).
 %% API
 -export([start_link/1]).
 
@@ -88,7 +89,7 @@ start_link(Name) ->
              ?MODULE, [Name], []).
 
 read(Name, Key, TxId) ->
-    gen_server:call({global, Name}, {read, Key, TxId}).
+    gen_server:call({global, Name}, {read, Key, TxId}, ?READ_TIMEOUT).
 
 check_table(Name) ->
     gen_server:call({global, Name}, {check_table}).

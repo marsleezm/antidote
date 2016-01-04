@@ -29,6 +29,8 @@
 -export([init/1, certify/4, get_stat/0, get_internal_data/3, start_tx/1, 
             start_read_tx/1, set_internal_data/3, read/4, single_commit/4]).
 
+-define(READ_TIMEOUT, 10000).
+
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
@@ -87,9 +89,9 @@ set_internal_data(Name, Type, Param) ->
 read(Name, TxId, Key, Node) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {read, Key, TxId, Node});
+            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {read, Key, TxId, Node}, ?READ_TIMEOUT);
         false ->
-            gen_server:call({global, Name}, {read, Key, TxId, Node})
+            gen_server:call({global, Name}, {read, Key, TxId, Node}, ?READ_TIMEOUT)
     end.
 
 get_stat() ->
