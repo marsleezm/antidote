@@ -22,9 +22,13 @@
 -behavior(gen_server).
 
 -include("antidote.hrl").
-
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-define(CACHE_SERV, mock_partition_fsm).
+-define(DATA_REPL_SERV, mock_partition_fsm).
+-else.
+-define(CACHE_SERV, cache_serv).
+-define(DATA_REPL_SERV, data_repl_serv).
 -endif.
 
 %% API
@@ -42,11 +46,9 @@
 
 %% States
 -export([repl_prepare/4,
-         repl_abort/3,
-	 check_table/0,
-         repl_commit/4,
-         repl_abort/4,
-         repl_commit/5,
+	     check_table/0,
+         repl_commit/6,
+         repl_abort/5,
          quorum_replicate/7,
          chain_replicate/5,
          send_after/3]).
@@ -64,8 +66,7 @@
         repl_factor :: non_neg_integer(),
         fast_reply :: boolean(),
         delay :: non_neg_integer(),
-        my_name :: atom(),
-		self :: atom()}).
+        my_name :: atom()}).
 
 %%%===================================================================
 %%% API
@@ -81,26 +82,6 @@ repl_prepare(Partition, PrepType, TxId, LogContent) ->
 
 check_table() ->
     gen_server:call({global, get_repl_name()}, {check_table}).
-
-repl_abort(UpdatedParts, TxId, DoRepl) ->
-    repl_abort(UpdatedParts, TxId, DoRepl, false). 
-
-repl_abort(_, _, false, _) ->
-    ok;
-repl_abort([], _, true, _) ->
-    ok;
-repl_abort(UpdatedParts, TxId, true, SkipLocal) ->
-    gen_server:cast({global, get_repl_name()}, {repl_abort, TxId, UpdatedParts, SkipLocal}).
-
-repl_commit(UpdatedParts, TxId, CommitTime, DoRepl) ->
-    repl_commit(UpdatedParts, TxId, CommitTime, DoRepl, false). 
-
-repl_commit(_, _, _, false, _) ->
-    ok;
-repl_commit([], _, _, true, _) ->
-    ok;
-repl_commit(UpdatedParts, TxId, CommitTime, true, SkipLocal) ->
-    gen_server:cast({global, get_repl_name()}, {repl_commit, TxId, UpdatedParts, CommitTime, SkipLocal}).
 
 quorum_replicate(Replicas, Type, TxId, Partition, WriteSet, TimeStamp, MyName) ->
     lists:foreach(fun(Replica) ->
@@ -198,45 +179,6 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
     end,
     {noreply, SD0};
 
-handle_cast({repl_commit, TxId, UpdatedParts, CommitTime, SkipLocal}, 
-	    SD0=#state{local_rep_set=LocalRepSet}) ->
-    %lager:warning("Updated parts are ~w", [UpdatedParts]),
-    AllReplicas = get_all_replicas(UpdatedParts),
-    %lager:warning("All replicas are ~w", [AllReplicas]),
-    lists:foreach(fun({Node, Partitions}) -> 
-        %lager:warning("Node is ~w, partitions are ~w", [Node, Partitions]),
-        [{_, Replicas}] = ets:lookup(meta_info, Node),
-        %lager:warning("Node replicas are ~w", [Replicas]),
-        lists:foreach(fun(R) ->
-            %lager:warning("Sending repl commit to ~w", [R]),
-            case (SkipLocal == true) and (sets:is_element(R, LocalRepSet) == true) of
-                true ->
-                    %lager:warning("Skipping sending commit to ~w", [R]),
-                    ok;
-                false ->
-                    gen_server:cast({global, R}, {repl_commit, TxId, CommitTime, Partitions})
-            end end,  Replicas) end,
-            AllReplicas),
-    {noreply, SD0};
-
-handle_cast({repl_abort, TxId, UpdatedParts, SkipLocal}, 
-	    SD0=#state{local_rep_set=LocalRepSet}) ->
-    AllReplicas = get_all_replicas(UpdatedParts),
-    %lager:warning("Replicas are ~w", [AllReplicas]),
-    lists:foreach(fun({Node, Partitions}) -> 
-        [{_, Replicas}] = ets:lookup(meta_info, Node),
-        lists:foreach(fun(R) ->
-            %lager:warning("Sending repl abort to ~w", [R]),
-            case (SkipLocal == true) and (sets:is_element(R, LocalRepSet) == true) of
-                true ->
-                    %lager:warning("Skipping sending abort to ~w", [R]),
-                    ok;
-                false ->
-                    gen_server:cast({global, R}, {repl_abort, TxId, Partitions}) 
-            end end, Replicas) end,
-            AllReplicas),
-    {noreply, SD0};
-
 handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
     case ets:lookup(PendingLog, {TxId, Partition}) of
         [{{TxId, Partition}, {R, 1}}] ->
@@ -296,7 +238,7 @@ send_after(Delay, To, Msg) ->
 get_repl_name() ->
     list_to_atom("repl"++atom_to_list(node())).
 
-get_all_replicas(Parts) ->
+build_node_parts(Parts) ->
     D = lists:foldl(fun({Partition, Node}, Acc) ->
                       dict:append(Node, Partition, Acc)
                    end,
@@ -315,5 +257,76 @@ get_name(ReplName, N) ->
         "repl" ->  lists:sublist(ReplName, 1, N-1);
          _ -> get_name(ReplName, N+1)
     end.
-    
+
+repl_commit(_, _, _, false, _, _) ->
+    ok;
+repl_commit([], _, _, true, _, _) ->
+    ok;
+repl_commit(UpdatedParts, TxId, CommitTime, true, false, RepDict) ->
+    NodeParts = build_node_parts(UpdatedParts),
+    lists:foreach(fun({Node, Partitions}) ->
+        Replicas = dict:fetch(Node, RepDict),
+        lists:foreach(fun(R) ->
+            case R of
+                cache -> ok;
+                {rep, Server} ->
+                   %lager:warning("Repl commit to ~w for ~w of ~w", [Server, TxId, Partitions]),
+                    gen_server:cast({global, Server}, {repl_commit, TxId, CommitTime, Partitions});
+                Server ->
+                   %lager:warning("Repl commit to ~w for ~w of ~w", [Server, TxId, Partitions]),
+                    gen_server:cast({global, Server}, {repl_commit, TxId, CommitTime, Partitions})
+            end end,  Replicas) end,
+            NodeParts);
+repl_commit(UpdatedParts, TxId, CommitTime, true, true, RepDict) ->
+    NodeParts = build_node_parts(UpdatedParts),
+    lists:foreach(fun({Node, Partitions}) ->
+        Replicas = dict:fetch(Node, RepDict),
+        lists:foreach(fun(R) ->
+            case R of
+                cache ->
+                   %lager:warning("Commit specula to cache for ~w of ~w", [TxId, Partitions]),
+                    ?CACHE_SERV:commit_specula(TxId, Partitions, CommitTime);
+                {rep, Server} ->
+                   %lager:warning("Commit specula to ~w for ~w of ~w", [Server, TxId, Partitions]),
+                    ?DATA_REPL_SERV:commit_specula(Server, TxId, Partitions, CommitTime);
+                Server ->
+                   %lager:warning("Repl commit to ~w for ~w of ~w", [Server, TxId, Partitions]),
+                    gen_server:cast({global, Server}, {repl_commit, TxId, CommitTime, Partitions})
+            end end,  Replicas) end,
+            NodeParts).
+
+repl_abort(_, _, false, _, _) ->
+    ok;
+repl_abort([], _, true, _, _) ->
+    ok;
+repl_abort(UpdatedParts, TxId, true, false, RepDict) ->
+    NodeParts = build_node_parts(UpdatedParts),
+    lists:foreach(fun({Node, Partitions}) ->
+        Replicas = dict:fetch(Node, RepDict),
+        lists:foreach(fun(R) ->
+            case R of
+                cache -> ok;
+                {rep, Server} ->
+                   %lager:warning("Commit specula to ~w for ~w of ~w", [Server, TxId, Partitions]),
+                    gen_server:cast({global, Server}, {repl_abort, TxId, Partitions});
+                Server ->
+                    gen_server:cast({global, Server}, {repl_abort, TxId, Partitions})
+            end end,  Replicas) end,
+            NodeParts);
+repl_abort(UpdatedParts, TxId, true, true, RepDict) ->
+    NodeParts = build_node_parts(UpdatedParts),
+    lists:foreach(fun({Node, Partitions}) ->
+        Replicas = dict:fetch(Node, RepDict),
+        lists:foreach(fun(R) ->
+            case R of
+                cache ->
+                   %lager:warning("Abort specula to cache for ~w of ~w", [TxId, Partitions]),
+                    ?CACHE_SERV:abort_specula(TxId, Partitions);
+                {rep, Server} ->
+                   %lager:warning("Abort specula to ~w for ~w of ~w", [Server, TxId, Partitions]),
+                    ?DATA_REPL_SERV:abort_specula(Server, TxId, Partitions);
+                Server ->
+                    gen_server:cast({global, Server}, {repl_abort, TxId, Partitions})
+            end end,  Replicas) end,
+            NodeParts).    
 

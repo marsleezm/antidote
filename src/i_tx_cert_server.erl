@@ -50,6 +50,7 @@
         do_repl :: boolean(),
         sender :: term(),
         last_commit_ts :: non_neg_integer(),
+        rep_dict :: dict(),
         to_ack :: non_neg_integer()}).
 
 %%%===================================================================
@@ -67,7 +68,9 @@ start_link(Name) ->
 
 init([]) ->
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
-    {ok, #state{do_repl=antidote_config:get(do_repl), last_commit_ts=0}}.
+    DoRepl = antidote_config:get(do_repl),
+    RepDict = hash_fun:build_rep_dict(DoRepl),
+    {ok, #state{do_repl=DoRepl, last_commit_ts=0, rep_dict=RepDict}}.
 
 handle_call({get_stat}, _Sender, SD0) ->
     {reply, {0, 0, 0, 0, 0}, SD0};
@@ -122,7 +125,7 @@ handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
 handle_cast({prepared, TxId, PrepareTime, local}, 
-	    SD0=#state{to_ack=N, tx_id=TxId, local_parts=LocalParts, do_repl=DoRepl,
+	    SD0=#state{to_ack=N, tx_id=TxId, local_parts=LocalParts, do_repl=DoRepl, rep_dict=RepDict,
             remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime}) ->
     %lager:info("Got prepared local"),
     case N of
@@ -133,7 +136,7 @@ handle_cast({prepared, TxId, PrepareTime, local},
                     %lager:info("Trying to prepare!!"),
                     CommitTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:commit(LocalParts, TxId, CommitTime),
-                    repl_fsm:repl_commit(LocalParts, TxId, CommitTime, DoRepl),
+                    repl_fsm:repl_commit(LocalParts, TxId, CommitTime, DoRepl, false, RepDict),
                     gen_server:reply(Sender, {ok, {committed, CommitTime}}),
                     {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
                 L ->
@@ -168,7 +171,7 @@ handle_cast({abort, _, local, _}, SD0) ->
 
 handle_cast({prepared, TxId, PrepareTime, remote}, 
 	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, do_repl=DoRepl, 
-            prepare_time=MaxPrepTime, to_ack=N, local_parts=LocalParts}) ->
+            prepare_time=MaxPrepTime, to_ack=N, local_parts=LocalParts, rep_dict=RepDict}) ->
     %lager:info("Received remote prepare ~w, ~w, N is ~w", [TxId, PrepareTime, N]),
     case N of
         1 ->
@@ -176,8 +179,8 @@ handle_cast({prepared, TxId, PrepareTime, remote},
             CommitTime = max(MaxPrepTime, PrepareTime),
             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
             clocksi_vnode:commit(RemoteParts, TxId, CommitTime),
-            repl_fsm:repl_commit(LocalParts, TxId, CommitTime, DoRepl),
-            repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, DoRepl),
+            repl_fsm:repl_commit(LocalParts, TxId, CommitTime, DoRepl, false, RepDict),
+            repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, DoRepl, false, RepDict),
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
             {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
         N ->
@@ -190,13 +193,13 @@ handle_cast({prepared, _, _, remote},
 
 handle_cast({abort, TxId, {remote,_}, FromNode}, 
 	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, 
-        local_parts=LocalParts, do_repl=DoRepl}) ->
+        local_parts=LocalParts, do_repl=DoRepl, rep_dict=RepDict}) ->
     %lager:info("Remote abort ~w", [TxId]),
     RemoteParts1 = lists:delete(FromNode, RemoteParts),
     clocksi_vnode:abort(LocalParts, TxId),
     clocksi_vnode:abort(RemoteParts1, TxId),
-    repl_fsm:repl_abort(LocalParts, TxId, DoRepl),
-    repl_fsm:repl_abort(RemoteParts1, TxId, DoRepl),
+    repl_fsm:repl_abort(LocalParts, TxId, DoRepl, false, RepDict),
+    repl_fsm:repl_abort(RemoteParts1, TxId, DoRepl, false, RepDict),
     gen_server:reply(Sender, {aborted, TxId}),
     {noreply, SD0#state{tx_id={}}};
 
