@@ -166,12 +166,15 @@ clocksi_test3(Nodes, PartList) ->
     rpc:call(Node1, clocksi_vnode, commit, [[Part1, Part2], TxId2, SnapshotTime+16]),
     receive
         Msg5 ->
-            ?assertMatch({abort, TxId3, local}, parse_msg(Msg5))
+            lager:info("Msg5 is ~w", [Msg5]),
+            ?assertMatch({abort, TxId3, local, _}, parse_msg(Msg5))
     end,
 
     %% Concurrency test.. Two concurrent transaction sending reads, one wait and the other abort, so no deadlock can happen
     TxId4 = {tx_id, SnapshotTime+20, self()}, 
+    lager:info("TxId 4 is ~w", [TxId4]),
     TxId5 = {tx_id, SnapshotTime+25, self()}, 
+    lager:info("TxId 5 is ~w", [TxId5]),
     WS4P1 = [{Part1, [{K1,41}, {K2,41}]}], 
     WS4P2 = [{Part2, [{K3,43}, {K4,44}]}],
     WS5P1 = [{Part1, [{K1,51}, {K2,52}]}], 
@@ -191,7 +194,7 @@ clocksi_test3(Nodes, PartList) ->
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS4P2, TxId4, local, self()]),
     receive
        Msg8 ->
-            ?assertMatch({abort, TxId4, local}, parse_msg(Msg8))
+            ?assertMatch({abort, TxId4, local, _}, parse_msg(Msg8))
     end,
     lager:info("Tx4 with ~w should aborted already", [TxId4]),
     %% A non-trivial case for waiting: 
@@ -232,23 +235,23 @@ clocksi_test3(Nodes, PartList) ->
     rpc:call(Node1, clocksi_vnode, commit, [[Part1], TxId5, SnapshotTime+33]),
     receive Msg9 ->
         case parse_msg(Msg9) of
-            {abort, _, _} ->
-                ?assertMatch({abort, TxId6, local}, parse_msg(Msg9)),
+            {abort, _, _, _} ->
+                ?assertMatch({abort, TxId6, local, _}, parse_msg(Msg9)),
                 receive Msg10 -> ?assertMatch({prepared, TxId7, _, local}, parse_msg(Msg10)) end;
             _ ->
                 ?assertMatch({prepared, TxId7, _, local}, parse_msg(Msg9)),
-                receive Msg10 -> ?assertMatch({abort, TxId6, local}, parse_msg(Msg10)) end
+                receive Msg10 -> ?assertMatch({abort, TxId6, local, _}, parse_msg(Msg10)) end
         end
     end,
     rpc:call(Node1, clocksi_vnode, commit, [[Part2], TxId5, SnapshotTime+33]),
     receive Msg11 ->
         case parse_msg(Msg11) of
-            {abort, _, _} ->
-                ?assertMatch({abort, TxId6, local}, parse_msg(Msg11)),
+            {abort, _, _, _} ->
+                ?assertMatch({abort, TxId6, local, _}, parse_msg(Msg11)),
                 receive Msg12 -> ?assertMatch({prepared, TxId7, _, local}, parse_msg(Msg12)) end;
             _ ->
                 ?assertMatch({prepared, TxId7, _, local}, parse_msg(Msg11)),
-                receive Msg12 -> ?assertMatch({abort, TxId6, local}, parse_msg(Msg12)) end
+                receive Msg12 -> ?assertMatch({abort, TxId6, local, _}, parse_msg(Msg12)) end
         end
     end,
     rpc:call(Node1, clocksi_vnode, commit, [[Part1, Part2], TxId7, SnapshotTime+37]),
@@ -301,7 +304,7 @@ clocksi_test4(Nodes, PartList) ->
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS1, TxId1, local, self()]),
     receive
         Msg3 ->
-            ?assertMatch({abort, TxId1, local}, parse_msg(Msg3))
+            ?assertMatch({abort, TxId1, local, _}, parse_msg(Msg3))
     end,
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS4, TxId4, local, self()]),
     nothing_after_wait(500), 

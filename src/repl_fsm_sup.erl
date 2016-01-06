@@ -48,10 +48,10 @@ find_to_repl() ->
 init([]) ->
     case antidote_config:get(do_repl) of
         true ->
-            MyRepFsm = {repl_fsm, {repl_fsm, start_link, []}, transient, 5000, worker, [repl_fsm]},
+            %MyRepFsm = {repl_fsm, {repl_fsm, start_link, []}, transient, 5000, worker, [repl_fsm]},
             DataReplFsms = generate_data_repl_serv(), 
             CacheServ = {cache_serv, {cache_serv, start_link, [node()]}, transient, 5000, worker, [cache_serv]}, 
-            {ok, {{one_for_one, 5, 10}, [CacheServ|[MyRepFsm|DataReplFsms]]}};
+            {ok, {{one_for_one, 5, 10}, [CacheServ|DataReplFsms]}};
         false ->
             {ok, {{one_for_one, 5, 10}, []}}
     end.

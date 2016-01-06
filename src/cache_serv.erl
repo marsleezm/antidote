@@ -91,11 +91,11 @@ if_prepared(TxId, Keys) ->
 prepare_specula(TxId, Partition, WriteSet, PrepareTime) ->
     gen_server:cast({global, node()}, {prepare_specula, TxId, Partition, WriteSet, PrepareTime}).
 
-abort_specula(TxId, Partition) -> 
-    gen_server:cast({global, node()}, {abort_specula, TxId, Partition}).
+abort_specula(TxId, Partitions) -> 
+    gen_server:cast({global, node()}, {abort_specula, TxId, Partitions}).
 
-commit_specula(TxId, Partition, CommitTime) -> 
-    gen_server:cast({global, node()}, {commit_specula, TxId, Partition, CommitTime}).
+commit_specula(TxId, Partitions, CommitTime) -> 
+    gen_server:cast({global, node()}, {commit_specula, TxId, Partitions, CommitTime}).
 
 %%%===================================================================
 %%% Internal
@@ -178,6 +178,7 @@ handle_call({go_down},_Sender,SD0) ->
 
 handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, 
 	    SD0=#state{cache_log=CacheLog}) ->
+    %lager:warning("Preparing specula for ~w, ~w", [TxId, Partition]),
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
                     case ets:lookup(CacheLog, Key) of
                         [] ->
@@ -195,17 +196,22 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp},
 
 %% Where shall I put the speculative version?
 %% In ets, faster for read.
-handle_cast({abort_specula, TxId, Partition}, 
+handle_cast({abort_specula, TxId, Partitions}, 
 	    SD0=#state{cache_log=CacheLog}) ->
-    [{{TxId, Partition}, KeySet}] = ets:lookup(CacheLog, {TxId, Partition}),
-    delete_keys(CacheLog, KeySet, TxId),
+    %lager:warning("Cache abort specula for ~w, ~w", [TxId, Partitions]),
+    lists:foreach(fun(Partition) ->
+                    [{{TxId, Partition}, KeySet}] = ets:lookup(CacheLog, {TxId, Partition}),
+                    delete_keys(CacheLog, KeySet, TxId)
+        end, Partitions),
     specula_utilities:deal_abort_deps(TxId),
     {noreply, SD0};
     
-handle_cast({commit_specula, TxId, Partition, CommitTime}, 
+handle_cast({commit_specula, TxId, Partitions, CommitTime}, 
 	    SD0=#state{cache_log=CacheLog}) ->
-    [{{TxId, Partition}, KeySet}] = ets:lookup(CacheLog, {TxId, Partition}),
-    delete_keys(CacheLog, KeySet, TxId),
+    lists:foreach(fun(Partition) ->
+                    [{{TxId, Partition}, KeySet}] = ets:lookup(CacheLog, {TxId, Partition}),
+                    delete_keys(CacheLog, KeySet, TxId)
+                end, Partitions),
     specula_utilities:deal_commit_deps(TxId, CommitTime),
     {noreply, SD0};
 
