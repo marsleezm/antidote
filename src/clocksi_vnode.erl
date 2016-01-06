@@ -537,8 +537,9 @@ handle_command({single_commit, WriteSet}, Sender,
                 true ->
                     PendingRecord = {Sender, WriteSet, CommitTime},
                     %%lager:warning("Trying to replicate single commit for ~p", [TxId]),
+                    %% Always fast reply in prepare
                     repl_fsm:repl_prepare(Partition, single_commit, TxId, PendingRecord),
-                    {noreply, State#state{max_ts=CommitTime, 
+                    {reply, {ok, {committed, CommitTime}}, State#state{max_ts=CommitTime, 
                             num_committed=NumCommitted+1}};
                 false ->
                     %gen_server:cast(Sender, {committed, CommitTime}),
