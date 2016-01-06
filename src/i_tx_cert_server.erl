@@ -70,7 +70,7 @@ init([]) ->
     {ok, #state{do_repl=antidote_config:get(do_repl), last_commit_ts=0}}.
 
 handle_call({get_stat}, _Sender, SD0) ->
-    {reply, {0, 0, 0, 0, 0}, SD0};
+    {reply, {0, 0, 0, 0, 0, 0}, SD0};
 
 handle_call({single_commit, Node, Key, Value}, Sender, SD0) ->
     clocksi_vnode:single_commit(Node,[{Key, Value}], Sender),
