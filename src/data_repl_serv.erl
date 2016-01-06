@@ -347,8 +347,8 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                         true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value}|RemainList]})
                 end end,
             lists:foreach(AppendFun, WriteSet),
-            %gen_server:cast({global, Sender}, {ack, Partition, TxId}), 
-            clocksi_vnode:ack(Sender, TxId, Partition),
+            gen_server:cast({global, Sender}, {ack, Partition, TxId}), 
+            %clocksi_vnode:ack(Sender, TxId, Partition),
             {noreply, SD0}
     end;
 
