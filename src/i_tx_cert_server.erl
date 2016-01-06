@@ -158,11 +158,11 @@ handle_cast({prepared, _OtherTxId, _, local},
     {noreply, SD0};
 
 handle_cast({abort, TxId, local, FromNode}, SD0=#state{tx_id=TxId, local_parts=LocalParts, 
-            do_repl=DoRepl, sender=Sender}) ->
+            do_repl=DoRepl, sender=Sender, rep_dict=RepDict}) ->
     %lager:info("Local abort ~w", [TxId]),
     LocalParts1 = lists:delete(FromNode, LocalParts), 
     clocksi_vnode:abort(LocalParts1, TxId),
-    repl_fsm:repl_abort(LocalParts1, TxId, DoRepl),
+    repl_fsm:repl_abort(LocalParts1, TxId, DoRepl, false, RepDict),
     gen_server:reply(Sender, {aborted, TxId}),
     {noreply, SD0#state{tx_id={}}};
 handle_cast({abort, _, local, _}, SD0) ->
