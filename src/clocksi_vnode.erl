@@ -1106,12 +1106,12 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, M
             case dict:find(TxId, DepDict) of
                 {ok, {_, _, Sender, Type}} ->
                  %lager:error("Aborting ~w", [TxId]),
-                    %NewDepDict = dict:erase(TxId, DepDict),
+                    NewDepDict = dict:erase(TxId, DepDict),
                     %%lager:warning("Prepare not valid anymore! For ~w, sending '~w' abort to ~w", [TxId, Type, Sender]),
                     gen_server:cast(Sender, {abort, TxId, Type, MyNode}),
                     %% Abort should be fast, so send abort to myself directly.. Coord won't send abort to me again.
                     abort([MyNode], TxId),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, MyNode)
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, NewDepDict, MyNode)
                 %error ->
                 %   %lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
                 %    specula_utilities:deal_abort_deps(TxId),
@@ -1141,10 +1141,10 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
             case dict:find(TxId, DepDict) of
                 {ok, {_, _, Sender, Type}} ->
                   %lager:error("Aborting ~w of others, remaining is ~w ", [TxId, Remaining]),
-                    %NewDepDict = dict:erase(TxId, DepDict),
+                    NewDepDict = dict:erase(TxId, DepDict),
                     gen_server:cast(Sender, {abort, TxId, Type, MyNode}),
                     abort([MyNode], TxId),
-                    abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime, MyNode);
+                    abort_others(PPTime, Rest, NewDepDict, Remaining, LastPPTime, MyNode);
                 error ->
                     %%lager:warning("~w aborted already", [TxId]),
                     abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime, MyNode)
