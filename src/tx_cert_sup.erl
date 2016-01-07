@@ -132,5 +132,5 @@ generate_supervisor_spec(N) ->
 
 %% @doc Starts the coordinator of a ClockSI interactive transaction.
 init([]) ->
-    Pool = [generate_supervisor_spec(N) || N <- lists:seq(0, ?NUM_SUP-1)],
+    Pool = [generate_supervisor_spec(N) || N <- lists:seq(1, ?NUM_SUP)],
     {ok, {{one_for_one, 5, 10}, Pool}}.
