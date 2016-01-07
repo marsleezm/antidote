@@ -39,7 +39,7 @@ single_commit(Name, Node, Key, Value) ->
 append_value(Name, Node, Key, Value, CommitTime) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, 
+            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, 
                     {append_value, Node, Key, Value, CommitTime});
         false ->
             gen_server:call({global, Name}, 
@@ -49,7 +49,7 @@ append_value(Name, Node, Key, Value, CommitTime) ->
 start_tx(Name) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {start_tx});
+            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {start_tx});
         false ->
             gen_server:call({global, Name}, {start_tx})
     end.
@@ -57,7 +57,7 @@ start_tx(Name) ->
 start_read_tx(Name) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {start_read_tx});
+            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {start_read_tx});
         false ->
             gen_server:call({global, Name}, {start_read_tx})
     end.
@@ -65,7 +65,7 @@ start_read_tx(Name) ->
 certify(Name, TxId, LocalUpdates, RemoteUpdates) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, 
+            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, 
                     {certify, TxId, LocalUpdates, RemoteUpdates});
         false ->
             gen_server:call({global, Name}, 
@@ -75,7 +75,7 @@ certify(Name, TxId, LocalUpdates, RemoteUpdates) ->
 get_internal_data(Name, Type, Param) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {get_internal_data, Type, Param});
+            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {get_internal_data, Type, Param});
         false ->
             gen_server:call({global, Name}, {get_internal_data, Type, Param})
     end.
@@ -83,7 +83,7 @@ get_internal_data(Name, Type, Param) ->
 set_internal_data(Name, Type, Param) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {set_internal_data, Type, Param});
+            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {set_internal_data, Type, Param});
         false ->
             gen_server:call({global, Name}, {set_internal_data, Type, Param})
     end.
@@ -95,7 +95,7 @@ single_read(Name, Key, Node) ->
 read(Name, TxId, Key, Node) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, {read, Key, TxId, Node}, ?READ_TIMEOUT);
+            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP + 1)}, {read, Key, TxId, Node}, ?READ_TIMEOUT);
         false ->
             gen_server:call({global, Name}, {read, Key, TxId, Node}, ?READ_TIMEOUT)
     end.
@@ -103,7 +103,7 @@ read(Name, TxId, Key, Node) ->
 get_stat() ->
     SPL = lists:seq(1, ?NUM_SUP),
     {R1, R2, R3, R4, R5, SpeculaReadTxns} = lists:foldl(fun(N, {A1, A2, A3, A4, A5, A6}) ->
-                            {T1, T2, T3, T4, T5, T6} = gen_server:call({global, generate_module_name(N rem ?NUM_SUP)}, {get_stat}),
+                            {T1, T2, T3, T4, T5, T6} = gen_server:call({global, generate_module_name((N-1) rem ?NUM_SUP +1)}, {get_stat}),
                             {A1+T1, A2+T2, A3+T3, A4+T4, A5+T5, A6+T6} end, {0,0,0,0,0,0}, SPL),
     LocalServ = hash_fun:get_local_servers(),
     PRead = lists:foldl(fun(S, Acc) ->
