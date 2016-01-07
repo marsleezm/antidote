@@ -26,8 +26,8 @@
 
 -export([start_link/0]).
 
--export([init/1, certify/4, get_stat/0, get_internal_data/3, start_tx/1, 
-            start_read_tx/1, set_internal_data/3, read/4, single_commit/4]).
+-export([init/1, certify/4, get_stat/0, get_internal_data/3, start_tx/1, single_read/3, 
+            start_read_tx/1, set_internal_data/3, read/4, single_commit/4, append_value/5]).
 
 -define(READ_TIMEOUT, 10000).
 
@@ -35,13 +35,15 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 single_commit(Name, Node, Key, Value) ->
+    append_value(Name, Node, Key, Value, tx_utilities:now_microsec()).
+append_value(Name, Node, Key, Value, CommitTime) ->
     case is_integer(Name) of
         true ->
             gen_server:call({global, generate_module_name(Name rem ?NUM_SUP)}, 
-                    {single_commit, Node, Key, Value});
+                    {append_value, Node, Key, Value, CommitTime});
         false ->
             gen_server:call({global, Name}, 
-                    {single_commit, Node, Key, Value})
+                    {append_value, Node, Key, Value, CommitTime})
     end.
 
 start_tx(Name) ->
@@ -85,6 +87,10 @@ set_internal_data(Name, Type, Param) ->
         false ->
             gen_server:call({global, Name}, {set_internal_data, Type, Param})
     end.
+
+single_read(Name, Key, Node) ->
+    TxId = tx_utilities:create_tx_id(0),
+    read(Name, TxId, Key, Node).
 
 read(Name, TxId, Key, Node) ->
     case is_integer(Name) of

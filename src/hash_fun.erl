@@ -148,15 +148,8 @@ convert_key(Key) ->
     end.
 
 get_partitions() ->
-    case ets:lookup(meta_info, partitions) of
-        [] ->
-            {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
-            PartitionList = chashbin:to_list(CHBin),
-            ets:insert(meta_info, {partitions, PartitionList}),
-            PartitionList;
-        [{partitions, PartitionList}] ->
-            PartitionList
-    end.
+    {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
+    chashbin:to_list(CHBin).
 
 get_hash_fun() ->
     %case ets:lookup(meta_info, node_list) of

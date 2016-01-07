@@ -25,7 +25,8 @@
 
 -export([start_vnode/1,
 	    read_data_item/3,
-	relay_read_stat/1,
+	    relay_read_stat/1,
+        verify_table/2,
         debug_read/3,
 	    relay_read/5,
         check_key_record/3,
@@ -39,7 +40,7 @@
         if_prepared/3,
         commit/3,
         single_commit/2,
-        single_commit/3,
+        append_value/5,
         abort/2,
 
         init/1,
@@ -92,7 +93,7 @@
                 debug = false :: boolean(),
                 total_time :: non_neg_integer(),
                 prepare_count :: non_neg_integer(),
-		relay_read :: {non_neg_integer(), non_neg_integer()},
+		        relay_read :: {non_neg_integer(), non_neg_integer()},
                 num_specula_read :: non_neg_integer(),
                 num_aborted :: non_neg_integer(),
                 num_blocked :: non_neg_integer(),
@@ -120,6 +121,11 @@ do_reply(Node, TxId) ->
 relay_read_stat(Node) ->
     riak_core_vnode_master:sync_command(Node,
                            {relay_read_stat},
+                           ?CLOCKSI_MASTER, infinity).
+
+verify_table(Node, Repl) ->
+    riak_core_vnode_master:sync_command(Node,
+                           {verify_table, Repl},
                            ?CLOCKSI_MASTER, infinity).
 
 %% @doc Sends a read request to the Node that is responsible for the Key
@@ -175,9 +181,9 @@ single_commit(Node, WriteSet) ->
                                    {single_commit, WriteSet},
                                    ?CLOCKSI_MASTER, infinity).
 
-single_commit(Node, WriteSet, ToReply) ->
+append_value(Node, Key, Value, CommitTime, ToReply) ->
     riak_core_vnode_master:command(Node,
-                                   {single_commit, WriteSet},
+                                   {append_value, Key, Value, CommitTime},
                                    ToReply,
                                    ?CLOCKSI_MASTER).
 
@@ -304,6 +310,11 @@ check_prepared_empty([{Partition,Node}|Rest]) ->
 handle_command({set_debug, Debug},_Sender,SD0=#state{partition=Partition}) ->
     lager:info("~w: Setting debug to be ~w", [Partition, Debug]),
     {reply, ok, SD0#state{debug=Debug}};
+
+handle_command({verify_table, Repl},_Sender,SD0=#state{inmemory_store=InMemoryStore}) ->
+    L = ets:tab2list(InMemoryStore),
+    data_repl_serv:verify_table(Repl, L),
+    {reply, ok, SD0};
 
 handle_command({relay_read_stat},_Sender,SD0=#state{relay_read=RelayRead}) ->
     {N, R} = RelayRead,
@@ -520,7 +531,7 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
 handle_command({single_commit, WriteSet}, Sender,
                State = #state{partition=Partition,
                               if_replicate=IfReplicate,
-                              if_certify=IfCertify,
+                             if_certify=IfCertify,
                               committed_txs=CommittedTxs,
                               prepared_txs=PreparedTxs,
                               inmemory_store=InMemoryStore,
@@ -551,6 +562,21 @@ handle_command({single_commit, WriteSet}, Sender,
             gen_server:cast(Sender, {abort, TxId, whatever, {Partition, node()}}),
             {noreply, State#state{num_cert_fail=NumCertFail+1}}
     end;
+
+handle_command({append_value, Key, Value, CommitTime}, Sender,
+               State = #state{committed_txs=CommittedTxs,
+                              inmemory_store=InMemoryStore
+                              }) ->
+    ets:insert(CommittedTxs, {Key, CommitTime}),
+    case ets:lookup(InMemoryStore, Key) of
+        [] ->
+            true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}]});
+        [{Key, ValueList}] ->
+            {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
+            true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}|RemainList]})
+    end,
+    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+    {noreply, State#state{max_ts=CommitTime}};
 
 handle_command({commit, TxId, TxCommitTime}, _Sender,
                #state{partition=Partition,

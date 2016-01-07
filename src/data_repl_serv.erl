@@ -55,8 +55,10 @@
 
 %% States
 -export([relay_read/4,
-	check_key/2,
-	check_table/1,
+         append_value/4,
+	    check_key/2,
+	    check_table/1,
+        verify_table/2,
         debug_read/3,
         prepare_specula/5,
         commit_specula/4,
@@ -64,6 +66,7 @@
         if_prepared/3,
         if_bulk_prepared/3,
         num_specula_read/1,
+        single_read/2,
         read/3]).
 
 %% Spawn
@@ -90,6 +93,16 @@ start_link(Name) ->
 
 read(Name, Key, TxId) ->
     gen_server:call({global, Name}, {read, Key, TxId}, ?READ_TIMEOUT).
+
+single_read(Name, Key) ->
+    TxId = tx_utilities:create_tx_id(0),
+    gen_server:call({global, Name}, {read, Key, TxId}, ?READ_TIMEOUT).
+
+append_value(Name, Key, Value, CommitTime) ->
+    gen_server:call({global, Name}, {append_value, Key, Value, CommitTime}).
+
+verify_table(Name, List) ->
+    gen_server:call({global, Name}, {verify_table, List}, infinity).
 
 check_table(Name) ->
     gen_server:call({global, Name}, {check_table}).
@@ -143,6 +156,7 @@ handle_call({retrieve_log, LogName},  _Sender,
             {reply, [], SD0}
     end;
 
+
 handle_call({num_specula_read}, _Sender, SD0=#state{num_specula_read=NumSpeculaRead, num_read=NumRead}) ->
     {reply, {NumSpeculaRead, NumRead}, SD0};
 
@@ -170,6 +184,16 @@ handle_call({debug_read, Key, TxId}, _Sender,
                     {reply, {ok, Value}, SD0}
             end
     end;
+
+handle_call({append_value, Key, Value, CommitTime}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
+    case ets:lookup(ReplicatedLog, Key) of
+        [] ->
+            true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
+        [{Key, ValueList}] ->
+            {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
+            true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}|RemainList]})
+    end,
+    {reply, ok, SD0};
 
 handle_call({read, Key, TxId}, _Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog, num_read=NumRead,
@@ -221,6 +245,15 @@ handle_call({if_bulk_prepared, TxId, Partition}, _Sender, SD0=#state{
             lager:info("~w: something else", [Record]),
             {reply, false, SD0}
     end;
+
+handle_call({verify_table, List}, _Sender, SD0=#state{name=Name, replicated_log=ReplicatedLog}) ->
+   lager:info("Start verifying on ~w", [Name]),
+   lists:foreach(fun({K, V}=Elem) -> 
+                    case ets:lookup(ReplicatedLog, K) of [Elem] -> ok;
+                        Other -> 
+                            lager:error("Doesn't match! Origin is [{~p, ~p}], Rep is ~p", [K, V, Other])
+                    end end, List),
+   {reply, ok, SD0};
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.

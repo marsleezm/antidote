@@ -6,10 +6,22 @@
 -endif.
 
 -export([delete_1/2, delete_2/2,
-         lookup_1/2, lookup_2/2,
+         lookup_1/2, lookup_2/2, get_my_range/4,
          check_node/1, check_list/1,
          pass1/1, pass2/1]).
 
+
+get_my_range(Total, Start, NumIds, MyId) ->
+    Remainder = Total rem NumIds,
+    Div = (Total-Remainder)/NumIds,
+    First = ((MyId-1) * Div) + Start,
+    Last = case MyId of
+                NumIds ->
+                  Div + Remainder + First - 1;
+                _ ->
+                  Div + First -1
+               end,
+    {First, Last}.
 
 check_node(Times) ->
     Seq = lists:seq(1, Times),
