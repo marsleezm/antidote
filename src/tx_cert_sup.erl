@@ -26,8 +26,8 @@
 
 -export([start_link/0]).
 
--export([init/1, certify/4, get_stat/0, get_internal_data/3, start_tx/1, single_read/3, 
-            start_read_tx/1, set_internal_data/3, read/4, single_commit/4, append_value/5]).
+-export([init/1, certify/4, get_stat/0, get_int_data/3, start_tx/1, single_read/3, 
+            start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_value/5]).
 
 -define(READ_TIMEOUT, 10000).
 
@@ -72,20 +72,20 @@ certify(Name, TxId, LocalUpdates, RemoteUpdates) ->
                     {certify, TxId, LocalUpdates, RemoteUpdates})
     end.
 
-get_internal_data(Name, Type, Param) ->
+get_int_data(Name, Type, Param) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {get_internal_data, Type, Param});
+            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {get_int_data, Type, Param});
         false ->
-            gen_server:call({global, Name}, {get_internal_data, Type, Param})
+            gen_server:call({global, Name}, {get_int_data, Type, Param})
     end.
 
-set_internal_data(Name, Type, Param) ->
+set_int_data(Name, Type, Param) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {set_internal_data, Type, Param});
+            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {set_int_data, Type, Param});
         false ->
-            gen_server:call({global, Name}, {set_internal_data, Type, Param})
+            gen_server:call({global, Name}, {set_int_data, Type, Param})
     end.
 
 single_read(Name, Key, Node) ->

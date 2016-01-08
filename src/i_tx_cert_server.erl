@@ -160,7 +160,7 @@ handle_cast({abort, TxId, local, FromNode}, SD0=#state{tx_id=TxId, local_parts=L
     LocalParts1 = lists:delete(FromNode, LocalParts), 
     clocksi_vnode:abort(LocalParts1, TxId),
     repl_fsm:repl_abort(LocalParts1, TxId, DoRepl),
-    gen_server:reply(Sender, {aborted, TxId}),
+    gen_server:reply(Sender, {aborted, local}),
     {noreply, SD0#state{tx_id={}}};
 handle_cast({abort, _, local, _}, SD0) ->
     %lager:info("Received abort for previous txn ~w", [OtherTxId]),
@@ -197,7 +197,7 @@ handle_cast({abort, TxId, {remote,_}, FromNode},
     clocksi_vnode:abort(RemoteParts1, TxId),
     repl_fsm:repl_abort(LocalParts, TxId, DoRepl),
     repl_fsm:repl_abort(RemoteParts1, TxId, DoRepl),
-    gen_server:reply(Sender, {aborted, TxId}),
+    gen_server:reply(Sender, {aborted, remote}),
     {noreply, SD0#state{tx_id={}}};
 
 handle_cast({abort, _, {remote,_}, _}, 

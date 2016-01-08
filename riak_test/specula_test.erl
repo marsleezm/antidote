@@ -141,9 +141,9 @@ specula_test2(Nodes) ->
 
     TxId2 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
 
-    Dep1 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, dependency, TxId1]),
+    Dep1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, dependency, TxId1]),
     ?assertEqual([], Dep1),
-    AntiDep1 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, anti_dep, TxId2]),
+    AntiDep1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, anti_dep, TxId2]),
     ?assertEqual([], AntiDep1),
     ReadR1 = rpc:call(Node1, cache_serv, read, [K4, TxId2]),
     ?assertEqual({ok, 4}, ReadR1),
@@ -151,9 +151,9 @@ specula_test2(Nodes) ->
     ?assertEqual({ok, 2}, ReadR2),
     ReadR3 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K3, TxId2]),
     ?assertEqual({ok, []}, ReadR3),
-    Dep2 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, dependency, TxId1]),
+    Dep2 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, dependency, TxId1]),
     ?assertEqual([{TxId1, TxId2}], Dep2),
-    AntiDep2 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, anti_dep, TxId2]),
+    AntiDep2 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, anti_dep, TxId2]),
     ?assertEqual([{TxId2, TxId1}], AntiDep2),
 
     LUp2 = [{PartNode1, [{K5, 25}]}],
@@ -165,7 +165,7 @@ specula_test2(Nodes) ->
     {ok, Result2} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId2, LUp2, RUp2]),
     ?assertMatch({specula_commit, _}, Result2),
     lager:info("Specula commit for t2"),
-    IntDep = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, read_dep, TxId2]),
+    IntDep = rpc:call(Node1, tx_cert_sup, get_int_data, [1, read_dep, TxId2]),
     ?assertEqual([TxId1], IntDep),
     
     TxId3 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
@@ -173,11 +173,11 @@ specula_test2(Nodes) ->
     ?assertEqual({ok, 3}, ReadR4),
     ReadR5 = rpc:call(Node1, tx_cert_sup, read, [1, TxId3, K5, PartNode1]),
     ?assertEqual({ok, 25}, ReadR5),
-    Dep3 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, dependency, TxId1]),
+    Dep3 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, dependency, TxId1]),
     ?assertEqual([{TxId1, TxId2}, {TxId1, TxId3}], Dep3),
-    Dep4 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, dependency, TxId2]),
+    Dep4 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, dependency, TxId2]),
     ?assertEqual([{TxId2, TxId3}], Dep4),
-    AntiDep3 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, anti_dep, TxId3]),
+    AntiDep3 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, anti_dep, TxId3]),
     ?assertEqual([{TxId3, TxId1}, {TxId3, TxId2}], AntiDep3),
 
     LUp3 = [{PartNode1, [{K9, 31}]}],
@@ -187,7 +187,7 @@ specula_test2(Nodes) ->
     lager:info("Cert t3 ~w", [TxId3]),
     {ok, Result3} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId3, LUp3, RUp3]),
     ?assertMatch({specula_commit, _}, Result3),
-    IntDep2 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, read_dep, TxId3]),
+    IntDep2 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, read_dep, TxId3]),
     ?assertEqual([TxId1, TxId2], IntDep2),
 
     %% This txn will not read anything from the previous txn. And its previous txn
@@ -245,7 +245,7 @@ specula_test2(Nodes) ->
 
     %% Tx2 gets committed
     lager:info("Commit t2"),
-    ReadDep1 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, read_dep, TxId2]),
+    ReadDep1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, read_dep, TxId2]),
     ?assertEqual([], ReadDep1),
     ok = rpc:call(Node1, clocksi_vnode, do_reply, [PartNode3, TxId2]),
     timer:sleep(500),
@@ -258,19 +258,19 @@ specula_test2(Nodes) ->
     read_txn_data(Node1, LUp3, RUp3),
 
     {tx_id, T, _} =TxId4,
-    rpc:call(Node1, tx_cert_sup, set_internal_data, [1, last_commit_time, T+10]),
+    rpc:call(Node1, tx_cert_sup, set_int_data, [1, last_commit_time, T+10]),
 
     %% Tx4 gets committed, before committing check that TxId5 still depends on Tx4
     lager:info("Commit t4"),
-    ReadDep2 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, read_dep, TxId5]),
+    ReadDep2 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, read_dep, TxId5]),
     ?assertEqual([TxId4], ReadDep2),
     {tx_id, T1, _} =TxId5,
-    rpc:call(Node1, tx_cert_sup, set_internal_data, [1, last_commit_time, T1+10]),
+    rpc:call(Node1, tx_cert_sup, set_int_data, [1, last_commit_time, T1+10]),
 
     ok = rpc:call(Node1, clocksi_vnode, do_reply, [PartNode3, TxId4]),
     timer:sleep(500),
     read_txn_data(Node1, LUp4, RUp4),
-    LastCommitT1 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, last_commit_time, ignore]),
+    LastCommitT1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, last_commit_time, ignore]),
     ?assertEqual(T1+11, LastCommitT1),
 
     %% Tx5 will be aborted, due to its commit time being smaller than the commit time of its previous txn
@@ -285,9 +285,9 @@ specula_test2(Nodes) ->
     %% Tx6 will also be aborted because TxId5 is aborted!
     lager:info("Abort t6"),
     read_txn_data(Node1, LUp4, RUp4),
-    ReadAborted1 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, read_aborted, ignore]),
+    ReadAborted1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, read_aborted, ignore]),
     ?assertEqual(2, ReadAborted1),
-    Committed1 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, committed, ignore]),
+    Committed1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, committed, ignore]),
     ?assertEqual(5, Committed1),
     check_txn_preparing_state(TxId6, Node1, LUp6, false, false),
 
@@ -307,9 +307,9 @@ specula_test3(Nodes) ->
     PartNode4 = rpc:call(Node4, hash_fun, get_local_vnode_by_id, [1]),
     %{Part4, _} = PartNode4,
 
-    ReadAborted1 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, aborted, ignore]),
-    ReadAborted2 = rpc:call(Node1, tx_cert_sup, get_internal_data, [2, aborted, ignore]),
-    ReadAborted3 = rpc:call(Node1, tx_cert_sup, get_internal_data, [3, aborted, ignore]),
+    ReadAborted1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, aborted, ignore]),
+    ReadAborted2 = rpc:call(Node1, tx_cert_sup, get_int_data, [2, aborted, ignore]),
+    ReadAborted3 = rpc:call(Node1, tx_cert_sup, get_int_data, [3, aborted, ignore]),
 
     K1=t3p1k1, K2=t3p2k1, K3=t3p3k1, K4=t3p4k1,
     K5=t3p1k2, _K6=t3p2k2, K7=t3p3k2, K8=t3p4k2,
@@ -418,7 +418,7 @@ specula_test3(Nodes) ->
 
     %% Start the test now!!!!
     {tx_id, T4, _} =TxId4,
-    rpc:call(Node1, tx_cert_sup, set_internal_data, [3, last_commit_time, T4+10]),    
+    rpc:call(Node1, tx_cert_sup, set_int_data, [3, last_commit_time, T4+10]),    
     %% T3 gets committed 
     ok = rpc:call(Node1, clocksi_vnode, do_reply, [PartNode3, TxId3]),
 
@@ -438,11 +438,11 @@ specula_test3(Nodes) ->
     check_txn_local_states(TxId7, Node1, RUp7, false),
     check_txn_preparing_state(TxId7, Node1, RUp7, false, false),
 
-    ReadAborted12 = rpc:call(Node1, tx_cert_sup, get_internal_data, [1, aborted, ignore]),
+    ReadAborted12 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, aborted, ignore]),
     ?assertEqual(ReadAborted12, ReadAborted1+2),
-    ReadAborted22 = rpc:call(Node1, tx_cert_sup, get_internal_data, [2, aborted, ignore]),
+    ReadAborted22 = rpc:call(Node1, tx_cert_sup, get_int_data, [2, aborted, ignore]),
     ?assertEqual(ReadAborted22, ReadAborted2+1),
-    ReadAborted32 = rpc:call(Node1, tx_cert_sup, get_internal_data, [3, aborted, ignore]),
+    ReadAborted32 = rpc:call(Node1, tx_cert_sup, get_int_data, [3, aborted, ignore]),
     ?assertEqual(ReadAborted32, ReadAborted3+1),
 
     ok = rpc:call(Node1, clocksi_vnode, set_debug, [PartNode2, false]),
