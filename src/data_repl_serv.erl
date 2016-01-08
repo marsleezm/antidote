@@ -201,7 +201,7 @@ handle_call({read, Key, TxId}, _Sender,
     %lager:info("DataRepl Reading for ~w , key ~p", [TxId, Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
-            lager:warning("Nothing for ~p, ~w", [Key, TxId]),
+            %lager:warning("Nothing for ~p, ~w", [Key, TxId]),
             {reply, {ok, []}, SD0#state{num_read=NumRead+1}};
         [{Key, ValueList}] ->
             %lager:info("Value list is ~p", [ValueList]),
