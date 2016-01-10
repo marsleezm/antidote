@@ -102,12 +102,15 @@ read(Name, TxId, Key, Node) ->
 
 get_stat() ->
     SPL = lists:seq(1, ?NUM_SUP),
-    {R1, R2, R3, R4, R5, SpeculaReadTxns} = lists:foldl(fun(N, {A1, A2, A3, A4, A5, A6}) ->
-                            {T1, T2, T3, T4, T5, T6} = gen_server:call({global, generate_module_name((N-1) rem ?NUM_SUP +1)}, {get_stat}),
-                            {A1+T1, A2+T2, A3+T3, A4+T4, A5+T5, A6+T6} end, {0,0,0,0,0,0}, SPL),
+    {R1, R2, R3, R4, R5, R6, R7, R8, Cnt} = lists:foldl(fun(N, {A1, A2, A3, A4, A5, A6, A7, A8, C}) ->
+                            Res = gen_server:call({global, generate_module_name(N)}, {get_stat}),
+                            {T1, T2, T3, T4, T5, T6, T7, T8} = Res,
+                            lager:info("Get stat from ~w is ~p", [N, Res]),
+                            NewC = case T1 of 0 -> C; _ -> C+1 end, 
+                            {A1+T1, A2+T2, A3+T3, A4+T4, A5+T5, A6+T6, A7+T7, A8+T8, NewC} end, {0,0,0,0,0,0,0,0,0}, SPL),
     LocalServ = hash_fun:get_local_servers(),
     PRead = lists:foldl(fun(S, Acc) ->
-                        Num = clocksi_vnode:num_specula_read(S), Num+Acc
+                        Num = helper:num_specula_read(S), Num+Acc
                         end, 0, LocalServ), 
     Lists = antidote_config:get(to_repl),
     [LocalRepList] = [LocalReps || {Node, LocalReps} <- Lists, Node == node()],
@@ -117,8 +120,8 @@ get_stat() ->
                         end, {0, 0}, LocalRepNames), 
     lager:info("Data replica specula read is ~w, Data replica read is ~w", [DSpeculaRead, DTotalRead]),
     {CacheSpeculaRead, CacheAttemptRead} = cache_serv:num_specula_read(),
-    {R1, R2, R3, R4, R5, SpeculaReadTxns, PRead,  
-        DSpeculaRead, DTotalRead, CacheSpeculaRead, CacheAttemptRead}.
+    {R1, R2, R3, R4, R5, R6, PRead,  
+        DSpeculaRead, DTotalRead, CacheSpeculaRead, CacheAttemptRead, R7 div max(1,Cnt), R8 div max(1,Cnt)}.
 
 generate_module_name(N) ->
     list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list(N)).

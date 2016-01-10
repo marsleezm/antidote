@@ -54,7 +54,8 @@ gather_abort_stat(Len) ->
     PartitionList = chashbin:to_list(CHBin),
     lists:map(fun(Partition) ->
             R = check_top_aborted(Partition, Len),
-            lager:info("~w: ~p", [Partition, R])
+            lager:info("~w: ~p", [Partition, R]),
+            {Partition, R}
             end, PartitionList).
   
 check_top_aborted(Partition, Len) ->

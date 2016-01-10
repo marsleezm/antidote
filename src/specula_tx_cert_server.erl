@@ -136,9 +136,13 @@ handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnaps
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS}};
 
 handle_call({get_stat}, _Sender, SD0=#state{aborted=Aborted, committed=Committed, read_aborted=ReadAborted, specula_aborted=SpeculaAborted, 
-        speculated=Speculated, num_specula_read=NumSpeculaRead}) ->
+        speculated=Speculated, num_specula_read=NumSpeculaRead, pending_txs=PendingTxs}) ->
  %lager:warning("Num of read aborted ~w, Num of aborted is ~w, Num of committed is ~w, Speculated ~w, NumSpeculaRead is ~w", [ReadAborted, Aborted, Committed, Speculated, NumSpeculaRead]),
-    {reply, {ReadAborted, Aborted, SpeculaAborted, Committed, Speculated, NumSpeculaRead}, SD0};
+    [{abort, T1, C1}] = ets:lookup(PendingTxs, abort),
+    [{commit, T2, C2}] = ets:lookup(PendingTxs, commit),
+    A = T1 div max(1, C1), 
+    C = T2 div max(1, C2),
+    {reply, {ReadAborted, Aborted, SpeculaAborted, Committed, Speculated, NumSpeculaRead, A, C}, SD0};
 
 handle_call({set_int_data, Type, Param}, _Sender, SD0)->
     case Type of
