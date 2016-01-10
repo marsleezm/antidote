@@ -382,7 +382,7 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                                    %lager:warning("Fast replying to sender of ~w, ~w", [TxId, RepMode]),
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
                                 local_only ->
-                                    PendingRecord = {Sender, local_only, WriteSet, PrepareTime},
+                                    PendingRecord = {Sender, local, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
                                 _ ->
                                    %lager:warning("Not fast replying for ~w, ~w", [TxId, RepMode]),
