@@ -356,7 +356,6 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                               r_abort_dict=RAbortDict,
                               committed_txs=CommittedTxs,
                               if_certify=IfCertify,
-                              fast_reply=FastReply,
                               total_time=TotalTime,
                               prepare_count=PrepareCount,
                               num_cert_fail=NumCertFail,
@@ -376,13 +375,16 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                 true ->
                     case Debug of
                         false ->
-                            case (FastReply == true) and (RepMode == local) of
-                                true ->
+                            case RepMode of
+                                local ->
                                     PendingRecord = {Sender, false, WriteSet, PrepareTime},
                                     gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode}),
                                    %lager:warning("Fast replying to sender of ~w, ~w", [TxId, RepMode]),
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
-                                false ->
+                                local_only ->
+                                    PendingRecord = {Sender, local_only, WriteSet, PrepareTime},
+                                    repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
+                                _ ->
                                    %lager:warning("Not fast replying for ~w, ~w", [TxId, RepMode]),
                                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)

@@ -93,17 +93,6 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
     {noreply, SD0};
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
-    %{LocalUpdates, RemoteUpdates} = case LocalUpdates0 of   
-    %                                    {raw, LList} ->
-    %                                        {raw, RList} = RemoteUpdates0,
-    %                                        {[{hash_fun:get_vnode_by_id(P, N), Ups}  || {N, P, Ups} <- LList],
-    %                                         [{hash_fun:get_vnode_by_id(P, N), Ups}  || {N, P, Ups} <- RList]};
-    %                                    _ ->
-    %                                        {LocalUpdates0, RemoteUpdates0}
-    %                                end,
-    %LocalKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, LocalUpdates),
-    %lager:info("TxId ~w: localUps ~p, remoteUps ~p", [TxId, LocalUpdates, RemoteUpdates]),
-    %lager:info("TxId ~w", [TxId]),
     case length(LocalUpdates) of
         0 ->
             RemoteParts = [P || {P, _} <- RemoteUpdates],
@@ -113,7 +102,12 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
         N ->
             LocalParts = [Part || {Part, _} <- LocalUpdates],
             %lager:info("Local updates are ~w", [LocalUpdates]),
-            clocksi_vnode:prepare(LocalUpdates, TxId, local),
+            case RemoteUpdates of
+                [] ->
+                    clocksi_vnode:prepare(LocalUpdates, TxId, local_only);
+                _ ->
+                    clocksi_vnode:prepare(LocalUpdates, TxId, local)
+            end,
             {noreply, SD0#state{tx_id=TxId, to_ack=N, local_parts=LocalParts, remote_parts=
                 RemoteUpdates, sender=Sender}}
     end;

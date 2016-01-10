@@ -252,7 +252,12 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
                             fun({_, B, _}) ->%lager:warning("Previous readdep is ~w", [B]),
                              {length(LocalUpdates), ReadDepTxs--B, LastCommitTs+1} end, DepDict),
                  %lager:warning("Prepare ~w", [TxId]),
-                    ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local),
+                    case RemoteUpdates of
+                        [] ->
+                            ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local_only);
+                        _ ->
+                            ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local)
+                    end,
                     NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
                                                         _ -> NumSpeculaRead+1
                                       end,
