@@ -255,7 +255,7 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                             %lager:warning("Not really replying.."),
                             ok;
                         _ ->
-                            gen_server:cast(Sender, {prepared, TxId, Timestamp, RepMode})
+                            gen_server:cast(Sender, {prepared, TxId, Timestamp})
                     end;
                 single_commit ->
                     %lager:warning("Single commit of ~w got enough replies, replying to ~w", [TxId, Sender]),

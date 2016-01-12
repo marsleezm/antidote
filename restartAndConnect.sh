@@ -3,12 +3,13 @@
 if [ $# -eq 3 ]
 then
     DoSpecula=$1
+    FastReply=$2
     SpeculaLength=$3
 else
     DoSpecula=true
+    FastReply=false
     SpeculaLength=5
 fi
-FastReply=true
 
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev1/antidote.config
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev2/antidote.config
