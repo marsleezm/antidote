@@ -407,11 +407,13 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
             end;
         {wait, NumDeps, PrepareTime} ->
          %lager:error("~w waiting with ~w", [TxId, PrepareTime]),
-            case (FastReply == true ) and (RepMode == local )of 
-                true ->  gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime});
-                false -> ok
-            end, 
-            NewDepDict = dict:store(TxId, {NumDeps, PrepareTime, Sender, RepMode}, DepDict),
+            NewDepDict = case (FastReply == true) and (RepMode == local) of 
+                                %% local_fast
+                        true ->  gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime}),
+                                 lager:warning("Pending prepared for ~w", [TxId]),
+                                 dict:store(TxId, {NumDeps, PrepareTime, Sender, local_fast}, DepDict);
+                        false -> dict:store(TxId, {NumDeps, PrepareTime, Sender, RepMode}, DepDict)
+                    end, 
             {noreply, State#state{max_ts=PrepareTime, dep_dict=NewDepDict}};
         {error, write_conflict, Key} ->
           %lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
@@ -1022,8 +1024,8 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
             end
     end.
 
-add_read_dep(ReaderTx, WriterTx, Key) ->
-    lager:info("Inserting anti_dep from ~w to ~w for ~p", [ReaderTx, WriterTx, Key]),
+add_read_dep(ReaderTx, WriterTx, _Key) ->
+    %lager:info("Inserting anti_dep from ~w to ~w for ~p", [ReaderTx, WriterTx, Key]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
@@ -1096,10 +1098,17 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
             case Partition of
                 ignore ->
                   %lager:warning("No more dependency, sending reply back for ~w", [TxId]),
-                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode});
+                    case RepMode of
+                        local_fast -> gen_server:cast(Sender, {real_prepared, TxId, PrepareTime});
+                        _ -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}) 
+                    end;
                 _ ->
                     [{TxId, {waiting, WriteSet}}] = ets:lookup(PreparedTxs, TxId),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
+                    case RepMode of
+                        local_fast -> lager:warning("Unblocking local_fast txn! ~w", [TxId]);
+                        _ -> ok
+                    end,
                  %lager:error("~w unblocked, replicating writeset", [TxId]),
                     PendingRecord = {Sender,
                         RepMode, WriteSet, PrepareTime},

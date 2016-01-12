@@ -182,6 +182,10 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                             end;
                         _ ->
                             %lager:warning("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
+                            case RepMode of
+                                local_fast -> lager:warning("Replicating local_fast txn! ~w", [TxId]);
+                                _ -> ok
+                            end,
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, RepMode}, ReplFactor}}),
                             %case FastReply of
@@ -250,12 +254,10 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                     %lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     case RepMode of
-                        false ->
-                            %% In this case, no need to reply
-                            %lager:warning("Not really replying.."),
-                            ok;
-                        _ ->
-                            gen_server:cast(Sender, {prepared, TxId, Timestamp})
+                        false -> ok;
+                        local_fast -> lager:warning("In repl-fsm do fast reply for ~w", [TxId]),
+                                        gen_server:cast(Sender, {real_prepared, TxId, Timestamp});
+                        _ -> gen_server:cast(Sender, {prepared, TxId, Timestamp})
                     end;
                 single_commit ->
                     %lager:warning("Single commit of ~w got enough replies, replying to ~w", [TxId, Sender]),
