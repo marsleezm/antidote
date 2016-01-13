@@ -250,8 +250,7 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     case RepMode of
                         false -> ok;
-                        local_fast -> lager:warning("In repl-fsm do fast reply for ~w", [TxId]),
-                                        gen_server:cast(Sender, {real_prepared, TxId, Timestamp});
+                        local_fast -> gen_server:cast(Sender, {real_prepared, TxId, Timestamp});
                         _ -> gen_server:cast(Sender, {prepared, TxId, Timestamp})
                     end;
                 single_commit ->
