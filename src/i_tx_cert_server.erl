@@ -58,7 +58,7 @@
 %%%===================================================================
 
 start_link(Name) ->
-    %lager:info("Normal tx cert started wit name ~w", [Name]),
+    lager:info("Normal tx cert started wit name ~w", [Name]),
     gen_server:start_link({global, Name},
              ?MODULE, [], []).
 
