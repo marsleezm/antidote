@@ -328,7 +328,7 @@ handle_cast({real_prepared, TxId, PrepareTime}, SD0) ->
     handle_cast({prepared, TxId, PrepareTime}, SD0); 
 
 handle_cast({prepared, TxId, PrepareTime}, 
-	    SD0=#state{tx_id=TxId, local_updates=LocalParts, do_repl=DoRepl, 
+	    SD0=#state{tx_id=TxId, local_updates=LocalParts, do_repl=DoRepl, stage=local_cert, 
             remote_updates=RemoteUpdates, sender=Sender, dep_dict=DepDict, pending_list=PendingList,
              min_commit_ts=LastCommitTs, specula_length=SpeculaLength, pending_prepares=PendingPrepares,
             pending_txs=PendingTxs, rep_dict=RepDict, committed=Committed}) ->
