@@ -619,7 +619,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
     PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
     case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0, IfCertify) of
 	    {false, InsertedKeys, WaitingKeys, ConflictKey} ->
-            lager:warning("~w failed, has inserted ~p", [TxId, InsertedKeys]),
+            lager:warning("~w failed, has inserted ~p, waiting for key ~w, ConflictKye ~w", [TxId, InsertedKeys, WaitingKeys, ConflictKey]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of

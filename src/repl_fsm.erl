@@ -188,12 +188,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                             end,
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, RepMode}, ReplFactor}}),
-                            %case FastReply of
-                            %    true ->
-                            %        ets:delete(PendingLog, {TxId, Partition});
-                            %    false ->
-                                    quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
-                            %end
+                            quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                     end;
                 chain ->
                     ToReply = {prepared, TxId, PrepareTime, RepMode},
