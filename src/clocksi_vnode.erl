@@ -1104,10 +1104,10 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
                 _ ->
                     [{TxId, {waiting, WriteSet}}] = ets:lookup(PreparedTxs, TxId),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
-                    case RepMode of
-                        local_fast -> lager:warning("Unblocking local_fast txn! ~w", [TxId]);
-                        _ -> ok
-                    end,
+                    %case RepMode of
+                    %    local_fast ->  lager:warning("Unblocking local_fast txn! ~w", [TxId]);
+                    %    _ -> ok
+                    %end,
                  %lager:error("~w unblocked, replicating writeset", [TxId]),
                     PendingRecord = {Sender,
                         RepMode, WriteSet, PrepareTime},

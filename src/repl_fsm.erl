@@ -182,10 +182,10 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                             end;
                         _ ->
                             %lager:warning("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
-                            case RepMode of
-                                local_fast -> lager:warning("Replicating local_fast txn! ~w", [TxId]);
-                                _ -> ok
-                            end,
+                            %case RepMode of
+                            %    local_fast -> lager:warning("Replicating local_fast txn! ~w", [TxId]);
+                            %    _ -> ok
+                            %end,
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, RepMode}, ReplFactor}}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)

@@ -219,7 +219,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
                 0 ->
                     RemotePartitions = [P || {P, _} <- RemoteUpdates],
                     DepDict1 = dict:update(TxId, 
-                        fun({_, B, _}) ->lager:warning("Previous readdep is ~w", [B]),
+                         fun({_, B, _}) -> %lager:warning("Previous readdep is ~w", [B]),
                             {length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1} end, DepDict),
                     NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
                                                         _ -> NumSpeculaRead+1
@@ -320,7 +320,7 @@ handle_cast({pending_prepared, _OtherTxId, _}, SD0) ->
     {noreply, SD0}; 
 
 handle_cast({real_prepared, TxId, _}, SD0=#state{pending_prepares=PendingPrepares, tx_id=TxId, stage=local_cert}) ->
-    lager:warning("Real prepare in local cert for ~w", [TxId]),
+    %lager:warning("Real prepare in local cert for ~w", [TxId]),
     {noreply, SD0#state{pending_prepares=PendingPrepares-1}};
 
 handle_cast({real_prepared, TxId, PrepareTime}, SD0) ->
