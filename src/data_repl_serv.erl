@@ -55,7 +55,7 @@
 
 %% States
 -export([relay_read/4,
-         append_value/4,
+        append_values/3,
 	    check_key/2,
 	    check_table/1,
         verify_table/2,
@@ -98,8 +98,8 @@ single_read(Name, Key) ->
     TxId = tx_utilities:create_tx_id(0),
     gen_server:call({global, Name}, {read, Key, TxId}, ?READ_TIMEOUT).
 
-append_value(Name, Key, Value, CommitTime) ->
-    gen_server:call({global, Name}, {append_value, Key, Value, CommitTime}).
+append_values(Name, KeyValues, CommitTime) ->
+    gen_server:call({global, Name}, {append_values, KeyValues, CommitTime}).
 
 verify_table(Name, List) ->
     gen_server:call({global, Name}, {verify_table, List}, infinity).
@@ -185,14 +185,10 @@ handle_call({debug_read, Key, TxId}, _Sender,
             end
     end;
 
-handle_call({append_value, Key, Value, CommitTime}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
-    case ets:lookup(ReplicatedLog, Key) of
-        [] ->
-            true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
-        [{Key, ValueList}] ->
-            {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-            true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}|RemainList]})
-    end,
+handle_call({append_values, KeyValues, CommitTime}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
+    lists:foreach(fun({Key, Value}) ->
+                    true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]})
+                end, KeyValues),
     {reply, ok, SD0};
 
 handle_call({read, Key, TxId}, _Sender, 

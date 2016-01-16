@@ -73,8 +73,8 @@ init([]) ->
 handle_call({get_stat}, _Sender, SD0) ->
     {reply, {0, 0, 0, 0, 0, 0, 0, 0}, SD0};
 
-handle_call({append_value, Node, Key, Value, CommitTime}, Sender, SD0) ->
-    clocksi_vnode:append_value(Node, Key, Value, CommitTime, Sender),
+handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
+    clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
     {noreply, SD0};
 
 handle_call({get_hash_fun}, _Sender, SD0) ->

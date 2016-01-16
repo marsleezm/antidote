@@ -37,6 +37,7 @@
         commit/3,
         single_commit/2,
         append_value/5,
+        append_values/4,
         abort/2,
 
         init/1,
@@ -159,6 +160,12 @@ single_commit(Node, WriteSet) ->
 append_value(Node, Key, Value, CommitTime, ToReply) ->
     riak_core_vnode_master:command(Node,
                                    {append_value, Key, Value, CommitTime},
+                                   ToReply,
+                                   ?CLOCKSI_MASTER).
+
+append_values(Node, KeyValues, CommitTime, ToReply) ->
+    riak_core_vnode_master:command(Node,
+                                   {append_values, KeyValues, CommitTime},
                                    ToReply,
                                    ?CLOCKSI_MASTER).
 
@@ -486,6 +493,18 @@ handle_command({append_value, Key, Value, CommitTime}, Sender,
             {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
             true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}|RemainList]})
     end,
+    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+    {noreply, State#state{max_ts=CommitTime}};
+
+handle_command({append_values, KeyValues, CommitTime}, Sender,
+               State = #state{committed_txs=CommittedTxs,
+                              inmemory_store=InMemoryStore
+                              }) ->
+    lists:foreach(fun({Key, Value}) ->
+            ets:insert(CommittedTxs, {Key, CommitTime}),
+            true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}]})
+            end, KeyValues),
+            
     gen_server:reply(Sender, {ok, {committed, CommitTime}}),
     {noreply, State#state{max_ts=CommitTime}};
 

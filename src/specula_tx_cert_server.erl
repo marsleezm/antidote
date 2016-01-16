@@ -121,8 +121,8 @@ init([]) ->
     {ok, #state{pending_txs=PendingTxs, rep_dict=RepDict, dep_dict=dict:new(), invalid_ts=0,
             do_repl=DoRepl, specula_length=SpeculaLength, pending_prepares=0}}.
 
-handle_call({append_value, Node, Key, Value, CommitTime}, Sender, SD0) ->
-    clocksi_vnode:append_value(Node, Key, Value, CommitTime, Sender),
+handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
+    clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
     {noreply, SD0};
 
 handle_call({start_read_tx}, _Sender, SD0) ->
