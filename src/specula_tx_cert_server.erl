@@ -79,6 +79,8 @@
         do_repl :: boolean(),
         num_specula_read=0 :: non_neg_integer(),
         committed=0 :: non_neg_integer(),
+        start_prepare=0 :: non_neg_integer(),
+        cert_stat={0,0} :: {non_neg_integer(), non_neg_integer()},
 
         read_aborted=0 :: non_neg_integer(),
         cert_aborted=0 :: non_neg_integer(),
@@ -136,13 +138,14 @@ handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnaps
     D1 = dict:store(TxId, {0, [], 0}, D),
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS, pending_prepares=0}};
 
-handle_call({get_stat}, _Sender, SD0=#state{cert_aborted=CertAborted, committed=Committed, read_aborted=ReadAborted, cascade_aborted=CascadeAborted, num_specula_read=NumSpeculaRead, pending_txs=PendingTxs}) ->
+handle_call({get_stat}, _Sender, SD0=#state{cert_aborted=CertAborted, committed=Committed, read_aborted=ReadAborted, cascade_aborted=CascadeAborted, num_specula_read=NumSpeculaRead, pending_txs=PendingTxs, cert_stat={AccT, AccN}}) ->
   %lager:warning("Num of read cert_aborted ~w, Num of cert_aborted is ~w, Num of committed is ~w, NumSpeculaRead is ~w", [ReadAborted, CascadeAborted, Committed, NumSpeculaRead]),
     [{abort, T1, C1}] = ets:lookup(PendingTxs, abort),
     [{commit, T2, C2}] = ets:lookup(PendingTxs, commit),
     A = T1 div max(1, C1), 
     C = T2 div max(1, C2),
-    {reply, {ReadAborted, CertAborted, CascadeAborted, Committed, 0, NumSpeculaRead, A, C}, SD0};
+    AvgT = AccT div max(1, AccN),
+    {reply, {ReadAborted, CertAborted, CascadeAborted, Committed, 0, NumSpeculaRead, AvgT, A, C}, SD0};
 
 handle_call({set_int_data, Type, Param}, _Sender, SD0)->
     case Type of
@@ -257,7 +260,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
                                                         _ -> NumSpeculaRead+1
                                       end,
                     {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, sender=Sender, local_updates=LocalPartitions,
-                        remote_updates=RemoteUpdates, stage=local_cert, num_specula_read=NumSpeculaRead1}}
+                        remote_updates=RemoteUpdates, stage=local_cert, num_specula_read=NumSpeculaRead1, start_prepare=os:timestamp()}}
             end;
         -1 -> 
             %% Some read is invalid even before the txn starts.. If invalid_ts is larger than 0, it can possibly be saved.
@@ -283,8 +286,8 @@ handle_call({go_down},_Sender,SD0) ->
 %%  Transaction that has already cert_aborted.
 handle_cast({pending_prepared, TxId, PrepareTime}, 
 	    SD0=#state{tx_id=TxId, local_updates=LocalParts, remote_updates=RemoteUpdates, sender=Sender, 
-                dep_dict=DepDict, pending_list=PendingList, specula_length=SpeculaLength, 
-                pending_prepares=PendingPrepares, pending_txs=PendingTxs, rep_dict=RepDict}) ->  
+                dep_dict=DepDict, pending_list=PendingList, specula_length=SpeculaLength, start_prepare=StartPrepare, 
+                pending_prepares=PendingPrepares, pending_txs=PendingTxs, rep_dict=RepDict, cert_stat=CertStat}) ->  
     %lager:warning("Speculative receive pending_prepared for ~w, current pp is ~w", [TxId, PendingPrepares+1]),
     case dict:find(TxId, DepDict) of
           %% Maybe can commit already.
@@ -297,7 +300,8 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                     %lager:warning("Pedning prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                     DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
-                    {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert}};
+                    {AccTime, AccCount} = CertStat,
+                    {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert, cert_stat={AccTime+timer:now_diff(os:timestamp()-StartPrepare), AccCount+1}}};
                 false ->
                     %lager:warning("Pending prep: decided to speculate ~w, pending list is ~w!!", [TxId, PendingList]),
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
@@ -306,8 +310,8 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                     ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, os:timestamp()}}),
                     add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
                     DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
-                    {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1,
-                        pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
+                    {AccTime, AccCount} = CertStat,
+                    {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_stat={AccTime+timer:now_diff(os:timestamp()-StartPrepare), AccCount+1}, pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
             end;
         {ok, {N, ReadDeps, OldPrepTime}} ->
             %lager:warning("~w needs ~w local prep replies", [TxId, N-1]),
@@ -328,10 +332,10 @@ handle_cast({real_prepared, TxId, PrepareTime}, SD0) ->
     handle_cast({prepared, TxId, PrepareTime}, SD0); 
 
 handle_cast({prepared, TxId, PrepareTime}, 
-	    SD0=#state{tx_id=TxId, local_updates=LocalParts, do_repl=DoRepl, stage=local_cert, 
+	    SD0=#state{tx_id=TxId, local_updates=LocalParts, do_repl=DoRepl, stage=local_cert, start_prepare=StartPrepare, 
             remote_updates=RemoteUpdates, sender=Sender, dep_dict=DepDict, pending_list=PendingList,
              min_commit_ts=LastCommitTs, specula_length=SpeculaLength, pending_prepares=PendingPrepares,
-            pending_txs=PendingTxs, rep_dict=RepDict, committed=Committed}) ->
+            pending_txs=PendingTxs, rep_dict=RepDict, committed=Committed, cert_stat=CertStat}) ->
     %lager:warning("Got local prepare for ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         %% Maybe can commit already.
@@ -355,7 +359,8 @@ handle_cast({prepared, TxId, PrepareTime},
                             %lager:warning("Decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                             DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
-                            {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert}};
+                            {AccTime, AccCount} = CertStat,
+                            {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert, cert_stat={AccTime+timer:now_diff(os:timestamp()-StartPrepare), AccCount+1}}};
                         false ->
                             %lager:warning("Speculate current tx with ~w, remote parts are ~w, Num is ~w", [TxId, RemoteParts, length(RemoteParts)]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
@@ -364,8 +369,8 @@ handle_cast({prepared, TxId, PrepareTime},
                             ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, os:timestamp()}}),
                             add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
                             DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
-                            {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, 
-                                pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
+                            {AccTime, AccCount} = CertStat,
+                            {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_stat={AccTime+timer:now_diff(os:timestamp()-StartPrepare), AccCount+1},  pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
                     end
                 end;
         {ok, {N, ReadDeps, OldPrepTime}} ->

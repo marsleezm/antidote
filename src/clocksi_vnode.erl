@@ -195,6 +195,10 @@ init([Partition]) ->
     CommittedTxs = tx_utilities:open_table(Partition, committed),
     InMemoryStore = tx_utilities:open_table(Partition, inmemory_store),
     DepDict = dict:new(),
+    DepDict1 = dict:store(success_wait, 0, DepDict),
+    DepDict2 = dict:store(commit_diff, {0,0}, DepDict1),
+    DepDict3 = dict:store(fucked_by_commit, {0,0}, DepDict2),
+    DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
 
     IfCertify = antidote_config:get(do_cert),
     IfReplicate = antidote_config:get(do_repl), 
@@ -219,7 +223,7 @@ init([Partition]) ->
                 if_specula = IfSpecula,
                 fast_reply = FastReply,
                 inmemory_store=InMemoryStore,
-                dep_dict = DepDict,
+                dep_dict = DepDict4,
                 max_ts=0,
 
                 total_time = 0, 
@@ -250,8 +254,8 @@ handle_command({check_key_record, Key, Type},_Sender,SD0=#state{prepared_txs=Pre
     R = helper:handle_check_key_record(Key, Type, PreparedTxs, CommittedTxs),
     {reply, R, SD0};
 
-handle_command({check_top_aborted, Len},_Sender,SD0=#state{l_abort_dict=LAbortDict, r_abort_dict=RAbortDict}) ->
-    R = helper:handle_check_top_aborted(Len, LAbortDict, RAbortDict),
+handle_command({check_top_aborted, Len},_Sender,SD0=#state{l_abort_dict=LAbortDict, r_abort_dict=RAbortDict, dep_dict=DepDict}) ->
+    R = helper:handle_check_top_aborted(Len, LAbortDict, RAbortDict, DepDict),
     {reply, R, SD0};
 
 handle_command({do_reply, TxId}, _Sender, SD0=#state{prepared_txs=PreparedTxs, partition=Partition, if_replicate=IfReplicate}) ->
@@ -729,7 +733,7 @@ commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Pa
                 true -> specula_utilities:deal_commit_deps(TxId, TxCommitTime);
                 false -> ok
             end,
-            DepDict1 = update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition),
+            DepDict1 = update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, 0),
           %lager:warning("After commit ~w", [TxId]),
             true = ets:delete(PreparedTxs, TxId),
             {ok, committed, DepDict1};
@@ -880,14 +884,14 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
                           TxId::txid(),TxCommitTime:: {term(), term()},
                                 InMemoryStore :: cache_id(), CommittedTxs :: cache_id(),
                                 PreparedTxs :: cache_id(), DepDict :: dict(), 
-                        Partition :: integer() ) -> ok.
-update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs, DepDict, _Partition) ->
-    DepDict;
-update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition) ->
+                        Partition :: integer(), PrepareTime :: integer() ) -> ok.
+update_store([], _TxId, TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs, DepDict, _Partition, PrepareTime) ->
+    dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
+update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PTime) ->
  %lager:error("Trying to insert key ~p with for ~w, commit time is ~w", [Key, TxId, TxCommitTime]),
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
-        [{Key, [{TxId, _Time, _, Value, []}|Deps] }] ->		
+        [{Key, [{TxId, PrepareTime, _, Value, []}|Deps] }] ->		
             %lager:warning("No pending reader! Waiter is ~p", [Deps]),
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
@@ -904,15 +908,15 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                   %lager:warning("No record!"),
 					true = ets:delete(PreparedTxs, Key),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
-								 PreparedTxs, DepDict1, Partition);
+								 PreparedTxs, DepDict1, Partition, PrepareTime);
                 _ ->
                     %lager:warning("Record is ~p!", [Record]),
 					true = ets:insert(PreparedTxs, {Key, Record}),
                     DepDict2 = unblock_prepare(PPTxId, DepDict1, PreparedTxs, Partition),
 					update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
-						PreparedTxs, DepDict2, Partition)
+						PreparedTxs, DepDict2, Partition, PrepareTime)
             end;
-        [{Key, [{TxId, _, _, Value, PendingReaders}|Deps]}] ->
+        [{Key, [{TxId, PrepareTime, _, Value, PendingReaders}|Deps]}] ->
             %lager:warning("Pending readers are ~w! Pending writers are ~p", [PendingReaders, Deps]),
             ets:insert(CommittedTxs, {Key, TxCommitTime}),
             Values = case ets:lookup(InMemoryStore, Key) of
@@ -941,7 +945,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                         PendingReaders),
                     true = ets:delete(PreparedTxs, Key),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
-                        DepDict1, Partition);
+                        DepDict1, Partition, PrepareTime);
                 [{PPTxId, PPTime, LastPPTime, PPValue, []}|Remaining] ->
                     DepDict2 = unblock_prepare(PPTxId, DepDict1, PreparedTxs, Partition),
                     NewPendingReaders = lists:foldl(fun({SnapshotTime, Sender}, PReaders) ->
@@ -963,12 +967,12 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                         [], PendingReaders),
                     true = ets:insert(PreparedTxs, {Key, [{PPTxId, PPTime, LastPPTime, PPValue, NewPendingReaders}|Remaining]}),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
-                        DepDict2, Partition)
+                        DepDict2, Partition, PrepareTime)
             end;
          [] ->
             %[{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
           %lager:warning("Something is wrong!!! A txn updated two same keys ~p!", [Key]),
-            update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition)
+            update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PTime)
     end.
 
 ready_or_block(TxId, Key, PreparedTxs, Sender) ->
@@ -1065,7 +1069,8 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, M
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     %% Abort should be fast, so send abort to myself directly.. Coord won't send abort to me again.
                     abort([MyNode], TxId),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, MyNode)
+                    DepDict1 = dict:update(fucked_by_commit, fun({T, Cnt}) ->  {T+TxCommitTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict1, MyNode)
                 %error ->
                 %  %lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
                 %    specula_utilities:deal_abort_deps(TxId),
@@ -1098,7 +1103,8 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
                     %NewDepDict = dict:erase(TxId, DepDict),
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     abort([MyNode], TxId),
-                    abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime, MyNode);
+                    DepDict1 = dict:update(fucked_by_badprep, fun({T, Cnt}) ->  {T+PPTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
+                    abort_others(PPTime, Rest, DepDict1, Remaining, LastPPTime, MyNode);
                 error ->
                     %lager:warning("~w aborted already", [TxId]),
                     abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime, MyNode)
@@ -1132,7 +1138,8 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
                         RepMode, WriteSet, PrepareTime},
                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
             end,
-            dict:erase(TxId, DepDict);
+            DepDict1 = dict:update_counter(success_wait, 1, DepDict), 
+            dict:erase(TxId, DepDict1);
         {ok, {N, PrepareTime, Sender, Type}} ->
             %lager:warning("~w updates dep to ~w", [TxId, N-1]),
             dict:store(TxId, {N-1, PrepareTime, Sender, Type}, DepDict)

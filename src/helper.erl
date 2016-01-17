@@ -39,7 +39,7 @@
         handle_command_print_stat/8,
         handle_command_check_tables_ready/1,
         handle_command_check_prepared_empty/1,
-        handle_check_top_aborted/3
+        handle_check_top_aborted/4
         ]).
 
 
@@ -182,11 +182,15 @@ handle_command_check_prepared_empty(PreparedTxs) ->
 		 _ ->  false
     end.
 
-handle_check_top_aborted(Len, LocalAbort, RemoteAbort) ->
+handle_check_top_aborted(Len, LocalAbort, RemoteAbort, DepDict) ->
     L = dict:to_list(LocalAbort),
     R = dict:to_list(RemoteAbort),
     LS = lists:keysort(2, L),
     RS = lists:keysort(2, R),
     RLS = lists:reverse(LS),
     RRS = lists:reverse(RS),
-    {lists:sublist(RLS, Len), lists:sublist(RRS, Len)}.
+    NumSuccessWait = dict:fetch(success_wait, DepDict),
+    {FailByCommit, FCC} = dict:fetch(fucked_by_commit, DepDict),
+    {FailByPrep, FPC} = dict:fetch(fucked_by_badprep, DepDict),
+    {CommitDiff, DC} = dict:fetch(commit_diff, DepDict),
+    lists:flatten(io_lib:format("LA Top:~p, RATop:~p, NumSuccWait: ~p, TimeCFailDiff: ~p, NumCFail: ~p, TimePFailDiff: ~p, NumPFail: ~p, CommitDiff: ~p, CommitNum: ~p", [lists:sublist(RLS, Len), lists:sublist(RRS, Len), NumSuccessWait, FailByCommit div max(1,FCC), FCC, FailByPrep div max(1,FPC), FPC, CommitDiff div max(1,DC), DC])).
