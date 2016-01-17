@@ -301,7 +301,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                     DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
                     {AccTime, AccCount} = CertStat,
-                    {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert, cert_stat={AccTime+timer:now_diff(os:timestamp()-StartPrepare), AccCount+1}}};
+                    {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert, cert_stat={AccTime+timer:now_diff(os:timestamp(),StartPrepare), AccCount+1}}};
                 false ->
                     %lager:warning("Pending prep: decided to speculate ~w, pending list is ~w!!", [TxId, PendingList]),
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
@@ -311,7 +311,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                     add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
                     DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
                     {AccTime, AccCount} = CertStat,
-                    {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_stat={AccTime+timer:now_diff(os:timestamp()-StartPrepare), AccCount+1}, pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
+                    {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_stat={AccTime+timer:now_diff(os:timestamp(),StartPrepare), AccCount+1}, pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
             end;
         {ok, {N, ReadDeps, OldPrepTime}} ->
             %lager:warning("~w needs ~w local prep replies", [TxId, N-1]),
@@ -360,7 +360,7 @@ handle_cast({prepared, TxId, PrepareTime},
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                             DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
                             {AccTime, AccCount} = CertStat,
-                            {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert, cert_stat={AccTime+timer:now_diff(os:timestamp()-StartPrepare), AccCount+1}}};
+                            {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert, cert_stat={AccTime+timer:now_diff(os:timestamp(),StartPrepare), AccCount+1}}};
                         false ->
                             %lager:warning("Speculate current tx with ~w, remote parts are ~w, Num is ~w", [TxId, RemoteParts, length(RemoteParts)]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
@@ -370,7 +370,7 @@ handle_cast({prepared, TxId, PrepareTime},
                             add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
                             DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
                             {AccTime, AccCount} = CertStat,
-                            {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_stat={AccTime+timer:now_diff(os:timestamp()-StartPrepare), AccCount+1},  pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
+                            {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_stat={AccTime+timer:now_diff(os:timestamp(), StartPrepare), AccCount+1},  pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
                     end
                 end;
         {ok, {N, ReadDeps, OldPrepTime}} ->
