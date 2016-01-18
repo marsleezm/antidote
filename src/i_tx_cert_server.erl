@@ -93,13 +93,17 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
     clocksi_vnode:relay_read(Node, Key, TxId, Sender, no_specula),
     {noreply, SD0};
 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{last_commit_ts=LastCommitTs}) ->
     case length(LocalUpdates) of
         0 ->
-            RemoteParts = [P || {P, _} <- RemoteUpdates],
-            clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
-            {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates), local_parts=[], remote_parts=
-                RemoteParts, sender=Sender, stage=remote_cert}};
+            case length(RemoteUpdates) of
+                0 -> gen_server:reply(Sender, {ok, {committed, LastCommitTs}});
+                _ -> 
+                    RemoteParts = [P || {P, _} <- RemoteUpdates],
+                    clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
+                    {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates), local_parts=[], remote_parts=
+                        RemoteParts, sender=Sender, stage=remote_cert}}
+            end;
         N ->
             LocalParts = [Part || {Part, _} <- LocalUpdates],
             %lager:info("Local updates are ~w", [LocalUpdates]),
