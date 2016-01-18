@@ -97,7 +97,8 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{la
     case length(LocalUpdates) of
         0 ->
             case length(RemoteUpdates) of
-                0 -> gen_server:reply(Sender, {ok, {committed, LastCommitTs}});
+                0 -> gen_server:reply(Sender, {ok, {committed, LastCommitTs}}),
+                    {noreply, SD0};
                 _ -> 
                     RemoteParts = [P || {P, _} <- RemoteUpdates],
                     clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
