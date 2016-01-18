@@ -211,13 +211,19 @@ init([Partition]) ->
                     false ->
                         ok
                 end,
+    LD = dict:new(),
+    RD = dict:new(),
+    LD1 = dict:store(pa, {0,0}, LD),
+    LD2 = dict:store(ca, {0,0}, LD1),
+    RD1 = dict:store(pa, {0,0}, RD),
+    RD2 = dict:store(ca, {0,0}, RD1),
 
     {ok, #state{partition=Partition,
                 committed_txs=CommittedTxs,
                 prepared_txs=PreparedTxs,
 		        relay_read={0,0},
-                l_abort_dict=dict:new(),
-                r_abort_dict=dict:new(),
+                l_abort_dict=LD2,
+                r_abort_dict=RD2,
                 if_certify = IfCertify,
                 if_replicate = IfReplicate,
                 if_specula = IfSpecula,
@@ -426,23 +432,35 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                         false -> dict:store(TxId, {NumDeps, PrepareTime, Sender, RepMode}, DepDict)
                     end, 
             {noreply, State#state{max_ts=PrepareTime, dep_dict=NewDepDict}};
-        {error, write_conflict, Key} ->
+        {error, write_conflict, Key, Reason} ->
             %lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
             case Debug of
                 false ->
                     case RepMode of 
                         local ->
                             gen_server:cast(Sender, {aborted, TxId, {Partition, node()}}),
+                            LAbortDict1 = case Reason of 
+                                            {prep, Diff} -> dict:update(pa, fun({CP, PT}) -> {CP+1, Diff+PT} end, LAbortDict);
+                                            {comm, Diff} -> dict:update(ca, fun({CC, CT}) -> {CC+1, Diff+CT} end, LAbortDict)
+                                          end,
                             {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1, 
-                                    l_abort_dict=dict:update_counter(Key, 1, LAbortDict)}};
+                                    l_abort_dict=dict:update_counter(Key, 1, LAbortDict1)}};
                         local_only ->
                             gen_server:cast(Sender, {aborted, TxId, {Partition, node()}}),
+                            LAbortDict1 = case Reason of 
+                                            {prep, Diff} -> dict:update(pa, fun({CP, PT}) -> {CP+1, Diff+PT} end, LAbortDict);
+                                            {comm, Diff} -> dict:update(ca, fun({CC, CT}) -> {CC+1, Diff+CT} end, LAbortDict)
+                                          end,
                             {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1, 
-                                    l_abort_dict=dict:update_counter(Key, 1, LAbortDict)}};
+                                    l_abort_dict=dict:update_counter(Key, 1, LAbortDict1)}};
                         _ ->
                             gen_server:cast(Sender, {aborted, TxId, {Partition, node()}}),
+                            RAbortDict1 = case Reason of 
+                                            {prep, Diff} -> dict:update(pa, fun({CP, PT}) -> {CP+1, Diff+PT} end, RAbortDict);
+                                            {comm, Diff} -> dict:update(ca, fun({CC, CT}) -> {CC+1, Diff+CT} end, RAbortDict)
+                                          end,
                             {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1, 
-                                    r_abort_dict=dict:update_counter(Key, 1, RAbortDict)}}
+                                    r_abort_dict=dict:update_counter(Key, 1, RAbortDict1)}}
                     end;
                 true ->
                     ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {aborted, TxId, RepMode}}}),
@@ -867,8 +885,8 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
         [] ->
             ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, Value, []}]}),
             true;
-        [{Key, [{PrepTxId, PrepareTime, _, PrepValue, RWaiter}|PWaiter]}] ->
-            case PrepareTime > SnapshotTime of
+        [{Key, [{PrepTxId, PrepareTime, OldPPTime, PrepValue, RWaiter}|PWaiter]}] ->
+            case OldPPTime > SnapshotTime of
                 true ->
                     %lager:warning("~w fail because prepare time is ~w, PWaiters are ~p", [TxId, PrepareTime, PWaiter]),
                     false;
