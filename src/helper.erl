@@ -183,10 +183,6 @@ handle_command_check_prepared_empty(PreparedTxs) ->
     end.
 
 handle_check_top_aborted(Len, LocalAbort, RemoteAbort, DepDict) ->
-    {LPC, LPT} = dict:fetch(pa, LocalAbort),
-    {LCC, LCT} = dict:fetch(ca, LocalAbort),
-    {RPC, RPT} = dict:fetch(pa, RemoteAbort),
-    {RCC, RCT} = dict:fetch(ca, RemoteAbort),
     LA1 = dict:erase(pa, LocalAbort),
     LA2 = dict:erase(ca, LA1),
     RA1 = dict:erase(pa, RemoteAbort),
@@ -201,4 +197,4 @@ handle_check_top_aborted(Len, LocalAbort, RemoteAbort, DepDict) ->
     {FailByCommit, FCC} = dict:fetch(fucked_by_commit, DepDict),
     {FailByPrep, FPC} = dict:fetch(fucked_by_badprep, DepDict),
     {CommitDiff, DC} = dict:fetch(commit_diff, DepDict),
-    lists:flatten(io_lib:format("LA Top:~p, RATop:~p, LocalPrepAbort ~p, ~p, LocalCommitAbort ~p, ~p, RemotePrepAbort ~p, ~p, RemoteCommitAbort ~p, ~p, NumSuccWait: ~p, TimeCFailDiff: ~p, NumCFail: ~p, TimePFailDiff: ~p, NumPFail: ~p, CommitDiff: ~p, CommitNum: ~p ~n", [lists:sublist(RLS, Len), lists:sublist(RRS, Len), LPT div max(1,LPC), LPC, LCT div max(1,LCC), LCC, RPT div max(1,RPC), RPC, RCT div max(1,RCC), RCC, NumSuccessWait, FailByCommit div max(1,FCC), FCC, FailByPrep div max(1,FPC), FPC, CommitDiff div max(1,DC), DC])).
+    lists:flatten(io_lib:format("LA Top:~p, RATop:~p, NumSuccWait: ~p, TimeCFailDiff: ~p, NumCFail: ~p, TimePFailDiff: ~p, NumPFail: ~p, CommitDiff: ~p, CommitNum: ~p ~n", [lists:sublist(RLS, Len), lists:sublist(RRS, Len), NumSuccessWait, FailByCommit div max(1,FCC), FCC, FailByPrep div max(1,FPC), FPC, CommitDiff div max(1,DC), DC])).
