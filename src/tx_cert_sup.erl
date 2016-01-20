@@ -49,7 +49,7 @@ append_values(Name, Node, KeyValues, CommitTime) ->
 
 load_tpcc(WPerDc) ->
     {PartList, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
-    %lager:info("Part list is ~w, Replist is ~w", [PartList, ReplList]),
+    lager:info("Got load request, part list is ~w", [PartList]),
     AllDcs = [N || {N, _} <- PartList],
     lists:foreach(fun(Node) ->
                     lager:info("Asking ~p to load", [Node]),
