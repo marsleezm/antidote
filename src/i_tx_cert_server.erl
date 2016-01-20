@@ -121,6 +121,11 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{la
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
+handle_cast({load_tpcc, Sup, WPerDc}, SD0) ->
+    tpcc_load:load(WPerDc),
+    Sup ! done,
+    {noreply, SD0};
+
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, local_parts=LocalParts, do_repl=DoRepl, stage=local_cert,
             remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime}) ->

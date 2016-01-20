@@ -138,6 +138,7 @@ handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnaps
     D1 = dict:store(TxId, {0, [], 0}, D),
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS, pending_prepares=0}};
 
+
 handle_call({get_stat}, _Sender, SD0=#state{cert_aborted=CertAborted, committed=Committed, read_aborted=ReadAborted, cascade_aborted=CascadeAborted, num_specula_read=NumSpeculaRead, pending_txs=PendingTxs, cert_stat={AccT, AccN}}) ->
   %lager:warning("Num of read cert_aborted ~w, Num of cert_aborted is ~w, Num of committed is ~w, NumSpeculaRead is ~w", [ReadAborted, CascadeAborted, Committed, NumSpeculaRead]),
     [{abort, T1, C1}] = ets:lookup(PendingTxs, abort),
@@ -298,6 +299,14 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
+
+handle_cast({load_tpcc, Sup, WPerDc}, SD0) ->
+    lager:info("Got load req!"),
+    tpcc_load:load(WPerDc),
+    lager:info("Finished loading!"),
+    Sup ! done,
+    lager:info("Replied!"),
+    {noreply, SD0};
 
 %% Receiving local prepare. Can only receive local prepare for two kinds of transaction
 %%  Current transaction that has not finished local cert phase

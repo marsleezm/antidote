@@ -28,7 +28,7 @@
 -define(GET_AND_UPDATE_TS(Clock), clock_service:get_and_update_ts(Clock)).
 -endif.
 
--export([create_tx_id/1, now_microsec/0, open_table/2, open_private_table/1, get_table_name/2]).
+-export([create_tx_id/1, now_microsec/0, open_table/2, open_private_table/1, get_table_name/2, open_public_table/1]).
 
 -spec create_tx_id(snapshot_time() | ignore) -> txid().
 create_tx_id(ClientClock) ->
@@ -48,7 +48,7 @@ now_microsec() ->
 open_table(Partition, Name) ->
     try
     ets:new(get_table_name(Partition,Name),
-        [set,protected,named_table,?TABLE_CONCURRENCY])
+        [set,public,named_table,?TABLE_CONCURRENCY])
     catch
     _:_Reason ->
         %% Someone hasn't finished cleaning up yet
@@ -59,6 +59,17 @@ open_private_table(Name) ->
     try
     ets:new(Name,
         [set,private])
+    catch
+    Ex ->
+        lager:warn("Error when opening private table ~w", [Ex]),
+        %% Someone hasn't finished cleaning up yet
+        open_private_table(Name)
+    end.
+
+open_public_table(Name) ->
+    try
+    ets:new(Name,
+        [set,public])
     catch
     Ex ->
         lager:warn("Error when opening private table ~w", [Ex]),

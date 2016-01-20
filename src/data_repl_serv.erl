@@ -56,6 +56,7 @@
 %% States
 -export([relay_read/4,
         append_values/3,
+        get_table/1,
 	    check_key/2,
 	    check_table/1,
         verify_table/2,
@@ -93,6 +94,9 @@ start_link(Name) ->
 
 read(Name, Key, TxId) ->
     gen_server:call({global, Name}, {read, Key, TxId}, ?READ_TIMEOUT).
+
+get_table(Name) ->
+    gen_server:call({global, Name}, {get_table}, ?READ_TIMEOUT).
 
 single_read(Name, Key) ->
     TxId = tx_utilities:create_tx_id(0),
@@ -141,11 +145,14 @@ abort_specula(Name, TxId, Partition) ->
 
 init([Name]) ->
     lager:info("Data repl inited with name ~w", [Name]),
-    ReplicatedLog = tx_utilities:open_private_table(repl_log),
+    ReplicatedLog = tx_utilities:open_public_table(repl_log),
     PendingLog = tx_utilities:open_private_table(pending_log),
     {ok, #state{name=Name,
                 pending_log = PendingLog, current_set = sets:new(),
                 backup_set = sets:new(), replicated_log = ReplicatedLog}}.
+
+handle_call({get_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
+    {reply, ReplicatedLog, SD0};
 
 handle_call({retrieve_log, LogName},  _Sender,
 	    SD0=#state{replicated_log=ReplicatedLog}) ->

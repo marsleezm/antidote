@@ -28,6 +28,7 @@
         debug_read/3,
 	    relay_read/5,
         set_prepared/5,
+        get_table/1,
         async_send_msg/3,
 
         set_debug/2,
@@ -113,6 +114,11 @@ do_reply(Node, TxId) ->
                            {do_reply, TxId},
                            ?CLOCKSI_MASTER, infinity).
 
+get_table(Node) ->
+    %lager:warning("Trying to read ~w in node ~w", [Key, Node]),
+    riak_core_vnode_master:sync_command(Node,
+                                   {get_table},
+                                   ?CLOCKSI_MASTER, infinity).
 
 %% @doc Sends a read request to the Node that is responsible for the Key
 read_data_item(Node, Key, TxId) ->
@@ -242,6 +248,9 @@ init([Partition]) ->
 handle_command({set_debug, Debug},_Sender,SD0=#state{partition=Partition}) ->
     lager:info("~w: Setting debug to be ~w", [Partition, Debug]),
     {reply, ok, SD0#state{debug=Debug}};
+
+handle_command({get_table}, _Sender, SD0=#state{inmemory_store=InMemoryStore}) ->
+    {reply, InMemoryStore, SD0};
 
 handle_command({verify_table, Repl},_Sender,SD0=#state{inmemory_store=InMemoryStore}) ->
     R = helper:handle_verify_table(Repl, InMemoryStore),

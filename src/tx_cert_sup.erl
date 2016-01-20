@@ -53,14 +53,15 @@ load_tpcc(WPerDc) ->
     AllDcs = [N || {N, _} <- PartList],
     lists:foreach(fun(Node) ->
                     lager:info("Asking ~p to load", [Node]),
-                    spawn(rpc, call, [Node, tpcc_load, load, [WPerDc, self()]])
+                    CertServer = list_to_atom(atom_to_list(Node) ++ "-cert-" ++ integer_to_list(1)),
+                    gen_server:cast({global, CertServer}, {load_tpcc, self(), WPerDc})
                  end, AllDcs),
-    lager:info("Waiting for resutls..."),
+    lager:info("Waiting for results..."),
     lists:foreach(fun(_) ->
                  receive done -> ok end,
                 lager:info("Received ack")
                  end, AllDcs),
-    lager:info("Done").
+    lager:info("Totally finished in tx_cert_sup!!!").
 
 start_tx(Name) ->
     case is_integer(Name) of
