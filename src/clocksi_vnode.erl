@@ -163,11 +163,10 @@ append_value(Node, Key, Value, CommitTime, ToReply) ->
                                    ToReply,
                                    ?CLOCKSI_MASTER).
 
-append_values(Node, KeyValues, CommitTime, ToReply) ->
-    riak_core_vnode_master:command(Node,
+append_values(Node, KeyValues, CommitTime, _ToReply) ->
+    riak_core_vnode_master:sync_command(Node,
                                    {append_values, KeyValues, CommitTime},
-                                   ToReply,
-                                   ?CLOCKSI_MASTER).
+                                   ?CLOCKSI_MASTER, infinity).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
 commit(UpdatedParts, TxId, CommitTime) ->
@@ -313,13 +312,16 @@ handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{max_ts=MaxTS,
 
 handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max_ts=MaxTS,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=_Partition}) ->
+    %lager:info("Got read for ~w", [Key]),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
     %clock_service:update_ts(TxId#tx_id.snapshot_time),
     case ready_or_block(TxId, Key, PreparedTxs, Sender) of
         not_ready->
+            %lager:info("Not ready for ~w", [Key]),
             {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
         ready ->
             Result = read_value(Key, TxId, InMemoryStore),
+            %lager:info("Got value for ~w, ~w", [Key, Result]),
             {reply, Result, SD0#state{max_ts=MaxTS1}}
     end;
 
@@ -439,24 +441,24 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                         local ->
                             gen_server:cast(Sender, {aborted, TxId, {Partition, node()}}),
                             LAbortDict1 = case Reason of 
-                                            {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, LAbortDict);
-                                            {comm, Diff} -> dict:update(ca, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, LAbortDict)
+                                            {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, {0,0,0,0}, LAbortDict);
+                                            {comm, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, {0,0,0,0}, LAbortDict)
                                           end,
                             {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1, 
                                     l_abort_dict=LAbortDict1}};
                         local_only ->
                             gen_server:cast(Sender, {aborted, TxId, {Partition, node()}}),
                             LAbortDict1 = case Reason of 
-                                            {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, LAbortDict);
-                                            {comm, Diff} -> dict:update(ca, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, LAbortDict)
+                                            {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, {0,0,0,0},LAbortDict);
+                                            {comm, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, {0,0,0,0},LAbortDict)
                                           end,
                             {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1, 
                                     l_abort_dict=LAbortDict1}};
                         _ ->
                             gen_server:cast(Sender, {aborted, TxId, {Partition, node()}}),
                             RAbortDict1 = case Reason of 
-                                            {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, RAbortDict);
-                                            {comm, Diff} -> dict:update(ca, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, RAbortDict)
+                                            {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, {0,0,0,0}, RAbortDict);
+                                            {comm, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, {0,0,0,0}, RAbortDict)
                                           end,
                             {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1, 
                                     r_abort_dict=RAbortDict1}}
@@ -517,17 +519,18 @@ handle_command({append_value, Key, Value, CommitTime}, Sender,
     gen_server:reply(Sender, {ok, {committed, CommitTime}}),
     {noreply, State#state{max_ts=CommitTime}};
 
-handle_command({append_values, KeyValues, CommitTime}, Sender,
+handle_command({append_values, KeyValues, CommitTime}, _Sender,
                State = #state{committed_txs=CommittedTxs,
                               inmemory_store=InMemoryStore
                               }) ->
+    %lager:info("Got msg from ~p", [ToReply]),
     lists:foreach(fun({Key, Value}) ->
             ets:insert(CommittedTxs, {Key, CommitTime}),
             true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}]})
             end, KeyValues),
-            
-    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-    {noreply, State#state{max_ts=CommitTime}};
+    %lager:info("Sending msg back to ~p", [ToReply]),
+    %gen_fsm:reply(ToReply, {ok, {committed, CommitTime}}),
+    {reply, {ok, committed}, State#state{max_ts=CommitTime}};
 
 handle_command({commit, TxId, TxCommitTime}, _Sender,
                #state{partition=Partition,

@@ -27,7 +27,7 @@
 -export([start_link/0]).
 
 -export([init/1, certify/4, get_stat/0, get_int_data/3, start_tx/1, single_read/3, 
-            start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4]).
+            start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load_tpcc/1]).
 
 -define(READ_TIMEOUT, 10000).
 
@@ -46,6 +46,21 @@ append_values(Name, Node, KeyValues, CommitTime) ->
             gen_server:call({global, Name}, 
                     {append_values, Node, KeyValues, CommitTime}, 15000)
     end.
+
+load_tpcc(WPerDc) ->
+    {PartList, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
+    %lager:info("Part list is ~w, Replist is ~w", [PartList, ReplList]),
+    AllDcs = [N || {N, _} <- PartList],
+    lists:foreach(fun(Node) ->
+                    lager:info("Asking ~p to load", [Node]),
+                    spawn(rpc, call, [Node, tpcc_load, load, [WPerDc, self()]])
+                 end, AllDcs),
+    lager:info("Waiting for resutls..."),
+    lists:foreach(fun(_) ->
+                 receive done -> ok end,
+                lager:info("Received ack")
+                 end, AllDcs),
+    lager:info("Done").
 
 start_tx(Name) ->
     case is_integer(Name) of
@@ -100,6 +115,7 @@ read(Name, TxId, Key, Node) ->
         false ->
             gen_server:call({global, Name}, {read, Key, TxId, Node}, ?READ_TIMEOUT)
     end.
+
 
 get_stat() ->
     SPL = lists:seq(1, ?NUM_SUP),
