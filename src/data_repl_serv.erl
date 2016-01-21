@@ -237,7 +237,7 @@ handle_call({read, Key, TxId, {Part, _}}, Sender,
 
 handle_call({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, Sender, 
 	    SD0=#state{pending_log=PendingLog, ts_dict=TsDict}) ->
-    %lager:warning("Specula prepare for [~w, ~w]", [TxId, Partition]),
+    lager:warning("Specula prepare for [~w, ~w]", [TxId, Partition]),
     gen_server:reply(Sender, dict:fetch(Partition, TsDict)),
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
                       case ets:lookup(PendingLog, Key) of
@@ -308,6 +308,7 @@ handle_cast({relay_read, Key, TxId, Reader},
 %% In ets, faster for read.
 handle_cast({abort_specula, TxId, Partition}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict}) ->
+    lager:info("Abort specula for ~w, ~w", [TxId, Partition]),
     %TsDict1 = lists:foldl(fun(Partition, D) ->
                 [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
                 ets:delete(PendingLog, {TxId, Partition}),

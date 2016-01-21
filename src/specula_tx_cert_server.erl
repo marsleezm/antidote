@@ -908,6 +908,7 @@ add_to_table([], _, _, _) ->
 add_to_table([{{Partition, Node}, Updates}|Rest], TxId, PrepareTime, RepDict) ->
     Ts = case dict:find(Node, RepDict) of
             {ok, DataReplServ} ->
+                lager:warning("Prepareing specula for ~w ~w", [TxId, Partition]),
                 ?DATA_REPL_SERV:prepare_specula(DataReplServ, TxId, Partition, Updates, PrepareTime);
             _ ->
                 %% Send to local cache.
@@ -937,6 +938,7 @@ abort_to_table([], _, _) ->
 abort_to_table([{Partition, Node}|Rest], TxId, RepDict) ->
     case dict:find(Node, RepDict) of
         {ok, DataReplServ} ->
+            lager:warning("Aborting specula for ~w ~w", [TxId, Partition]),
             ?DATA_REPL_SERV:abort_specula(DataReplServ, TxId, Partition);
         _ ->
             %% Send to local cache.
