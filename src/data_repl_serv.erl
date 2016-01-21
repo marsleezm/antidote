@@ -633,7 +633,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                 ready -> ready;
                 {specula, PTxId, Value} ->  add_read_dep(TxId, PTxId, Key), {specula, Value};
                 {not_ready, NewList, PTxId} ->
-                    lager:warning("~w read is blocked by ~w for ~w", [TxId, PTxId, Key]),
+                    lager:warning("~w read is blocked by ~w for ~p", [TxId, PTxId, Key]),
                     ets:insert(PreparedTxs, {Key, NewList}), not_ready
             end
     end.
