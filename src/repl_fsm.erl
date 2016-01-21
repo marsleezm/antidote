@@ -236,7 +236,7 @@ handle_cast({repl_abort, TxId, UpdatedParts, SkipLocal},
             AllReplicas),
     {noreply, SD0};
 
-handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
+handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLog}) ->
     case ets:lookup(PendingLog, {TxId, Partition}) of
         [{{TxId, Partition}, {R, 1}}] ->
         %ToReply = {prepared, TxId, PrepareTime, remote},
@@ -250,8 +250,8 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     case RepMode of
                         false -> ok;
-                        local_fast -> gen_server:cast(Sender, {real_prepared, TxId, Timestamp});
-                        _ -> gen_server:cast(Sender, {prepared, TxId, Timestamp})
+                        local_fast -> gen_server:cast(Sender, {real_prepared, TxId, max(Timestamp, ProposedTs)});
+                        _ -> gen_server:cast(Sender, {prepared, TxId, max(Timestamp, ProposedTs)})
                     end;
                 single_commit ->
                     %lager:warning("Single commit of ~w got enough replies, replying to ~w", [TxId, Sender]),
@@ -259,8 +259,9 @@ handle_cast({ack, Partition, TxId}, SD0=#state{pending_log=PendingLog}) ->
                     gen_server:reply(Sender, {ok, {committed, Timestamp}})
             end;
         [{{TxId, Partition}, {R, N}}] ->
+            {PrepType, Sender, Timestamp, RepMode} = R,
             %lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
-            ets:insert(PendingLog, {{TxId, Partition}, {R, N-1}});
+            ets:insert(PendingLog, {{TxId, Partition}, {{PrepType, Sender, max(Timestamp,ProposedTs), RepMode}, N-1}});
         [] -> %%The record is appended already, do nothing
             %lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
             ok

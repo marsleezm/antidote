@@ -246,16 +246,17 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
                                                                 _ -> NumSpeculaRead+1
                                               end, 
                             %lager:warning("Trying to prepare ~w", [TxId]),
-                            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                             case length(PendingList) >= SpeculaLength of
                                 true -> %% Wait instead of speculate.
+                                    ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                                     {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, local_updates=[], num_specula_read=NumSpeculaRead1, 
                                                 remote_updates=RemoteUpdates, sender=Sender, stage=remote_cert}};
                                 false -> %% Can speculate. After replying, removing TxId
                                     %lager:warning("Speculating directly for ~w", [TxId]),
-                                    gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs}}),
                                     %% Update specula data structure, and clean the txid so we know current txn is already replied
-                                    add_to_table(RemoteUpdates, TxId, LastCommitTs, RepDict),
+                                    NewRemoteUps = add_to_table(RemoteUpdates, TxId, LastCommitTs, RepDict),
+                                    ?CLOCKSI_VNODE:prepare(NewRemoteUps, TxId, {remote, node()}),
+                                    gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs}}),
                                     PendingList1 = PendingList ++ [TxId],
                                     ets:insert(PendingTxs, {TxId, {[], RemotePartitions, os:timestamp()}}),
                                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, 
@@ -325,17 +326,17 @@ handle_cast({pending_prepared, TxId, PrepareTime},
             case length(PendingList) >= SpeculaLength of
                 true ->
                     %lager:warning("Pedning prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
-                    ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
+                    ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                     DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
                     {AccTime, AccCount} = CertStat,
                     {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert, cert_stat={AccTime+timer:now_diff(os:timestamp(),StartPrepare), AccCount+1}}};
                 false ->
                     %lager:warning("Pending prep: decided to speculate ~w, pending list is ~w!!", [TxId, PendingList]),
-                    ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                     %% Add dependent data into the table
-                    gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
                     ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, os:timestamp()}}),
-                    add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
+                    NewRemoteUps = add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
+                    ?CLOCKSI_VNODE:prepare(NewRemoteUps, TxId, {remote, node()}),
+                    gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
                     DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
                     {AccTime, AccCount} = CertStat,
                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_stat={AccTime+timer:now_diff(os:timestamp(),StartPrepare), AccCount+1}, pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
@@ -384,17 +385,17 @@ handle_cast({prepared, TxId, PrepareTime},
                         true -> 
                             %%In wait stage, only prepare and doesn't add data to table
                             %lager:warning("Decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
-                            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
+                            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                             DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
                             {AccTime, AccCount} = CertStat,
                             {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert, cert_stat={AccTime+timer:now_diff(os:timestamp(),StartPrepare), AccCount+1}}};
                         false ->
                             %lager:warning("Speculate current tx with ~w, remote parts are ~w, Num is ~w", [TxId, RemoteParts, length(RemoteParts)]),
-                            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                             %% Add dependent data into the table
-                            gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
                             ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, os:timestamp()}}),
-                            add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
+                            NewRemoteUps = add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
+                            ?CLOCKSI_VNODE:prepare(NewRemoteUps, TxId, {remote, node()}),
+                            gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
                             DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
                             {AccTime, AccCount} = CertStat,
                             {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_stat={AccTime+timer:now_diff(os:timestamp(), StartPrepare), AccCount+1},  pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
@@ -484,7 +485,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             SpeculaPrepTime = max(NewMaxPT+1, OldCurPrepTime),
                             DepDict3=dict:store(CurrentTxId, {Prep, Read, SpeculaPrepTime}, DepDict2),
                             gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime}}),
-                            add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
+                            %add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
                             PendingList1 = NewPendingList ++ [CurrentTxId],
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, os:timestamp()}}),
@@ -593,7 +594,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             SpeculaPrepTime = max(NewMaxPT+1, OldCurPrepTime),
                             DepDict3=dict:store(CurrentTxId, {Prep, Read, SpeculaPrepTime}, DepDict2),
                             gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime}}),
-                            add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
+                            %add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
                             PendingList1 = NewPendingList ++ [CurrentTxId],
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, os:timestamp()}}),
@@ -903,16 +904,18 @@ abort_tx(TxId, LocalParts, RemoteParts, DoRepl) ->
     ?REPL_FSM:repl_abort(RemoteParts, TxId, DoRepl, true).
 
 add_to_table([], _, _, _) ->
-    ok;
+    [];
 add_to_table([{{Partition, Node}, Updates}|Rest], TxId, PrepareTime, RepDict) ->
-    case dict:find(Node, RepDict) of
-        {ok, DataReplServ} ->
-            ?DATA_REPL_SERV:prepare_specula(DataReplServ, TxId, Partition, Updates, PrepareTime);
-        _ ->
-            %% Send to local cache.
-            ?CACHE_SERV:prepare_specula(TxId, Partition, Updates, PrepareTime)
-    end,
-    add_to_table(Rest, TxId, PrepareTime, RepDict).
+    Ts = case dict:find(Node, RepDict) of
+            {ok, DataReplServ} ->
+                ?DATA_REPL_SERV:prepare_specula(DataReplServ, TxId, Partition, Updates, PrepareTime);
+            _ ->
+                %% Send to local cache.
+                ?CACHE_SERV:prepare_specula(TxId, Partition, Updates, PrepareTime),
+                0
+         end,
+    %lager:info("Got ts is ~w", [Ts]),
+    [{{Partition, Node}, Updates, max(PrepareTime, Ts)}|add_to_table(Rest, TxId, PrepareTime, RepDict)].
 
 commit_to_table([], _, _, _) ->
     ok;

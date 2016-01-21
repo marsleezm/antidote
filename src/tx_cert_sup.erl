@@ -51,6 +51,7 @@ load_tpcc(WPerDc) ->
     {PartList, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
     lager:info("Got load request, part list is ~w", [PartList]),
     AllDcs = [N || {N, _} <- PartList],
+    StartTime = os:timestamp(),
     lists:foreach(fun(Node) ->
                     lager:info("Asking ~p to load", [Node]),
                     CertServer = list_to_atom(atom_to_list(Node) ++ "-cert-" ++ integer_to_list(1)),
@@ -61,7 +62,8 @@ load_tpcc(WPerDc) ->
                  receive done -> ok end,
                 lager:info("Received ack")
                  end, AllDcs),
-    lager:info("Totally finished in tx_cert_sup!!!").
+    EndTime = os:timestamp(),
+    lager:info("Totally finished in tx_cert_sup, used ~w secs!!!", [timer:now_diff(EndTime, StartTime)/1000000]).
 
 start_tx(Name) ->
     case is_integer(Name) of

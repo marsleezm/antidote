@@ -35,6 +35,7 @@
         do_reply/2,
         debug_prepare/4,
         prepare/3,
+        prepare_with_ts/3,
         commit/3,
         single_commit/2,
         append_value/5,
@@ -140,9 +141,28 @@ relay_read(Node, Key, TxId, Reader, From) ->
 
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
 prepare(Updates, TxId, Type) ->
-    lists:foreach(fun({Node, WriteSet}) ->
+    MyNode = node(),
+    case Type of 
+        {remote, MyNode} ->
+            lists:foreach(fun({Node, WriteSet, Ts}) ->
+                riak_core_vnode_master:command(Node,
+                                   {prepare, TxId, WriteSet, Type, Ts},
+                                   self(),
+                                   ?CLOCKSI_MASTER)
+                end, Updates);
+        _ ->
+            lists:foreach(fun({Node, WriteSet}) ->
+                riak_core_vnode_master:command(Node,
+                                   {prepare, TxId, WriteSet, Type, 0},
+                                   self(),
+                                   ?CLOCKSI_MASTER)
+		end, Updates)
+    end.
+
+prepare_with_ts(Updates, TxId, Type) ->
+    lists:foreach(fun({Node, WriteSet, Ts}) ->
 			riak_core_vnode_master:command(Node,
-						       {prepare, TxId, WriteSet, Type},
+						       {prepare, TxId, WriteSet, Type, Ts},
                                self(),
 						       ?CLOCKSI_MASTER)
 		end, Updates).
@@ -321,7 +341,7 @@ handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{max_ts=MaxTS,
 
 handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max_ts=MaxTS,
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=_Partition}) ->
-    %lager:info("Got read for ~w", [Key]),
+    lager:info("Got read for ~w", [Key]),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
     %clock_service:update_ts(TxId#tx_id.snapshot_time),
     case ready_or_block(TxId, Key, PreparedTxs, Sender) of
@@ -371,7 +391,7 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_bl
             end
     end;
 
-handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
+handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                State = #state{partition=Partition,
                               if_replicate=IfReplicate,
                               l_abort_dict=LAbortDict,
@@ -389,7 +409,7 @@ handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                               }) ->
     %lager:warning("~w: Got prepare of ~w, ~w", [Partition, TxId, RepMode]),
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
-    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify),
+    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, max(MaxTS, ProposedTs), IfCertify),
     case Result of
         {ok, PrepareTime} ->
             UsedTime = tx_utilities:now_microsec() - PrepareTime,
@@ -1010,7 +1030,7 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
         [] ->
             ready;
         [{Key, [{PreparedTxId, PrepareTime, LastPPTime, Value, PendingReader}| PendingPrepare]}] ->
-            %lager:warning("~p Not ready.. ~w waits for ~w with ~w, others are ~w", [Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
+           % lager:warning("~p Not ready.. ~w waits for ~w with ~w, others are ~w", [Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
             case PrepareTime =< SnapshotTime of
                 true ->
                     ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastPPTime, Value,

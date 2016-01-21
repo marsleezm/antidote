@@ -35,10 +35,14 @@ start_fsm(Partition) ->
 
 generate_data_repl_serv() ->
     ToReplicate = find_to_repl(),
-    Names = [ list_to_atom(atom_to_list(node())++"repl"++atom_to_list(Node))  || Node<- ToReplicate],
-    [{Name, {data_repl_serv, start_link, [Name]},
+    {[{_, AllNodeParts}], _} = hash_fun:get_hash_fun(),
+    AllParts = [P ||{P, _}  <- AllNodeParts],
+    NameList = lists:foldl(fun(Node, Acc) ->
+            ReplName = list_to_atom(atom_to_list(node())++"repl"++atom_to_list(Node)),
+            [{ReplName, AllParts}|Acc] end, [], ToReplicate),
+    [{Name, {data_repl_serv, start_link, [Name, Parts]},
         permanent, 5000, worker, [data_repl_serv]}
-            || Name <- Names ].
+            || {Name,Parts} <- NameList ].
 
 find_to_repl() ->
     List = antidote_config:get(to_repl),

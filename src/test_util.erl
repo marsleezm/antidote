@@ -7,9 +7,20 @@
 
 -export([delete_1/2, delete_2/2,
          lookup_1/2, lookup_2/2, get_my_range/4,
-         check_node/1, check_list/1,
+         check_node/1, check_list/1, test_hash/2,
          pass1/1, pass2/1]).
 
+test_hash(N, StrLen) ->
+    Key = random_string(StrLen),
+    PartList = [[100, 111,333], [444, 22333], [222, 3333], [1122, 1111]],
+    Seq = lists:seq(1, N),
+    T = os:timestamp(),
+    lists:foreach(fun(_) ->
+            L = lists:nth(2, PartList),
+            crypto:bytes_to_integer(erlang:md5(Key)) rem length(L) + 1
+            end, Seq),
+    Diff = timer:now_diff(os:timestamp(), T),
+    io:format("Diff is ~w ~n", [Diff]).
 
 get_my_range(Total, Start, NumIds, MyId) ->
     Remainder = Total rem NumIds,
@@ -148,3 +159,10 @@ init(NumItems) ->
     lists:foreach(fun(X) -> ets:insert(table, {X, {X, 2*X, 3*X, "123456789014567890123457890123456789012345678901234567890123456789012345678901234567890"}}) end, Seq),
     lists:foldl(fun(X, D) ->     
                         dict:store(X, {X, 2*X, 3*X}, D) end, dict:new(), Seq).
+
+random_string(Len) ->
+    Chrs = list_to_tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"),
+    ChrsSize = size(Chrs),
+    F = fun(_, R) -> [element(random:uniform(ChrsSize), Chrs) | R] end,
+    lists:foldl(F, "", lists:seq(1, Len)).
+
