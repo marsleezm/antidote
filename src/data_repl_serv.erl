@@ -320,7 +320,7 @@ handle_cast({abort_specula, TxId, Partition},
     
 handle_cast({commit_specula, TxId, Partition, CommitTime}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict}) ->
-    %lager:warning("Committing specula for ~w ~w", [TxId, Partition]),
+    lager:warning("Committing specula for ~w ~w", [TxId, Partition]),
     %TsDict1 = lists:foldl(fun(Partition, D) ->
               [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
               ets:delete(PendingLog, {TxId, Partition}),
@@ -334,7 +334,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, current_set=CurrentSet, backup_set=BackupSet}) ->
     case Type of
         prepared ->
-            %lager:info("Got repl prepare for ~w", [TxId]),
+            lager:info("Got repl prepare for ~w", [TxId]),
             case (sets:is_element(TxId, CurrentSet) or sets:is_element(TxId, BackupSet)) of
                 true ->
                     %lager:info("~w belongs to set!", [TxId]),
@@ -389,7 +389,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 
 handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict, do_specula=DoSpecula}) ->
-    %lager:info("repl commit for ~w ~w", [TxId, Partition]),
+    lager:info("repl commit for ~w ~w", [TxId, Partitions]),
     TsDict1 = lists:foldl(fun(Partition, D) ->
             [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
             ets:delete(PendingLog, {TxId, Partition}),
@@ -397,7 +397,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
             dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)
         end, TsDict, Partitions),
     case DoSpecula of
-        true -> specula_utilities:deal_abort_deps(TxId);
+        true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
         _ -> ok
     end,
     %% No need to eagerly update.. Because the master will have higher ts
@@ -405,6 +405,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_set=CurrentSet}) ->
+    lager:info("repl abort for ~w ~w", [TxId, Partitions]),
     {CurrentSet1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
