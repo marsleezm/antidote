@@ -334,7 +334,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, current_set=CurrentSet, backup_set=BackupSet}) ->
     case Type of
         prepared ->
-            lager:info("Got repl prepare for ~w", [TxId]),
+            %lager:info("Got repl prepare for ~w", [TxId]),
             case (sets:is_element(TxId, CurrentSet) or sets:is_element(TxId, BackupSet)) of
                 true ->
                     %lager:info("~w belongs to set!", [TxId]),
@@ -643,6 +643,7 @@ read_or_block([], _, _SnapshotTime, _) ->
 read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sender) when SnapshotTime >= PrepTime ->
     case prepared_by_local(PTxId) of
         true ->
+            lager:info("Prepare by local"),
             {specula, PTxId, Value};
         false ->
             case Prev of [] -> {not_ready, [{PTxId, PrepTime, Value, [{SnapshotTime, Sender}|Reader]}|Rest], PTxId};
