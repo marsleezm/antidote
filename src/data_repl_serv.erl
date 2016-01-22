@@ -38,7 +38,7 @@
 -endif.
 
 -define(NUM_VERSIONS, 10).
--define(SET_SIZE, 20).
+-define(SET_SIZE, 30).
 -define(READ_TIMEOUT, 5000).
 %% API
 -export([start_link/2]).
@@ -337,6 +337,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
             lager:info("Got repl prepare for ~w, ~w", [TxId, Partition]),
             case dict:find({TxId, Partition}, CurrentDict) of 
                 {ok, aborted} ->
+                    lager:info("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 {ok, committed} ->
                     add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
@@ -344,6 +345,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                 error ->
                     case dict:find({TxId, Partition}, BackupDict) of 
                         {ok, aborted} ->
+                            lager:info("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         {ok, committed} ->
                             add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
