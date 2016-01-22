@@ -42,11 +42,11 @@
 
 %% States
 -export([repl_prepare/4,
+	    check_table/0,
          repl_abort/3,
-	 check_table/0,
          repl_commit/4,
-         repl_abort/4,
-         repl_commit/5,
+         %repl_abort/4,
+         %repl_commit/5,
          quorum_replicate/7,
          chain_replicate/5,
          send_after/3]).
@@ -82,25 +82,25 @@ repl_prepare(Partition, PrepType, TxId, LogContent) ->
 check_table() ->
     gen_server:call({global, get_repl_name()}, {check_table}).
 
-repl_abort(UpdatedParts, TxId, DoRepl) ->
-    repl_abort(UpdatedParts, TxId, DoRepl, false). 
+%repl_abort(UpdatedParts, TxId, DoRepl) ->
+%    repl_abort(UpdatedParts, TxId, DoRepl, false). 
 
-repl_abort(_, _, false, _) ->
+repl_abort(_, _, false) ->
     ok;
-repl_abort([], _, true, _) ->
+repl_abort([], _, true) ->
     ok;
-repl_abort(UpdatedParts, TxId, true, SkipLocal) ->
-    gen_server:cast({global, get_repl_name()}, {repl_abort, TxId, UpdatedParts, SkipLocal}).
+repl_abort(UpdatedParts, TxId, true) ->
+    gen_server:cast({global, get_repl_name()}, {repl_abort, TxId, UpdatedParts}).
 
-repl_commit(UpdatedParts, TxId, CommitTime, DoRepl) ->
-    repl_commit(UpdatedParts, TxId, CommitTime, DoRepl, false). 
+%repl_commit(UpdatedParts, TxId, CommitTime, DoRepl) ->
+%    repl_commit(UpdatedParts, TxId, CommitTime, DoRepl). 
 
-repl_commit(_, _, _, false, _) ->
+repl_commit(_, _, _, false) ->
     ok;
-repl_commit([], _, _, true, _) ->
+repl_commit([], _, _, true) ->
     ok;
-repl_commit(UpdatedParts, TxId, CommitTime, true, SkipLocal) ->
-    gen_server:cast({global, get_repl_name()}, {repl_commit, TxId, UpdatedParts, CommitTime, SkipLocal}).
+repl_commit(UpdatedParts, TxId, CommitTime, true) ->
+    gen_server:cast({global, get_repl_name()}, {repl_commit, TxId, UpdatedParts, CommitTime}).
 
 quorum_replicate(Replicas, Type, TxId, Partition, WriteSet, TimeStamp, MyName) ->
     lists:foreach(fun(Replica) ->
@@ -197,8 +197,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
     end,
     {noreply, SD0};
 
-handle_cast({repl_commit, TxId, UpdatedParts, CommitTime, SkipLocal}, 
-	    SD0=#state{local_rep_set=LocalRepSet}) ->
+handle_cast({repl_commit, TxId, UpdatedParts, CommitTime}, SD0) ->
     %lager:warning("Updated parts are ~w", [UpdatedParts]),
     AllReplicas = get_all_replicas(UpdatedParts),
     %lager:warning("All replicas are ~w", [AllReplicas]),
@@ -208,31 +207,30 @@ handle_cast({repl_commit, TxId, UpdatedParts, CommitTime, SkipLocal},
         %lager:warning("Node replicas are ~w", [Replicas]),
         lists:foreach(fun(R) ->
             %lager:warning("Sending repl commit to ~w", [R]),
-            case (SkipLocal == true) and (sets:is_element(R, LocalRepSet) == true) of
-                true ->
+            %case (SkipLocal == true) and (sets:is_element(R, LocalRepSet) == true) of
+            %    true ->
                     %lager:warning("Skipping sending commit to ~w", [R]),
-                    ok;
-                false ->
+            %        ok;
+            %    false ->
                     gen_server:cast({global, R}, {repl_commit, TxId, CommitTime, Partitions})
-            end end,  Replicas) end,
+            end,  Replicas) end,
             AllReplicas),
     {noreply, SD0};
 
-handle_cast({repl_abort, TxId, UpdatedParts, SkipLocal}, 
-	    SD0=#state{local_rep_set=LocalRepSet}) ->
+handle_cast({repl_abort, TxId, UpdatedParts},  SD0) ->
     AllReplicas = get_all_replicas(UpdatedParts),
-    %lager:warning("Replicas are ~w", [AllReplicas]),
+    lager:warning("Replicas are ~w", [AllReplicas]),
     lists:foreach(fun({Node, Partitions}) -> 
         [{_, Replicas}] = ets:lookup(meta_info, Node),
         lists:foreach(fun(R) ->
-            %lager:warning("Sending repl abort to ~w", [R]),
-            case (SkipLocal == true) and (sets:is_element(R, LocalRepSet) == true) of
-                true ->
-                    %lager:warning("Skipping sending abort to ~w", [R]),
-                    ok;
-                false ->
+            lager:warning("Sending repl abort to ~w", [R]),
+            %case (SkipLocal == true) and (sets:is_element(R, LocalRepSet) == true) of
+            %    true ->
+            %        lager:warning("Skipping sending abort to ~w", [R]),
+            %        ok;
+            %    false ->
                     gen_server:cast({global, R}, {repl_abort, TxId, Partitions}) 
-            end end, Replicas) end,
+            end, Replicas) end,
             AllReplicas),
     {noreply, SD0};
 

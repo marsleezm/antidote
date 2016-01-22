@@ -820,7 +820,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, _, _, _, []}| PrepDeps]}] ->
-         %lager:error("clean abort: for key ~p, No reader, prepdeps are ~p", [Key, PrepDeps]),
+         lager:warning("clean abort: for key ~p, No reader, prepdeps are ~p", [Key, PrepDeps]),
 			%% 0 for commit time means that the first prepared txs will just be prepared
             {PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, MyNode),
             case PPTxId of
@@ -833,7 +833,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 					clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition)
             end;
         [{Key, [{TxId, _, _, _, PendingReaders}|PrepDeps]}] ->
-         %lager:error("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, PendingReaders, PrepDeps]),
+            lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, PendingReaders, PrepDeps]),
 			{PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, MyNode),
             Value = case ets:lookup(InMemoryStore, Key) of
 		                [{Key, ValueList}] ->
@@ -1043,11 +1043,11 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
 
 %% TODO: allowing all speculative read now! Maybe should not be so aggressive
 specula_read(TxId, Key, PreparedTxs, Sender) ->
-     lager:warning("Check if ready or block for ~w, key ~w", [TxId, Key]),
+     %lager:warning("Check if ready or block for ~w, key ~w", [TxId, Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
-              lager:warning("Nothing prepared!!"),
+              %lager:warning("Nothing prepared!!"),
             ready;
         [{Key, [{PreparedTxId, PrepareTime, LastPPTime, Value, PendingReader}| PendingPrepare]}] ->
              lager:warning("~p Not ready.. ~w waits for ~w with ~w, lastpp time is ~w, others are ~w",[Key, TxId, PreparedTxId, PrepareTime, LastPPTime, PendingReader]),
@@ -1181,7 +1181,7 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
                     %    local_fast ->  lager:warning("Unblocking local_fast txn! ~w", [TxId]);
                     %    _ -> ok
                     %end,
-                 lager:error("~w unblocked, replicating writeset", [TxId]),
+                 lager:warning("~w unblocked, replicating writeset", [TxId]),
                     PendingRecord = {Sender,
                         RepMode, WriteSet, PrepareTime},
                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)

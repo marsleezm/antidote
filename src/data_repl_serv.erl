@@ -62,8 +62,8 @@
         verify_table/2,
         debug_read/3,
         prepare_specula/5,
-        commit_specula/4,
-        abort_specula/3,
+        %commit_specula/4,
+        %abort_specula/3,
         if_prepared/3,
         if_bulk_prepared/3,
         num_specula_read/1,
@@ -135,11 +135,11 @@ relay_read(Name, Key, TxId, Reader) ->
     gen_server:cast({global, Name}, {relay_read, Key, TxId, Reader}).
 
 
-commit_specula(Name, TxId, Partition, CommitTime) ->
-    gen_server:cast({global, Name}, {commit_specula, TxId, Partition, CommitTime}).
+%commit_specula(Name, TxId, Partition, CommitTime) ->
+%    gen_server:cast({global, Name}, {commit_specula, TxId, Partition, CommitTime}).
 
-abort_specula(Name, TxId, Partition) ->
-    gen_server:cast({global, Name}, {abort_specula, TxId, Partition}).
+%abort_specula(Name, TxId, Partition) ->
+%    gen_server:cast({global, Name}, {abort_specula, TxId, Partition}).
 
 %%%===================================================================
 %%% Internal
@@ -237,7 +237,6 @@ handle_call({read, Key, TxId, {Part, _}}, Sender,
 
 handle_call({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, Sender, 
 	    SD0=#state{pending_log=PendingLog, ts_dict=TsDict}) ->
-    lager:warning("Specula prepare for [~w, ~w]", [TxId, Partition]),
     gen_server:reply(Sender, dict:fetch(Partition, TsDict)),
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
                       case ets:lookup(PendingLog, Key) of
@@ -250,6 +249,7 @@ handle_call({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, Sender,
                               [Key|KS]
                       end end, [], WriteSet),
     ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
+    lager:warning("Specula prepare for [~w, ~w, KeySet is ~p]", [TxId, Partition, KeySet]),
     {noreply, SD0};
 
 handle_call({if_prepared, TxId, Keys}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
@@ -306,29 +306,29 @@ handle_cast({relay_read, Key, TxId, Reader},
 
 %% Where shall I put the speculative version?
 %% In ets, faster for read.
-handle_cast({abort_specula, TxId, Partition}, 
-	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict}) ->
-    lager:info("Abort specula for ~w, ~w", [TxId, Partition]),
+%handle_cast({abort_specula, TxId, Partition}, 
+%	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict}) ->
+%    lager:info("Abort specula for ~w, ~w", [TxId, Partition]),
     %TsDict1 = lists:foldl(fun(Partition, D) ->
-                [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
-                ets:delete(PendingLog, {TxId, Partition}),
-                MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
-                TsDict1= dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, TsDict),
+%                [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
+%                ets:delete(PendingLog, {TxId, Partition}),
+%                MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
+%                TsDict1= dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, TsDict),
      %     end, TsDict, Partitions),
-    specula_utilities:deal_abort_deps(TxId),
-    {noreply, SD0#state{ts_dict=TsDict1}};
+%    specula_utilities:deal_abort_deps(TxId),
+%    {noreply, SD0#state{ts_dict=TsDict1}};
     
-handle_cast({commit_specula, TxId, Partition, CommitTime}, 
-	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict}) ->
-    lager:warning("Committing specula for ~w ~w", [TxId, Partition]),
+%handle_cast({commit_specula, TxId, Partition, CommitTime}, 
+%	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict}) ->
+%    lager:warning("Committing specula for ~w ~w", [TxId, Partition]),
     %TsDict1 = lists:foldl(fun(Partition, D) ->
-              [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
-              ets:delete(PendingLog, {TxId, Partition}),
-              MaxTs = update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0),
-    TsDict1 = dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, TsDict),
+%              [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
+%              ets:delete(PendingLog, {TxId, Partition}),
+%              MaxTs = update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0),
+%    TsDict1 = dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, TsDict),
     %      end, TsDict, Partitions),
-    specula_utilities:deal_commit_deps(TxId, CommitTime),
-    {noreply, SD0#state{ts_dict=TsDict1}};
+%    specula_utilities:deal_commit_deps(TxId, CommitTime),
+%    {noreply, SD0#state{ts_dict=TsDict1}};
 
 handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, current_set=CurrentSet, backup_set=BackupSet}) ->
@@ -337,7 +337,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
             %lager:info("Got repl prepare for ~w", [TxId]),
             case (sets:is_element(TxId, CurrentSet) or sets:is_element(TxId, BackupSet)) of
                 true ->
-                    %lager:info("~w belongs to set!", [TxId]),
+                    lager:info("~w belongs to set!", [TxId]),
                     {noreply, SD0};
                 false ->
                     %lager:info("Set is ~w ~w", [sets:to_list(CurrentSet), sets:to_list(BackupSet)]),
@@ -405,15 +405,16 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_set=CurrentSet}) ->
-    lager:info("repl abort for ~w ~w", [TxId, Partitions]),
+    lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     {CurrentSet1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
+                        lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
                         ets:delete(PendingLog, {TxId, Partition}),
                         MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
                         {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)};
                     [] -> 
-                        %lager:info("Repl abort arrived early! ~w", [TxId]),
+                        lager:info("Repl abort arrived early! ~w", [TxId]),
                         %lager:info("Set after adding element is ~w", [sets:to_list(sets:add_element(TxId, S))]),
                         {sets:add_element(TxId, S), D}
                 end
@@ -519,7 +520,7 @@ clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore, TS) ->
 clean_abort_prepared(PendingLog, [Key | Rest], TxId, ReplicatedLog, TS) ->
     [{Key, List}] = ets:lookup(PendingLog, Key),
     {{TxId, _, _, Readers}, RemainList} = delete_item(List, TxId, []),
-    %lager:error("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, PendingReaders, PrepDeps]),
+    lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, Readers, RemainList]),
     case Readers of
         [] ->
             true = ets:insert(PendingLog, {Key, RemainList}),
@@ -631,7 +632,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
             %lager:warning("~p Not ready.. ~w waits for ~w with ~w, lastpp time is ~w, others are ~w",[Key, TxId, PreparedTxId, PrepareTime, LastPPTime, PendingReader]),
             case read_or_block(VersionList, [], SnapshotTime, Sender) of
                 ready -> ready;
-                {specula, PTxId, Value} ->  add_read_dep(TxId, PTxId, Key), {specula, Value};
+                {specula, PTxId, Value} -> lager:warning("Specula reading ~p, from ~w to ~w", [Key, TxId, PTxId]), add_read_dep(TxId, PTxId, Key), {specula, Value};
                 {not_ready, NewList, PTxId} ->
                     lager:warning("~w read is blocked by ~w for ~p", [TxId, PTxId, Key]),
                     ets:insert(PreparedTxs, {Key, NewList}), not_ready
