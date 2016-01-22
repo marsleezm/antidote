@@ -222,7 +222,7 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
             {PrepType, Sender, Timestamp, RepMode} = R,
             case PrepType of
                 prepared ->
-                    lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
+                    %lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     case RepMode of
                         false -> ok;
