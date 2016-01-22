@@ -618,6 +618,8 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             ready;
+        [{Key, []}] ->
+            ready;
         [{Key, [{PreparedTxId, PrepareTime, Value, PendingReader}|Others]}] ->
             case PrepareTime =< SnapshotTime of
                 true ->
