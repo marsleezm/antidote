@@ -27,6 +27,7 @@
 
 
 -export([get_preflist_from_key/1,
+         build_rep_dict/1,
          get_my_next/2,
          build_rev_replicas/0,
          get_local_vnode_by_id/1,
@@ -213,6 +214,37 @@ build_rev_replicas() ->
             lager:info("Inserting ~w to repl table", [ReplList]),
             ets:insert(meta_info, ReplList)
         end, AllNodes).
+
+build_rep_dict(false)->
+    dict:new();
+build_rep_dict(true) ->
+    Lists = antidote_config:get(to_repl),
+    AllNodes = [Node  || {Node, _} <- Lists],
+    ReverseList = lists:foldl(fun(RepedNode, L) ->
+            RepList = {RepedNode, [RepingNode
+                            ||  {RepingNode, ToRepl} <- Lists, if_repl_myself(ToRepl, RepedNode)]},
+            [RepList|L]
+        end, [], AllNodes),
+    MyNode = node(),
+    [RepNodes] = [Reps || {Node, Reps} <- Lists, Node == node()],
+    RepDict = lists:foldl(fun(N, D) -> dict:store({rep, N},
+                    list_to_atom(atom_to_list(node())++"repl"++atom_to_list(N)), D) end, dict:new(), RepNodes),
+    Lists = antidote_config:get(to_repl),
+    RepDict1 = lists:foldl(fun(RepedNode, R) ->
+                     {RepedNode, NodeRepList} = lists:keyfind(RepedNode, 1, ReverseList),
+                     RepList = lists:foldl(fun(RepingNode, L) ->
+                                        case RepingNode of
+                                            MyNode ->
+                                                [{rep, list_to_atom(atom_to_list(RepingNode)++"repl"++atom_to_list(RepedNode))}|L];
+                                                %[list_to_atom(atom_to_list(RepingNode)++"repl"++atom_to_list(RepedNode))|L];
+                                            _ ->
+                                                [list_to_atom(atom_to_list(RepingNode)++"repl"++atom_to_list(RepedNode))|L]
+                                        end end, [], NodeRepList),
+                    dict:store(RepedNode, RepList, R)
+                 end,  RepDict, AllNodes),
+    AllButMe = AllNodes -- [MyNode],
+    [NonRepNode] = AllButMe -- RepNodes,
+    dict:append(NonRepNode, cache, RepDict1).
 
 if_repl_myself([], _) ->
     false;

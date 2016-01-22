@@ -79,8 +79,8 @@
         delay :: non_neg_integer(),
         num_specula_read=0 :: non_neg_integer(),
         num_read=0 :: non_neg_integer(),
-        current_set :: set(),
-        backup_set :: set(),
+        current_dict :: dict(),
+        backup_dict :: dict(),
         ts_dict :: dict(),
         do_specula :: boolean(),
         name :: atom(),
@@ -155,8 +155,8 @@ init([Name, Parts]) ->
                 dict:store(Part, 0, Acc) end, dict:new(), Parts),
     lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     {ok, #state{name=Name,
-                pending_log = PendingLog, current_set = sets:new(), ts_dict=TsDict, do_specula=DoSpecula,
-                backup_set = sets:new(), replicated_log = ReplicatedLog}}.
+                pending_log = PendingLog, current_dict = dict:new(), ts_dict=TsDict, do_specula=DoSpecula,
+                backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
 handle_call({get_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
     {reply, ReplicatedLog, SD0};
@@ -331,45 +331,39 @@ handle_cast({relay_read, Key, TxId, Reader},
 %    {noreply, SD0#state{ts_dict=TsDict1}};
 
 handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender}, 
-	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, current_set=CurrentSet, backup_set=BackupSet}) ->
+	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, current_dict=CurrentDict, backup_dict=BackupDict}) ->
     case Type of
         prepared ->
-            %lager:info("Got repl prepare for ~w", [TxId]),
-            case (sets:is_element(TxId, CurrentSet) or sets:is_element(TxId, BackupSet)) of
-                true ->
-                    lager:info("~w belongs to set!", [TxId]),
+            lager:info("Got repl prepare for ~w, ~w", [TxId, Partition]),
+            case dict:find(TxId, CurrentDict) of 
+                {ok, aborted} ->
                     {noreply, SD0};
-                false ->
-                    %lager:info("Set is ~w ~w", [sets:to_list(CurrentSet), sets:to_list(BackupSet)]),
-                    %lager:info("~w doesn't belongs to set!", [TxId]),
-                    KeySet = lists:foldl(fun({Key, Value}, KS) ->
-                    case ets:lookup(PendingLog, Key) of
-                        [] ->
-                            true = ets:insert(PendingLog, {Key, [{TxId, TimeStamp, Value, []}]}),
-                            [Key|KS];
-                        [{Key, RemainList}] ->
-                            NewList = insert_version(RemainList, TxId, TimeStamp, Value),
-                            true = ets:insert(PendingLog, {Key, NewList}),
-                            [Key|KS]
-                    end end, [], WriteSet),
-                    ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
-                        %[{{TxId, Partition}, CommitTime}] ->
-                        %    %lager:warning("Prep ~w ~w arrived late! Committed", [TxId, Partition]),
-                        %    ets:delete(PendingLog, {TxId, Partition}),
-                        %    AppendFun = fun({Key, Value}) ->
-                        %                    %lager:info("DataRepl Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
-                        %                    case ets:lookup(ReplicatedLog, Key) of
-                        %                        [] ->
-                        %                            true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
-                        %                        [{Key, ValueList}] ->
-                        %                            {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-                        %                            true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}|RemainList]})
-                        %                    end end,
-                        %            lists:foreach(AppendFun, WriteSet)
-                            %lager:info("Got repl prepare for {~w, ~w}, replying to ~w", [TxId, Partition, Sender]),
-                    %end,
-                    gen_server:cast({global, Sender}, {ack, Partition, TxId, dict:fetch(Partition, TsDict)}), 
-                    {noreply, SD0}
+                {ok, committed} ->
+                    add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
+                    {noreply, SD0};
+                error ->
+                    case dict:find(TxId, BackupDict) of 
+                        {ok, aborted} ->
+                            {noreply, SD0};
+                        {ok, committed} ->
+                            add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
+                            {noreply, SD0};
+                        error ->
+                            KeySet = lists:foldl(fun({Key, Value}, KS) ->
+                            case ets:lookup(PendingLog, Key) of
+                                [] ->
+                                    true = ets:insert(PendingLog, {Key, [{TxId, TimeStamp, Value, []}]}),
+                                    [Key|KS];
+                                [{Key, RemainList}] ->
+                                    NewList = insert_version(RemainList, TxId, TimeStamp, Value),
+                                    true = ets:insert(PendingLog, {Key, NewList}),
+                                    [Key|KS]
+                            end end, [], WriteSet),
+                            lager:info("Got repl prepare for ~w, ~p", [TxId, KeySet]),
+                            ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
+                            gen_server:cast({global, Sender}, {ack, Partition, TxId, dict:fetch(Partition, TsDict)}), 
+                            {noreply, SD0}
+                    end
             end;
             %end;
         single_commit ->
@@ -387,26 +381,36 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
             {noreply, SD0}
     end;
 
+
 handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
-	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict, do_specula=DoSpecula}) ->
+	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict, do_specula=DoSpecula,  current_dict=CurrentDict}) ->
     lager:info("repl commit for ~w ~w", [TxId, Partitions]),
-    TsDict1 = lists:foldl(fun(Partition, D) ->
-            [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
-            ets:delete(PendingLog, {TxId, Partition}),
-            MaxTs = update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0),
-            dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)
-        end, TsDict, Partitions),
+    {CurrentD1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
+            case ets:lookup(PendingLog, {TxId, Partition}) of
+                [{{TxId, Partition}, KeySet}] ->
+                    ets:delete(PendingLog, {TxId, Partition}),
+                    MaxTs = update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0),
+                    {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)};
+                [] ->
+                  lager:info("Repl abort arrived early! ~w", [TxId]),
+                  %lager:info("Set after adding element is ~w", [sets:to_list(sets:add_element(TxId, S))]),
+                  {dict:store(TxId, committed, S), D}
+        end end, {CurrentDict, TsDict}, Partitions),
     case DoSpecula of
         true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
         _ -> ok
     end,
-    %% No need to eagerly update.. Because the master will have higher ts
-    {noreply, SD0#state{ts_dict=TsDict1}};
+    case dict:size(CurrentD1) > ?SET_SIZE of
+          true ->
+            {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentD1}};
+          false ->
+            {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
+      end;
 
 handle_cast({repl_abort, TxId, Partitions}, 
-	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_set=CurrentSet}) ->
+	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_dict=CurrentDict}) ->
     lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
-    {CurrentSet1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
+    {CurrentDict1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
                         lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
@@ -416,19 +420,19 @@ handle_cast({repl_abort, TxId, Partitions},
                     [] -> 
                         lager:info("Repl abort arrived early! ~w", [TxId]),
                         %lager:info("Set after adding element is ~w", [sets:to_list(sets:add_element(TxId, S))]),
-                        {sets:add_element(TxId, S), D}
+                        {dict:store(TxId, aborted, S), D}
                 end
-        end, {CurrentSet, TsDict}, Partitions),
+        end, {CurrentDict, TsDict}, Partitions),
     case DoSpecula of
         true -> specula_utilities:deal_abort_deps(TxId);
         _ -> ok
     end,
     %lager:info("Set is ~w", [sets:to_list(CurrentSet)]),
-    case sets:size(CurrentSet1) > ?SET_SIZE of
+    case dict:size(CurrentDict1) > ?SET_SIZE of
         true ->
-            {noreply, SD0#state{ts_dict=TsDict1, current_set=sets:new(), backup_set=CurrentSet1}};
+            {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentDict1}};
         false ->
-            {noreply, SD0#state{ts_dict=TsDict1, current_set=CurrentSet1}}
+            {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentDict1}}
     end;
 
 handle_cast(_Info, StateData) ->
@@ -660,3 +664,14 @@ add_read_dep(ReaderTx, WriterTx, _Key) ->
 
 prepared_by_local(TxId) ->
     node(TxId#tx_id.server_pid) == node().
+
+add_to_commit_tab(WriteSet, TxCommitTime, Tab) ->
+    lists:foreach(fun({Key, Value}) ->
+            case ets:lookup(Tab, Key) of
+                [] ->
+                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}]});
+                [{Key, ValueList}] ->
+                    {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
+                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}|RemainList]})
+            end
+    end, WriteSet).

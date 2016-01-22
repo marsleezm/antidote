@@ -44,8 +44,8 @@
         terminate/2]).
 
 -export([
-        repl_commit/5,
-        repl_abort/4,
+        repl_commit/6,
+        repl_abort/5,
         repl_commit/4,
         repl_abort/3,
         abort/2,
@@ -83,13 +83,13 @@ if_applied(Param, Result) ->
 repl_commit(UpdatedParts, TxId, CommitTime, true) ->
     gen_server:cast(test_fsm, {repl_commit, TxId, UpdatedParts, CommitTime}).
 
-repl_commit(UpdatedParts, TxId, CommitTime, true, _) ->
+repl_commit(UpdatedParts, TxId, CommitTime, true, _, _) ->
     gen_server:cast(test_fsm, {repl_commit, TxId, UpdatedParts, CommitTime}).
 
 repl_abort(UpdatedParts, TxId, true) ->
     gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
 
-repl_abort(UpdatedParts, TxId, true, _) ->
+repl_abort(UpdatedParts, TxId, true, _, _) ->
     gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
 
 read_valid(_, RTxId, WTxId) ->

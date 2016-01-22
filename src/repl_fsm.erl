@@ -25,6 +25,21 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-define(CLOCKSI_VNODE, mock_partition_fsm).
+-define(REPL_FSM, mock_partition_fsm).
+-define(SPECULA_TX_CERT_SERVER, mock_partition_fsm).
+-define(CACHE_SERV, mock_partition_fsm).
+-define(DATA_REPL_SERV, mock_partition_fsm).
+-define(READ_VALID(SEND, RTXID, WTXID), mock_partition_fsm:read_valid(SEND, RTXID, WTXID)).
+-define(READ_INVALID(SEND, CT, TXID), mock_partition_fsm:read_invalid(SEND, CT, TXID)).
+-else.
+-define(CLOCKSI_VNODE, clocksi_vnode).
+-define(REPL_FSM, repl_fsm).
+-define(SPECULA_TX_CERT_SERVER, specula_tx_cert_server).
+-define(CACHE_SERV, cache_serv).
+-define(DATA_REPL_SERV, data_repl_serv).
+-define(READ_VALID(SEND, RTXID, WTXID), gen_server:cast(SEND, {read_valid, RTXID, WTXID})).
+-define(READ_INVALID(SEND, CT, TXID), gen_server:cast(SEND, {read_invalid, CT, TXID})).
 -endif.
 
 %% API
@@ -43,8 +58,8 @@
 %% States
 -export([repl_prepare/4,
 	    check_table/0,
-         repl_abort/3,
-         repl_commit/4,
+         repl_abort/5,
+         repl_commit/6,
          %repl_abort/4,
          %repl_commit/5,
          quorum_replicate/7,
@@ -85,22 +100,22 @@ check_table() ->
 %repl_abort(UpdatedParts, TxId, DoRepl) ->
 %    repl_abort(UpdatedParts, TxId, DoRepl, false). 
 
-repl_abort(_, _, false) ->
-    ok;
-repl_abort([], _, true) ->
-    ok;
-repl_abort(UpdatedParts, TxId, true) ->
-    gen_server:cast({global, get_repl_name()}, {repl_abort, TxId, UpdatedParts}).
+%repl_abort(_, _, false) ->
+%    ok;
+%repl_abort([], _, true) ->
+%    ok;
+%repl_abort(UpdatedParts, TxId, true) ->
+%    gen_server:cast({global, get_repl_name()}, {repl_abort, TxId, UpdatedParts}).
 
 %repl_commit(UpdatedParts, TxId, CommitTime, DoRepl) ->
 %    repl_commit(UpdatedParts, TxId, CommitTime, DoRepl). 
 
-repl_commit(_, _, _, false) ->
-    ok;
-repl_commit([], _, _, true) ->
-    ok;
-repl_commit(UpdatedParts, TxId, CommitTime, true) ->
-    gen_server:cast({global, get_repl_name()}, {repl_commit, TxId, UpdatedParts, CommitTime}).
+%repl_commit(_, _, _, false) ->
+%    ok;
+%repl_commit([], _, _, true) ->
+%    ok;
+%repl_commit(UpdatedParts, TxId, CommitTime, true) ->
+%    gen_server:cast({global, get_repl_name()}, {repl_commit, TxId, UpdatedParts, CommitTime}).
 
 quorum_replicate(Replicas, Type, TxId, Partition, WriteSet, TimeStamp, MyName) ->
     lists:foreach(fun(Replica) ->
@@ -197,43 +212,6 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
     end,
     {noreply, SD0};
 
-handle_cast({repl_commit, TxId, UpdatedParts, CommitTime}, SD0) ->
-    %lager:warning("Updated parts are ~w", [UpdatedParts]),
-    AllReplicas = get_all_replicas(UpdatedParts),
-    %lager:warning("All replicas are ~w", [AllReplicas]),
-    lists:foreach(fun({Node, Partitions}) -> 
-        %lager:warning("Node is ~w, partitions are ~w", [Node, Partitions]),
-        [{_, Replicas}] = ets:lookup(meta_info, Node),
-        %lager:warning("Node replicas are ~w", [Replicas]),
-        lists:foreach(fun(R) ->
-            %lager:warning("Sending repl commit to ~w", [R]),
-            %case (SkipLocal == true) and (sets:is_element(R, LocalRepSet) == true) of
-            %    true ->
-                    %lager:warning("Skipping sending commit to ~w", [R]),
-            %        ok;
-            %    false ->
-                    gen_server:cast({global, R}, {repl_commit, TxId, CommitTime, Partitions})
-            end,  Replicas) end,
-            AllReplicas),
-    {noreply, SD0};
-
-handle_cast({repl_abort, TxId, UpdatedParts},  SD0) ->
-    AllReplicas = get_all_replicas(UpdatedParts),
-    lager:warning("Replicas are ~w", [AllReplicas]),
-    lists:foreach(fun({Node, Partitions}) -> 
-        [{_, Replicas}] = ets:lookup(meta_info, Node),
-        lists:foreach(fun(R) ->
-            lager:warning("Sending repl abort to ~w", [R]),
-            %case (SkipLocal == true) and (sets:is_element(R, LocalRepSet) == true) of
-            %    true ->
-            %        lager:warning("Skipping sending abort to ~w", [R]),
-            %        ok;
-            %    false ->
-                    gen_server:cast({global, R}, {repl_abort, TxId, Partitions}) 
-            end, Replicas) end,
-            AllReplicas),
-    {noreply, SD0};
-
 handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLog}) ->
     case ets:lookup(PendingLog, {TxId, Partition}) of
         [{{TxId, Partition}, {R, 1}}] ->
@@ -244,7 +222,7 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
             {PrepType, Sender, Timestamp, RepMode} = R,
             case PrepType of
                 prepared ->
-                    %lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
+                    lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     case RepMode of
                         false -> ok;
@@ -291,12 +269,13 @@ send_after(Delay, To, Msg) ->
 get_repl_name() ->
     list_to_atom("repl"++atom_to_list(node())).
 
-get_all_replicas(Parts) ->
+build_node_parts(Parts) ->
     D = lists:foldl(fun({Partition, Node}, Acc) ->
                       dict:append(Node, Partition, Acc)
                    end,
                     dict:new(), Parts),
     dict:to_list(D).
+
 
 generate_except_replicas(Replicas) ->
     lists:foldl(fun(Rep, D) ->
@@ -311,4 +290,44 @@ get_name(ReplName, N) ->
          _ -> get_name(ReplName, N+1)
     end.
     
+%% No replication
+repl_commit(_, _, _, false, _, _) ->
+    ok;
+repl_commit([], _, _, true, _, _) ->
+    ok;
+repl_commit(UpdatedParts, TxId, CommitTime, true, ToCache, RepDict) ->
+    NodeParts = build_node_parts(UpdatedParts),
+    lists:foreach(fun({Node, Partitions}) ->
+        Replicas = dict:fetch(Node, RepDict),
+        lists:foreach(fun(R) ->
+            case R of
+                cache -> 
+                    case ToCache of false -> ok;
+                                      true -> ?CACHE_SERV:commit_specula(TxId, Partitions, CommitTime)
+                    end; 
+                {rep, S} ->
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions});
+                S ->
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions})
+            end end,  Replicas) end,
+            NodeParts).
 
+repl_abort(_, _, false, _, _) ->
+    ok;
+repl_abort([], _, true, _, _) ->
+    ok;
+repl_abort(UpdatedParts, TxId, true, ToCache, RepDict) ->
+    NodeParts = build_node_parts(UpdatedParts),
+    lists:foreach(fun({Node, Partitions}) ->
+        Replicas = dict:fetch(Node, RepDict),
+        lists:foreach(fun(R) ->
+            case R of
+                cache -> case ToCache of false -> ok;
+                                        true -> ?CACHE_SERV:abort_specula(TxId, Partitions) 
+                         end;
+                {rep, S} ->
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions});
+                S ->
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions})
+            end end,  Replicas) end,
+            NodeParts).
