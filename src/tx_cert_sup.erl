@@ -27,7 +27,7 @@
 -export([start_link/0]).
 
 -export([init/1, certify/4, get_stat/0, get_int_data/3, start_tx/1, single_read/3, 
-            start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load_tpcc/1]).
+            start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2]).
 
 -define(READ_TIMEOUT, 10000).
 
@@ -47,7 +47,7 @@ append_values(Name, Node, KeyValues, CommitTime) ->
                     {append_values, Node, KeyValues, CommitTime}, 15000)
     end.
 
-load_tpcc(WPerDc) ->
+load(Type, Param) ->
     {PartList, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
     lager:info("Got load request, part list is ~w", [PartList]),
     AllDcs = [N || {N, _} <- PartList],
@@ -55,7 +55,7 @@ load_tpcc(WPerDc) ->
     lists:foreach(fun(Node) ->
                     lager:info("Asking ~p to load", [Node]),
                     CertServer = list_to_atom(atom_to_list(Node) ++ "-cert-" ++ integer_to_list(1)),
-                    gen_server:cast({global, CertServer}, {load_tpcc, self(), WPerDc})
+                    gen_server:cast({global, CertServer}, {load, self(), Type, Param})
                  end, AllDcs),
     lager:info("Waiting for results..."),
     lists:foreach(fun(_) ->

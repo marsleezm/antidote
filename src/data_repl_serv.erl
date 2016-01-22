@@ -249,7 +249,7 @@ handle_call({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, Sender,
                               [Key|KS]
                       end end, [], WriteSet),
     ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
-    %lager:warning("Specula prepare for [~w, ~w, KeySet is ~p]", [TxId, Partition, KeySet]),
+    lager:warning("Specula prepare for [~w, ~w, KeySet is ~p]", [TxId, Partition, KeySet]),
     {noreply, SD0};
 
 handle_call({if_prepared, TxId, Keys}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
@@ -411,7 +411,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_dict=CurrentDict}) ->
-    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
+    lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     {CurrentDict1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
@@ -420,7 +420,7 @@ handle_cast({repl_abort, TxId, Partitions},
                         MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
                         {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)};
                     [] -> 
-                        %lager:info("Repl abort arrived early! ~w", [TxId]),
+                        lager:warning("Repl abort arrived early! ~w", [TxId]),
                         %lager:info("Set after adding element is ~w", [sets:to_list(sets:add_element(TxId, S))]),
                         {dict:store({TxId, Partition}, aborted, S), D}
                 end
@@ -526,7 +526,7 @@ clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore, TS) ->
 clean_abort_prepared(PendingLog, [Key | Rest], TxId, ReplicatedLog, TS) ->
     [{Key, List}] = ets:lookup(PendingLog, Key),
     {{TxId, _, _, Readers}, RemainList} = delete_item(List, TxId, []),
-    %lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, Readers, RemainList]),
+    lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, Readers, RemainList]),
     case Readers of
         [] ->
             true = ets:insert(PendingLog, {Key, RemainList}),
@@ -640,10 +640,10 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
             %lager:warning("~p Not ready.. ~w waits for ~w with ~w, lastpp time is ~w, others are ~w",[Key, TxId, PreparedTxId, PrepareTime, LastPPTime, PendingReader]),
             case read_or_block(VersionList, [], SnapshotTime, Sender) of
                 ready -> ready;
-                {specula, PTxId, Value} -> %lager:warning("Specula reading ~p, from ~w to ~w", [Key, TxId, PTxId]), 
+                {specula, PTxId, Value} -> lager:warning("Specula reading ~p, from ~w to ~w", [Key, TxId, PTxId]), 
                     add_read_dep(TxId, PTxId, Key), {specula, Value};
-                {not_ready, NewList, _PTxId} ->
-                    %lager:warning("~w read is blocked by ~w for ~p", [TxId, PTxId, Key]),
+                {not_ready, NewList, PTxId} ->
+                    lager:warning("~w read is blocked by ~w for ~p", [TxId, PTxId, Key]),
                     ets:insert(PreparedTxs, {Key, NewList}), not_ready
             end
     end.

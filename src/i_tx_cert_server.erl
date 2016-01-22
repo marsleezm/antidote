@@ -124,8 +124,10 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{la
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
-handle_cast({load_tpcc, Sup, WPerDc}, SD0) ->
-    tpcc_load:load(WPerDc),
+handle_cast({load, Sup, Type, Param}, SD0) ->
+    case Type of tpcc -> tpcc_load:load(Param);
+                 micro -> micro_load:load(Param)
+    end,
     Sup ! done,
     {noreply, SD0};
 
