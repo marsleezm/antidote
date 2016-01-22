@@ -243,8 +243,10 @@ build_rep_dict(true) ->
                     dict:store(RepedNode, RepList, R)
                  end,  RepDict, AllNodes),
     AllButMe = AllNodes -- [MyNode],
-    [NonRepNode] = AllButMe -- RepNodes,
-    dict:append(NonRepNode, cache, RepDict1).
+    CacheNode = AllButMe -- RepNodes,
+    case CacheNode of [] -> RepDict;
+                      [NonRepNode] ->  dict:append(NonRepNode, cache, RepDict1)
+    end.               
 
 if_repl_myself([], _) ->
     false;
