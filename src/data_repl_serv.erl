@@ -335,14 +335,14 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
     case Type of
         prepared ->
             lager:info("Got repl prepare for ~w, ~w", [TxId, Partition]),
-            case dict:find(TxId, CurrentDict) of 
+            case dict:find({TxId, Partition}, CurrentDict) of 
                 {ok, aborted} ->
                     {noreply, SD0};
                 {ok, committed} ->
                     add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
                     {noreply, SD0};
                 error ->
-                    case dict:find(TxId, BackupDict) of 
+                    case dict:find({TxId, Partition}, BackupDict) of 
                         {ok, aborted} ->
                             {noreply, SD0};
                         {ok, committed} ->
@@ -394,7 +394,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
                 [] ->
                   lager:info("Repl abort arrived early! ~w", [TxId]),
                   %lager:info("Set after adding element is ~w", [sets:to_list(sets:add_element(TxId, S))]),
-                  {dict:store(TxId, committed, S), D}
+                  {dict:store({TxId, Partition}, committed, S), D}
         end end, {CurrentDict, TsDict}, Partitions),
     case DoSpecula of
         true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
@@ -420,7 +420,7 @@ handle_cast({repl_abort, TxId, Partitions},
                     [] -> 
                         lager:info("Repl abort arrived early! ~w", [TxId]),
                         %lager:info("Set after adding element is ~w", [sets:to_list(sets:add_element(TxId, S))]),
-                        {dict:store(TxId, aborted, S), D}
+                        {dict:store({TxId, Partition}, aborted, S), D}
                 end
         end, {CurrentDict, TsDict}, Partitions),
     case DoSpecula of
