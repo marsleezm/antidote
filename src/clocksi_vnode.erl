@@ -264,7 +264,7 @@ init([Partition]) ->
                 num_cert_fail = 0,
                 num_committed = 0}}.
 
-handle_command({set_debug, Debug},_Sender,SD0=#state{partition=Partition}) ->
+handle_command({set_debug, Debug},_Sender,SD0=#state{partition=_Partition}) ->
    %lager:info("~w: Setting debug to be ~w", [Partition, Debug]),
     {reply, ok, SD0#state{debug=Debug}};
 
@@ -1110,7 +1110,7 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, M
             %% Check the preparedtxs table to delete all its inserted keys and reply abort to sender
             %% But the second step can be done by the coordinator..
             case dict:find(TxId, DepDict) of
-                {ok, {_, _, Sender, Type}} ->
+                {ok, {_, _, Sender, _Type}} ->
                  %lager:error("Aborting ~w", [TxId]),
                     %NewDepDict = dict:erase(TxId, DepDict),
                     %lager:warning("Prepare not valid anymore! For ~w, sending '~w' abort to ~w", [TxId, Type, Sender]),
