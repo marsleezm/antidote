@@ -35,7 +35,7 @@ start_fsm(Partition) ->
 
 generate_data_repl_serv() ->
     ToReplicate = find_to_repl(),
-    {[{_, AllNodeParts}], _} = hash_fun:get_hash_fun(),
+    AllNodeParts = hash_fun:get_partitions(),
     AllParts = [P ||{P, _}  <- AllNodeParts],
     NameList = lists:foldl(fun(Node, Acc) ->
             ReplName = list_to_atom(atom_to_list(node())++"repl"++atom_to_list(Node)),

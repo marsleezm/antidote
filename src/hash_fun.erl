@@ -29,6 +29,7 @@
 -export([get_preflist_from_key/1,
          build_rep_dict/1,
          get_my_next/2,
+         get_partitions/0,
          build_rev_replicas/0,
          get_local_vnode_by_id/1,
          get_vnode_by_id/2,
