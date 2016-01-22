@@ -244,7 +244,7 @@ build_rep_dict(true) ->
                  end,  RepDict, AllNodes),
     AllButMe = AllNodes -- [MyNode],
     CacheNode = AllButMe -- RepNodes,
-    case CacheNode of [] -> RepDict;
+    case CacheNode of [] -> RepDict1;
                       [NonRepNode] ->  dict:append(NonRepNode, cache, RepDict1)
     end.               
 
