@@ -207,7 +207,6 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
             num_specula_read=NumSpeculaRead}) ->
     %RemoteKeys = lists:map(fun({Node, Ups}) -> {Node, [Key || {Key, _} <- Ups]} end, RemoteUpdates),
     %% If there was a legacy ongoing transaction.
-     lager:warning("Got req: txid ~w", [TxId]),
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
     %OldReadDeps = dict:find(TxId, DepDict),
@@ -236,7 +235,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
                             NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
                                                                 _ -> NumSpeculaRead+1
                                               end, 
-                             lager:warning("Trying to prepare ~w", [TxId]),
+                             %lager:warning("Trying to prepare ~w", [TxId]),
                             case length(PendingList) >= SpeculaLength of
                                 true -> %% Wait instead of speculate.
                                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
@@ -259,7 +258,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
                     DepDict1 = dict:update(TxId, 
                             fun({_, B, _}) ->
                              {length(LocalUpdates), ReadDepTxs--B, LastCommitTs+1} end, DepDict),
-                     lager:warning("Prepare ~w", [TxId]),
+                    % lager:warning("Prepare ~w", [TxId]),
                     case RemoteUpdates of
                         [] ->
                             ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local_only);
@@ -710,10 +709,10 @@ handle_cast({aborted, PendingTxId, FromNode},
 	    SD0=#state{pending_list=PendingList, rep_dict=RepDict, tx_id=CurrentTxId, sender=Sender,
             do_repl=DoRepl, dep_dict=DepDict, pending_txs=PendingTxs, stage=Stage, cascade_aborted=CascadeAborted,
             cert_aborted=CertAborted, local_updates=LocalParts, remote_updates=RemoteUpdates}) ->
-    lager:warning("Aborting ~w remote, not current transaction", [PendingTxId]),
+    %lager:warning("Aborting ~w remote, not current transaction", [PendingTxId]),
     case start_from_list(PendingTxId, PendingList) of
         [] ->
-          lager:warning("Not aborting anything"),
+          %lager:warning("Not aborting anything"),
             {noreply, SD0};
         L ->
             lager:warning("Abort remote again, Pending list is ~w, PendingTxId is ~w, List is ~w", [PendingList, PendingTxId, L]),
@@ -979,7 +978,6 @@ try_to_commit(LastCommitTime, [], _RepDict, DepDict, _DoRepl, _PendingTxs, NumAb
     {[], LastCommitTime, DepDict, NumAborted, Committed};
 try_to_commit(LastCommitTime, [H|Rest]=PendingList, RepDict, DepDict, 
                         DoRepl, PendingTxs, NumAborted, Committed) ->
-    lager:warning("Checking if can commit tx ~w", [H]),
     Result = case dict:find(H, DepDict) of
                 {ok, {0, [], PendingMaxPT}} ->
                     {true, max(PendingMaxPT, LastCommitTime+1)};
@@ -989,12 +987,12 @@ try_to_commit(LastCommitTime, [H|Rest]=PendingList, RepDict, DepDict,
      lager:warning("If can commit decision for ~w is ~w", [H, Result]),
     case Result of
         false ->
-             lager:warning("Returning ~w ~w ~w ~w ~w", [PendingList, LastCommitTime, DepDict, NumAborted, Committed]),
+             %lager:warning("Returning ~w ~w ~w ~w ~w", [PendingList, LastCommitTime, DepDict, NumAborted, Committed]),
             {PendingList, LastCommitTime, DepDict, NumAborted, Committed};
         {true, CommitTime} ->
             {DepDict1, ToAbortTxs} = commit_specula_tx(H, CommitTime, DoRepl,
                dict:erase(H, DepDict), RepDict, PendingTxs),
-             lager:warning("Before commit specula tx, ToAbortTs are ~w, dict is ~w", [ToAbortTxs, DepDict1]),
+             %lager:warning("Before commit specula tx, ToAbortTs are ~w, dict is ~w", [ToAbortTxs, DepDict1]),
             case ToAbortTxs of
                 [] ->
                     try_to_commit(CommitTime, Rest, RepDict, DepDict1, DoRepl, PendingTxs, NumAborted, Committed+1);

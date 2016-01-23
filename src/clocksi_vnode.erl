@@ -462,7 +462,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     end, 
             {noreply, State#state{max_ts=PrepareTime, dep_dict=NewDepDict}};
         {error, write_conflict, Key, Reason} ->
-            lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
+            %lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
             case Debug of
                 false ->
                     case RepMode of 
@@ -690,7 +690,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
     PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
     case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0, IfCertify) of
 	    {false, InsertedKeys, WaitingKeys, ConflictKey, Reason} ->
-            lager:warning("~w failed, has inserted ~p, waiting for key ~w, ConflictKye ~w", [TxId, InsertedKeys, WaitingKeys, ConflictKey]),
+            lager:warning("~w failed, has inserted ~p, waiting for key ~p, ConflictKye ~p", [TxId, InsertedKeys, WaitingKeys, ConflictKey]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of
