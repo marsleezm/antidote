@@ -690,7 +690,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
     PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
     case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0, IfCertify) of
 	    {false, InsertedKeys, WaitingKeys, ConflictKey, Reason} ->
-            lager:warning("~w failed, has inserted ~p, waiting for key ~p, ConflictKye ~p", [TxId, InsertedKeys, WaitingKeys, ConflictKey]),
+            %lager:warning("~w failed, has inserted ~p, waiting for key ~p, ConflictKye ~p", [TxId, InsertedKeys, WaitingKeys, ConflictKey]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of
@@ -699,13 +699,13 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
 	        {error, write_conflict, ConflictKey, Reason};
         0 ->
             %PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
-            lager:warning("~w passed", [TxId]),
+            %lager:warning("~w passed", [TxId]),
 		    KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
             %lager:warning("Inserting key sets ~w, ~w", [TxId, KeySet]),
 		    {ok, PrepareTime};
         N ->
-            lager:warning("~w passed but has ~w deps", [TxId, N]),
+            %lager:warning("~w passed but has ~w deps", [TxId, N]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, {waiting, TxWriteSet}}),
             {wait, N, PrepareTime}
@@ -1152,7 +1152,7 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
                     DepDict1 = dict:update(fucked_by_badprep, fun({T, Cnt}) ->  {T+PPTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
                     abort_others(PPTime, Rest, DepDict1, Remaining, LastPPTime, MyNode);
                 error ->
-                    lager:warning("~w aborted already", [TxId]),
+                    %lager:warning("~w aborted already", [TxId]),
                     abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime, MyNode)
             end;
         false ->
