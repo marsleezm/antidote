@@ -412,7 +412,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
     case Result of
         {ok, PrepareTime} ->
             UsedTime = tx_utilities:now_microsec() - PrepareTime,
-            lager:warning("~w: ~w certification check prepred", [Partition, TxId]),
+            %lager:warning("~w: ~w certification check prepred", [Partition, TxId]),
             case IfReplicate of
                 true ->
                     case Debug of
