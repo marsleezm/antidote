@@ -255,7 +255,6 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
                             end
                         end;
                 _ ->
-                     lager:warning("Local updates are ~w", [LocalUpdates]),
                     LocalPartitions = [P || {P, _} <- LocalUpdates],
                     DepDict1 = dict:update(TxId, 
                             fun({_, B, _}) ->
