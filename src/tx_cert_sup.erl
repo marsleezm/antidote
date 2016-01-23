@@ -29,7 +29,7 @@
 -export([init/1, certify/4, get_stat/0, get_int_data/3, start_tx/1, single_read/3, 
             start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2]).
 
--define(READ_TIMEOUT, 15000).
+-define(READ_TIMEOUT, 60000).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
