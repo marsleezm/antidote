@@ -15,4 +15,3 @@ doc/
 .DS_Store
 log/
 tags
-rel/vars/*.config
