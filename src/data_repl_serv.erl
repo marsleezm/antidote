@@ -38,7 +38,7 @@
 -endif.
 
 -define(NUM_VERSIONS, 10).
--define(SET_SIZE, 30).
+-define(SET_SIZE, 50).
 -define(READ_TIMEOUT, 5000).
 %% API
 -export([start_link/2]).

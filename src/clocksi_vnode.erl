@@ -1059,7 +1059,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                     case Result of
                         first ->
                             %% There is more than one speculative version
-                            case prepared_by_local(TxId) of
+                            case prepared_by_local(PreparedTxId) of
                                 true ->
                                     add_read_dep(TxId, PreparedTxId, Key),
                                     {specula, Value};
@@ -1071,7 +1071,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                             end;
                         {ApprTxId, _, ApprPPValue} ->
                             %% There is more than one speculative version
-                            case prepared_by_local(TxId) of
+                            case prepared_by_local(ApprTxId) of
                                 true ->
                                     add_read_dep(TxId, ApprTxId, Key),
                                     {specula, ApprPPValue};
