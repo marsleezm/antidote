@@ -8,20 +8,39 @@
 -export([delete_1/2, delete_2/2,
          lookup_1/2, lookup_2/2, get_my_range/4,
          check_node/1, check_list/1, test_hash/2,
-         pass1/1, pass2/1]). %, set1/2, set2/2]).
+         pass1/1, pass2/1, set1/2, set2/2, set3/2]).
 
-%set1(N, S) ->
-%    Seq = lists:seq(1, S),
-%    SeqN = lists:seq(1, N),
-%    Set1 = lists:foldl(fun(M,S) -> sets:add_element(M,S) end, sets:new(), Seq),
-%    T = os:timestamp(),
+set1(N, S) ->
+    Seq = lists:seq(1, S),
+    SeqN = lists:seq(1, N),
+    T = os:timestamp(),
+    lists:foreach(fun(_) ->
+            lists:foldl(fun(M,Set) -> sets:add_element(M,Set) end, sets:new(), Seq)
+            end, SeqN),
+    Diff = timer:now_diff(os:timestamp(), T),
+    io:format("Diff is ~w ~n", [Diff]).
 
-%    lists:foldl(fun(_, S) ->
-%            K = random:uniform(5),
-%            S1 = sets:add_element(T, S1),
-%            end, Seq),
-%    Diff = timer:now_diff(os:timestamp(), T),
-%    io:format("Diff is ~w ~n", [Diff]).
+set2(N, S) ->
+    Seq = lists:seq(1, S),
+    SeqN = lists:seq(1, N),
+    Set1 = lists:foldl(fun(M,Set) -> sets:add_element(M,Set) end, sets:new(), Seq),
+    T = os:timestamp(),
+    lists:foreach(fun(_) ->
+            sets:is_element(10, Set1)
+            end, SeqN),
+    Diff = timer:now_diff(os:timestamp(), T),
+    io:format("Diff is ~w ~n", [Diff]).
+
+set3(N, S) ->
+    Seq = lists:seq(1, S),
+    SeqN = lists:seq(1, N),
+    T = os:timestamp(),
+    Set1 = lists:foldl(fun(M,Set) -> sets:add_element(M,Set) end, sets:new(), Seq),
+    lists:foreach(fun(_) ->
+            lists:foldl(fun(M,Se) -> sets:del_element(M,Se) end, Set1, Seq)
+            end, SeqN),
+    Diff = timer:now_diff(os:timestamp(), T),
+    io:format("Diff is ~w ~n", [Diff]).
 
 test_hash(N, StrLen) ->
     Key = random_string(StrLen),
