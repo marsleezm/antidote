@@ -2,7 +2,6 @@
 .eunit
 deps/*
 ebin/*
-rel/antidote
 dev
 apps/antidote/src/*
 *.swp
