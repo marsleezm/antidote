@@ -322,7 +322,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                     {AccTime, AccCount} = CertStat,
                     {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert, cert_stat={AccTime+timer:now_diff(os:timestamp(),StartPrepare), AccCount+1}}};
                 false ->
-                     lager:warning("Pending prep: decided to speculate ~w, pending list is ~w!!", [TxId, PendingList]),
+                     lager:warning("Pending prep: decided to speculate ~w and prepare to ~w pending list is ~w!!", [TxId, RemoteUpdates, PendingList]),
                     %% Add dependent data into the table
                     ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, os:timestamp()}}),
                     NewRemoteUps = add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
