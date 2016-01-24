@@ -334,10 +334,10 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, current_dict=CurrentDict, backup_dict=BackupDict}) ->
     case Type of
         prepared ->
-            %lager:info("Got repl prepare for ~w, ~w", [TxId, Partition]),
+            lager:info("Got repl prepare for ~w, ~w", [TxId, Partition]),
             case dict:find({TxId, Partition}, CurrentDict) of 
                 {ok, aborted} ->
-                    %lager:info("~w, ~w aborted already", [TxId, Partition]),
+                    lager:info("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 {ok, committed} ->
                     add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
@@ -394,7 +394,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
                     MaxTs = update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0),
                     {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)};
                 [] ->
-                  %lager:info("Repl abort arrived early! ~w", [TxId]),
+                  lager:info("Repl abort arrived early! ~w", [TxId]),
                   %lager:info("Set after adding element is ~w", [sets:to_list(sets:add_element(TxId, S))]),
                   {dict:store({TxId, Partition}, committed, S), D}
         end end, {CurrentDict, TsDict}, Partitions),
@@ -662,6 +662,7 @@ read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sende
     read_or_block(Rest, [{PTxId, PrepTime, Value, Reader}|Prev], SnapshotTime, Sender).
 
 add_read_dep(ReaderTx, WriterTx, _Key) ->
+    lager:info("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
