@@ -152,10 +152,11 @@ init([Name, Parts]) ->
     PendingLog = tx_utilities:open_private_table(pending_log),
     NumPartitions = length(hash_fun:get_partitions()),
     DoSpecula = antidote_config:get(do_specula),
+    Concurrent = antidote_config:get(concurrent),
     TsDict = lists:foldl(fun(Part, Acc) ->
                 dict:store(Part, 0, Acc) end, dict:new(), Parts),
     lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
-    {ok, #state{name=Name, set_size=NumPartitions*4,
+    {ok, #state{name=Name, set_size=NumPartitions*Concurrent div 4 +15,
                 pending_log = PendingLog, current_dict = dict:new(), ts_dict=TsDict, do_specula=DoSpecula,
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
