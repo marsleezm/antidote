@@ -37,7 +37,7 @@ load(WPerDc) ->
     %_PbPorts = basho_bench_config:get(antidote_pb_port),
     %% Choose the node using our ID as a modulus
 
-    {PartList, ReplList} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
+    {PartList, ReplList, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
     %lager:info("Part list is ~w, Replist is ~w", [PartList, ReplList]),
     AllDcs = [N || {N, _} <- PartList],
     MyNode = node(),
@@ -108,6 +108,7 @@ populate_items(TxServer, NumDCs, DcId, PartList) ->
                         DivItems + FirstItem -1
                    end,
     put_range_items(TxServer, trunc(FirstItem), trunc(LastItem), DcId, PartList).
+    %put_range_items(TxServer, 1, ?NB_MAX_ITEM, DcId, PartList).
 
 populate_warehouse(TxServer, WarehouseId, PartList, WPerDc)->
     random:seed({WarehouseId, 12,32}),

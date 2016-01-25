@@ -178,9 +178,9 @@ get_hash_fun() ->
                 List = lists:reverse(dict:to_list(Dict1)),
                 case antidote_config:get(do_repl) of
                     true ->
-                        {List, antidote_config:get(to_repl)};
+                        {List, antidote_config:get(to_repl), antidote_config:get(num_dcs)};
                     false ->
-                        {List, []}
+                        {List, [], antidote_config:get(num_dcs)}
                 end.
             %end.
     %end.

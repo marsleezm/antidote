@@ -161,7 +161,7 @@ process(#fpbsingleupreq{key=Key, value=Value, partition_id=PartitionId}, State) 
             {reply, #fpbpreptxnresp{result=0}, State}
     end;
 process(#fpbpartlistreq{noop=_}, State) ->
-    {PartList, ReplList} = hash_fun:get_hash_fun(),
+    {PartList, ReplList, _} = hash_fun:get_hash_fun(),
     lager:info("Hash fun is ~w", [PartList]),
     {reply, #fpbpartlist{node_parts=encode_part_list(PartList), repl_list=encode_repl_list(ReplList)}, State}.
 
