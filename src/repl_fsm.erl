@@ -299,6 +299,7 @@ repl_commit(UpdatedParts, TxId, CommitTime, true, ToCache, RepDict) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
+        %lager:info("repl commit of ~w for node ~w to replicas ~w for partitions ~w", [TxId, Node, Replicas, Partitions]),
         lists:foreach(fun(R) ->
             case R of
                 cache -> 
@@ -320,6 +321,7 @@ repl_abort(UpdatedParts, TxId, true, ToCache, RepDict) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
+        %lager:info("repl abort of ~w for node ~w to replicas ~w for partitions ~w", [TxId, Node, Replicas, Partitions]),
         lists:foreach(fun(R) ->
             case R of
                 cache -> case ToCache of false -> ok;

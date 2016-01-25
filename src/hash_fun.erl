@@ -246,7 +246,7 @@ build_rep_dict(true) ->
     AllButMe = AllNodes -- [MyNode],
     CacheNode = AllButMe -- RepNodes,
     lists:foldl(fun(N, D) ->
-              dict:store(N, cache, D)
+              dict:append(N, cache, D)
             end, RepDict1, CacheNode).
 
 if_repl_myself([], _) ->

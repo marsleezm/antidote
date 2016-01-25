@@ -1111,7 +1111,7 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, M
             case dict:find(TxId, DepDict) of
                 {ok, {_, _, Sender, _Type}} ->
                     %NewDepDict = dict:erase(TxId, DepDict),
-                    %lager:warning("Prepare not valid anymore! For ~w, sending '~w' abort to ~w", [TxId, Type, Sender]),
+                     %lager:warning("Prepare not valid anymore! For ~w, sending '~w' abort to ~w", [TxId, Type, Sender]),
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     %% Abort should be fast, so send abort to myself directly.. Coord won't send abort to me again.
                     abort([MyNode], TxId),
