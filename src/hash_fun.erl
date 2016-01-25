@@ -175,12 +175,15 @@ get_hash_fun() ->
                             dict:store(Node, List++[{Index, Node}], Dict)
                     end
                 end, dict:new(), Partitions),
-                List = lists:reverse(dict:to_list(Dict1)),
+                AllNodes = [Node  || {Node, _} <- antidote_config:get(to_repl)],
+                PartList = lists:foldr(fun(N, L) ->
+                                [{N, dict:fetch(N, Dict1)}|L] 
+                                end, [], AllNodes),
                 case antidote_config:get(do_repl) of
                     true ->
-                        {List, antidote_config:get(to_repl), antidote_config:get(num_dcs)};
+                        {PartList, antidote_config:get(to_repl), antidote_config:get(num_dcs)};
                     false ->
-                        {List, [], antidote_config:get(num_dcs)}
+                        {PartList, [], antidote_config:get(num_dcs)}
                 end.
             %end.
     %end.
