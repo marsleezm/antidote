@@ -122,12 +122,12 @@ read(Name, TxId, Key, Node) ->
 
 get_stat() ->
     SPL = lists:seq(1, ?NUM_SUP),
-    {R1, R2, R3, R4, R5, R6, R7, R8, R9, Cnt} = lists:foldl(fun(N, {A1, A2, A3, A4, A5, A6, A7, A8, A9, C}) ->
+    {R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, Cnt} = lists:foldl(fun(N, {A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, C}) ->
                             Res = gen_server:call({global, generate_module_name(N)}, {get_stat}),
-                            {T1, T2, T3, T4, T5, T6, T7, T8, T9} = Res,
+                            {T1, T2, T3, T4, T5, T6, T7, T8, T9, T10} = Res,
                             lager:info("Get stat from ~w is ~p", [N, Res]),
                             NewC = case T1 of 0 -> C; _ -> C+1 end, 
-                            {A1+T1, A2+T2, A3+T3, A4+T4, A5+T5, A6+T6, A7+T7, A8+T8, A9+T9, NewC} end, {0,0,0,0,0,0,0,0,0,0}, SPL),
+                            {A1+T1, A2+T2, A3+T3, A4+T4, A5+T5, A6+T6, A7+T7, A8+T8, A9+T9, A10+T10, NewC} end, {0,0,0,0,0,0,0,0,0,0,0}, SPL),
     LocalServ = hash_fun:get_local_servers(),
     PRead = lists:foldl(fun(S, Acc) ->
                         Num = helper:num_specula_read(S), Num+Acc
@@ -141,8 +141,8 @@ get_stat() ->
     lager:info("Data replica specula read is ~w, Data replica read is ~w", [DSpeculaRead, DTotalRead]),
     {CacheSpeculaRead, CacheAttemptRead} = cache_serv:num_specula_read(),
     RealCnt = max(1, Cnt),
-    {R1, R2, R3, R4, R5, R6, PRead,  
-        DSpeculaRead, DTotalRead, CacheSpeculaRead, CacheAttemptRead, R7 div RealCnt, R8 div RealCnt, R9 div RealCnt}.
+    {R1, R2, R3, R4, R5, R6, R7, PRead,  
+        DSpeculaRead, DTotalRead, CacheSpeculaRead, CacheAttemptRead, R8 div RealCnt, R9 div RealCnt, R10 div RealCnt}.
 
 generate_module_name(N) ->
     list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list(N)).
