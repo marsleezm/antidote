@@ -198,18 +198,23 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp},
 handle_cast({abort_specula, TxId, Partitions}, 
 	    SD0=#state{cache_log=CacheLog}) ->
     lists:foreach(fun(Partition) ->
-            [{{TxId, Partition}, KeySet}] = ets:lookup(CacheLog, {TxId, Partition}), 
-            delete_keys(CacheLog, KeySet, TxId)
-            end, Partitions),
+            case ets:lookup(CacheLog, {TxId, Partition}) of 
+                [{{TxId, Partition}, KeySet}] -> 
+                    delete_keys(CacheLog, KeySet, TxId);
+                _ -> ok
+            end end, Partitions),
     specula_utilities:deal_abort_deps(TxId),
     {noreply, SD0};
     
 handle_cast({commit_specula, TxId, Partitions, CommitTime}, 
 	    SD0=#state{cache_log=CacheLog}) ->
     lists:foreach(fun(Partition) ->
-            [{{TxId, Partition}, KeySet}] = ets:lookup(CacheLog, {TxId, Partition}), 
-            delete_keys(CacheLog, KeySet, TxId)
-             end, Partitions),
+            case ets:lookup(CacheLog, {TxId, Partition}) of
+                [{{TxId, Partition}, KeySet}] ->
+                    delete_keys(CacheLog, KeySet, TxId);
+                _ ->
+                    ok
+            end end, Partitions),
     specula_utilities:deal_commit_deps(TxId, CommitTime),
     {noreply, SD0};
 
