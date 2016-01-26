@@ -427,7 +427,6 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                                     PendingRecord = {Sender, local, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
                                 _ ->
-                                    lager:warning("Not fast replying for ~w, ~w", [TxId, RepMode]),
                                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
                             end,
@@ -699,10 +698,9 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
 	        {error, write_conflict, ConflictKey, Reason};
         0 ->
             %PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
-             lager:warning("~w passed", [TxId]),
 		    KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
-             lager:warning("Inserting key sets ~w, ~w", [TxId, KeySet]),
+             %lager:warning("Inserting key sets ~w, ~w", [TxId, KeySet]),
 		    {ok, PrepareTime};
         N ->
              lager:warning("~w passed but has ~w deps", [TxId, N]),

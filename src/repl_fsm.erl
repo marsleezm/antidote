@@ -218,11 +218,11 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
         %ToReply = {prepared, TxId, PrepareTime, remote},
 %                    ets:insert(PendingLog, {{TxId, Partition}, {{Prep, Sender,
 %                            PrepareTime, WriteSet, RepMode}, ReplFactor-1}}),
-            %%lager:warning("Got req from ~w for ~w, done", [Partition, TxId]),
+            %lager:warning("Got req from ~w for ~w, done", [Partition, TxId]),
             {PrepType, Sender, Timestamp, RepMode} = R,
             case PrepType of
                 prepared ->
-                    %lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
+                    lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     case RepMode of
                         false -> ok;
@@ -236,7 +236,7 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
             end;
         [{{TxId, Partition}, {R, N}}] ->
             {PrepType, Sender, Timestamp, RepMode} = R,
-            %lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
+            lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
             ets:insert(PendingLog, {{TxId, Partition}, {{PrepType, Sender, max(Timestamp,ProposedTs), RepMode}, N-1}});
         [] -> %%The record is appended already, do nothing
             %lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
