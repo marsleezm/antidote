@@ -156,6 +156,7 @@ handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
 handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, pending_log=PendingLog, except_replicas=ExceptReplicas, 
             my_name=MyName, mode=Mode, repl_factor=ReplFactor, fast_reply=_FastReply}) ->
+    lager:info("Repl prepare for ~w, ~w", [TxId, Partition]),
     case PrepType of
         single_commit ->
             {Sender, WriteSet, CommitTime} = LogContent,
@@ -182,15 +183,15 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                         %% This is for specula.. So no need to replicate the msg to the partition that sent the prepare(because due to specula,
                         %% the msg is replicated already).
                         {remote, SenderName} ->
-                            %lager:warning("RepMode is ~w", [RepMode]),
+                            lager:warning("RepMode is ~w", [RepMode]),
                             case dict:find(SenderName, ExceptReplicas) of
                                 {ok, R} -> 
-                                    %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
+                                    lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
                                     ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                             PrepareTime, remote}, ReplFactor-1}}),
                                     quorum_replicate(R, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
                                 error ->
-                                    %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
+                                    lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                                     ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                             PrepareTime, remote}, ReplFactor}}),
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
