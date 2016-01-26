@@ -156,7 +156,7 @@ handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
 handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, pending_log=PendingLog, except_replicas=ExceptReplicas, 
             my_name=MyName, mode=Mode, repl_factor=ReplFactor, fast_reply=_FastReply}) ->
-    lager:info("Repl prepare for ~w, ~w", [TxId, Partition]),
+    %lager:info("Repl prepare for ~w, ~w", [TxId, Partition]),
     case PrepType of
         single_commit ->
             {Sender, WriteSet, CommitTime} = LogContent,

@@ -391,7 +391,6 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
     {CurrentD1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
             case ets:lookup(PendingLog, {TxId, Partition}) of
                 [{{TxId, Partition}, KeySet}] ->
-                    lager:info("Kye set for part ~w is ~p", [Partition, KeySet]),
                     ets:delete(PendingLog, {TxId, Partition}),
                     MaxTs = update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0),
                     {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)};
@@ -499,7 +498,6 @@ update_store([], _TxId, _TxCommitTime, _InMemoryStore, _PreparedTxs, TS) ->
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, PreparedTxs, TS) ->
     [{Key, List}] = ets:lookup(PreparedTxs, Key),
     {{TxId, _, Value, PendingReaders}, PrepareRemainList} = delete_item(List, TxId, []),
-    lager:info("for ~w, before list is ~p, after is ~w", [TxId, List, PrepareRemainList]),
     Values = case ets:lookup(InMemoryStore, Key) of
                 [] ->
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]}),
