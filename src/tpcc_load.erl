@@ -245,7 +245,7 @@ init_params(FullPartList, HashLength) ->
     C_C_LAST = tpcc_tool:random_num(0, ?A_C_LAST),
     C_C_ID = tpcc_tool:random_num(0, ?A_C_ID),
     C_OL_I_ID = tpcc_tool:random_num(0, ?A_OL_I_ID),
-    COMMIT_TIME = tpcc_tool:now_nsec() - 5000,
+    COMMIT_TIME = tpcc_tool:now_nsec() - 100000,
     Partition1 = get_partition(K1, FullPartList, HashLength),
     Partition2 = get_partition(K2, FullPartList, HashLength),
     Partition3 = get_partition(K3, FullPartList, HashLength),
