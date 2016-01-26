@@ -177,7 +177,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                     case RepMode of
                         %% This is for non-specula version
                         {remote, ignore} ->
-                            lager:warning("Ignor Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition]),
+                           %lager:warning("Ignor Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, remote}, ReplFactor}}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
@@ -188,12 +188,12 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                                 {ok, []} ->
                                     gen_server:cast(Sender, {prepared, TxId, PrepareTime});
                                 {ok, R} -> 
-                                    lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
+                                   %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
                                     ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                             PrepareTime, remote}, ReplFactor-1}}),
                                     quorum_replicate(R, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
                                 error ->
-                                    lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
+                                   %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                                     ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                             PrepareTime, remote}, ReplFactor}}),
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
@@ -201,7 +201,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                         _ ->
                             %lager:warning("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             %case RepMode of
-                            %    local_fast -> lager:warning("Replicating local_fast txn! ~w", [TxId]);
+                            %    local_fast ->%lager:warning("Replicating local_fast txn! ~w", [TxId]);
                             %    _ -> ok
                             %end,
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
@@ -225,7 +225,7 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
             {PrepType, Sender, Timestamp, RepMode} = R,
             case PrepType of
                 prepared ->
-                    lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
+                   %lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     case RepMode of
                         false -> ok;
@@ -239,7 +239,7 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
             end;
         [{{TxId, Partition}, {R, N}}] ->
             {PrepType, Sender, Timestamp, RepMode} = R,
-            lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
+           %lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
             ets:insert(PendingLog, {{TxId, Partition}, {{PrepType, Sender, max(Timestamp,ProposedTs), RepMode}, N-1}});
         [] -> %%The record is appended already, do nothing
             %lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
