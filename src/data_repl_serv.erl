@@ -220,7 +220,6 @@ handle_call({read, Key, TxId, {Part, _}}, Sender,
                     Result = read_value(Key, TxId, ReplicatedLog),
                     MyClock = TxId#tx_id.snapshot_time,
                     TsDict1 = dict:update(Part, fun(OldTs) -> max(MyClock, OldTs) end, TsDict),
-                     lager:warning("NewDict is ~w", [dict:to_list(TsDict1)]),
                     {reply, Result, SD0#state{ts_dict=TsDict1, num_read=NumRead+1}}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
@@ -233,7 +232,6 @@ handle_call({read, Key, TxId, {Part, _}}, Sender,
                     Result = read_value(Key, TxId, ReplicatedLog),
                     MyClock = TxId#tx_id.snapshot_time,
                     TsDict1 = dict:update(Part, fun(OldTs) -> max(MyClock, OldTs) end, TsDict),
-                      lager:warning("NewDict is ~w", [dict:to_list(TsDict1)]),
                     {reply, Result, SD0#state{ts_dict=TsDict1, num_read=NumRead+1}}
             end
     end;
