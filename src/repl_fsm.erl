@@ -177,13 +177,13 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                     case RepMode of
                         %% This is for non-specula version
                         {remote, ignore} ->
+                            lager:warning("Ignor Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, remote}, ReplFactor}}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
                         %% This is for specula.. So no need to replicate the msg to the partition that sent the prepare(because due to specula,
                         %% the msg is replicated already).
                         {remote, SenderName} ->
-                            lager:warning("RepMode is ~w", [RepMode]),
                             case dict:find(SenderName, ExceptReplicas) of
                                 {ok, R} -> 
                                     lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
