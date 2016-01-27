@@ -57,6 +57,7 @@
         append_values/3,
         get_table/1,
 	    check_key/2,
+        clean_data/2,
 	    check_table/1,
         verify_table/2,
         debug_read/3,
@@ -133,6 +134,9 @@ prepare_specula(Name, TxId, Partition, WriteSet, PrepareTime) ->
 
 relay_read(Name, Key, TxId, Reader) ->
     gen_server:cast({global, Name}, {relay_read, Key, TxId, Reader}).
+
+clean_data(Name, Sender) ->
+    gen_server:cast({global, Name}, {clean_data, Sender}).
 
 
 %commit_specula(Name, TxId, Partition, CommitTime) ->
@@ -304,6 +308,15 @@ handle_cast({relay_read, Key, TxId, Reader},
             {noreply, SD0}
     end;
 
+handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pending_log=OldPendingLog}) ->
+    ets:delete(OldPendingLog),
+    ets:delete(OldReplicatedLog),
+    ReplicatedLog = tx_utilities:open_public_table(repl_log),
+    PendingLog = tx_utilities:open_private_table(pending_log), 
+    lager:info("Data repl replying!"),
+    Sender ! cleaned,
+    {noreply, SD0#state{pending_log = PendingLog, current_dict = dict:new(), backup_dict = dict:new(), 
+                num_specula_read=0, num_read=0, replicated_log = ReplicatedLog}};
 
 %% Where shall I put the speculative version?
 %% In ets, faster for read.

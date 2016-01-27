@@ -26,7 +26,7 @@
 
 -export([start_link/0]).
 
--export([init/1, certify/4, get_stat/0, get_int_data/3, start_tx/1, single_read/3, 
+-export([init/1, certify/4, get_stat/0, get_int_data/3, start_tx/1, single_read/3, clean_all_data/0, clean_data/1, 
             start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2]).
 
 -define(READ_TIMEOUT, 30000).
@@ -119,6 +119,39 @@ read(Name, TxId, Key, Node) ->
             gen_server:call({global, Name}, {read, Key, TxId, Node}, ?READ_TIMEOUT)
     end.
 
+clean_all_data() ->
+    Parts = hash_fun:get_partitions(),
+    Set = lists:foldl(fun({_, N}, D) ->
+                sets:add_element(N, D)
+                end, sets:new(), Parts),
+    AllNodes = sets:to_list(Set),
+    MySelf = self(),
+    lager:info("Sending msg to ~w", [AllNodes]),
+    lists:foreach(fun(Node) ->
+                    spawn(rpc, call, [Node, tx_cert_sup, clean_data, [MySelf]])
+    end, AllNodes),
+    lager:info("Send cleaning"),
+    lists:foreach(fun(_) ->
+                   receive cleaned -> ok end
+                   end, AllNodes).
+
+clean_data(Sender) ->
+    SPL = lists:seq(1, ?NUM_SUP),
+    MySelf = self(),
+    lager:info("~w received", [node()]),
+    lists:foreach(fun(N) -> gen_server:cast({global, generate_module_name(N)}, {clean_data, MySelf}) end, SPL),
+    lists:foreach(fun(_) -> receive cleaned -> ok end  end, SPL),
+    lager:info("Got reply from all tx servers"),
+    DataRepls = repl_fsm_sup:generate_data_repl_serv(),
+    lists:foreach(fun({N, _, _, _, _, _}) ->  data_repl_serv:clean_data(N,  MySelf)  end, DataRepls),
+    lists:foreach(fun(_) ->  receive cleaned -> ok end  end, DataRepls),
+    lager:info("Got reply from all data_repls"),
+    S = hash_fun:get_local_servers(),
+    lists:foreach(fun(N) ->  clocksi_vnode:clean_data(N,  MySelf)  end, S),
+    lists:foreach(fun(_) ->  receive cleaned -> ok end  end, S),
+    lager:info("Got reply from all local_nodes"),
+    gen_server:call({global, node()}, {clean_data}),
+    Sender ! cleaned.
 
 get_stat() ->
     SPL = lists:seq(1, ?NUM_SUP),

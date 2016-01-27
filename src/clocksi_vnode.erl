@@ -29,6 +29,7 @@
 	    relay_read/5,
         set_prepared/5,
         get_table/1,
+        clean_data/2,
         async_send_msg/3,
 
         set_debug/2,
@@ -133,6 +134,11 @@ debug_read(Node, Key, TxId) ->
                                    {debug_read, Key, TxId},
                                    ?CLOCKSI_MASTER, infinity).
 
+clean_data(Node, From) ->
+    riak_core_vnode_master:command(Node,
+                                   {clean_data, From}, self(),
+                                   ?CLOCKSI_MASTER).
+
 relay_read(Node, Key, TxId, Reader, From) ->
     riak_core_vnode_master:command(Node,
                                    {relay_read, Key, TxId, Reader, From}, self(),
@@ -223,12 +229,10 @@ init([Partition]) ->
     DepDict2 = dict:store(commit_diff, {0,0}, DepDict1),
     DepDict3 = dict:store(fucked_by_commit, {0,0}, DepDict2),
     DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
-
     IfCertify = antidote_config:get(do_cert),
     IfReplicate = antidote_config:get(do_repl), 
     IfSpecula = antidote_config:get(do_specula), 
     FastReply = antidote_config:get(fast_reply),
-
     _ = case IfReplicate of
                     true ->
                         repl_fsm_sup:start_fsm(Partition);
@@ -237,10 +241,6 @@ init([Partition]) ->
                 end,
     LD = dict:new(),
     RD = dict:new(),
-    %LD1 = dict:store(pa, {0,0}, LD),
-    %LD2 = dict:store(ca, {0,0}, LD1),
-    %RD1 = dict:store(pa, {0,0}, RD),
-    %RD2 = dict:store(ca, {0,0}, RD1),
     {ok, #state{partition=Partition,
                 committed_txs=CommittedTxs,
                 prepared_txs=PreparedTxs,
@@ -274,6 +274,35 @@ handle_command({get_table}, _Sender, SD0=#state{inmemory_store=InMemoryStore}) -
 handle_command({verify_table, Repl},_Sender,SD0=#state{inmemory_store=InMemoryStore}) ->
     R = helper:handle_verify_table(Repl, InMemoryStore),
     {reply, R, SD0};
+
+handle_command({clean_data, Sender}, _Sender, SD0=#state{inmemory_store=OldInMemoryStore,
+        prepared_txs=OldPreparedTxs, committed_txs=OldCommittedTxs, partition=Partition}) ->
+    ets:delete(OldInMemoryStore),
+    ets:delete(OldPreparedTxs),
+    ets:delete(OldCommittedTxs),
+    PreparedTxs = tx_utilities:open_table(Partition, prepared),
+    CommittedTxs = tx_utilities:open_table(Partition, committed),
+    InMemoryStore = tx_utilities:open_table(Partition, inmemory_store),
+    DepDict = dict:new(),
+    DepDict1 = dict:store(success_wait, 0, DepDict),
+    DepDict2 = dict:store(commit_diff, {0,0}, DepDict1),
+    DepDict3 = dict:store(fucked_by_commit, {0,0}, DepDict2),
+    DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
+    LD = dict:new(),
+    RD = dict:new(),
+    Sender ! cleaned,
+    {noreply, SD0#state{partition=Partition,
+                committed_txs=CommittedTxs,
+                prepared_txs=PreparedTxs, relay_read={0,0},
+                l_abort_dict=LD,
+                r_abort_dict=RD,
+                inmemory_store=InMemoryStore,
+                dep_dict = DepDict4,
+                max_ts=0, total_time = 0, prepare_count = 0, num_aborted = 0, num_blocked = 0,
+                blocked_time = 0,
+                num_specula_read = 0,
+                num_cert_fail = 0,
+                num_committed = 0}};
 
 handle_command({relay_read_stat},_Sender,SD0=#state{relay_read=RelayRead}) ->
     R = helper:handle_relay_read_stat(RelayRead),

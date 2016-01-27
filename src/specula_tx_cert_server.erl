@@ -65,20 +65,22 @@
 -record(state, {
         tx_id :: txid(),
         %prepare_time = 0 :: non_neg_integer(),
-        min_commit_ts = 0 :: non_neg_integer(),
-        min_snapshot_ts = 0 :: non_neg_integer(),
         local_updates :: [],
         remote_updates :: [],
         rep_dict :: dict(),
         dep_dict :: dict(),
         pending_list=[] :: [txid()],
-        invalid_ts :: non_neg_integer(),
+        specula_length :: non_neg_integer(),
 
         stage :: read|local_cert|remote_cert,
         %specula_data :: cache_id(),
         pending_txs :: cache_id(),
-        pending_prepares :: non_neg_integer(),
         do_repl :: boolean(),
+
+        min_commit_ts = 0 :: non_neg_integer(),
+        min_snapshot_ts = 0 :: non_neg_integer(),
+        invalid_ts=0 :: non_neg_integer(),
+        pending_prepares=0 :: non_neg_integer(),
         num_specula_read=0 :: non_neg_integer(),
         committed=0 :: non_neg_integer(),
         start_prepare=0 :: non_neg_integer(),
@@ -89,7 +91,6 @@
         cert_aborted=0 :: non_neg_integer(),
         cascade_aborted=0 :: non_neg_integer(),
 
-        specula_length :: non_neg_integer(),
         sender :: term()}).
 
 %%%===================================================================
@@ -115,8 +116,8 @@ init([]) ->
     ets:insert(PendingTxs, {commit, 0, 0}),
     ets:insert(PendingTxs, {abort, 0, 0}),
     %SpeculaData = tx_utilities:open_private_table(specula_data),
-    {ok, #state{pending_txs=PendingTxs, dep_dict=dict:new(), invalid_ts=0,
-            do_repl=DoRepl, specula_length=SpeculaLength, pending_prepares=0, rep_dict=RepDict}}.
+    {ok, #state{pending_txs=PendingTxs, dep_dict=dict:new(), 
+            do_repl=DoRepl, specula_length=SpeculaLength, rep_dict=RepDict}}.
 
 handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
     clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
@@ -302,6 +303,19 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     Sup ! done,
     lager:info("Replied!"),
     {noreply, SD0};
+
+handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs}) ->
+    ets:delete(OldPendingTxs), 
+    DoRepl = antidote_config:get(do_repl),
+    RepDict = hash_fun:build_rep_dict(DoRepl),
+    SpeculaLength = antidote_config:get(specula_length),
+    PendingTxs = tx_utilities:open_private_table(pending_txs),
+    ets:insert(PendingTxs, {commit, 0, 0}),
+    ets:insert(PendingTxs, {abort, 0, 0}),
+    %SpeculaData = tx_utilities:open_private_table(specula_data),
+    Sender ! cleaned,
+    {noreply, #state{pending_txs=PendingTxs, dep_dict=dict:new(), 
+            do_repl=DoRepl, specula_length=SpeculaLength, rep_dict=RepDict}};
 
 %% Receiving local prepare. Can only receive local prepare for two kinds of transaction
 %%  Current transaction that has not finished local cert phase

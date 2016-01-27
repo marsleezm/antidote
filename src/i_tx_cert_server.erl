@@ -131,6 +131,10 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     Sup ! done,
     {noreply, SD0};
 
+handle_cast({clean_data, Sender}, SD0) ->
+    Sender ! cleaned,
+    {noreply, SD0};
+
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, local_parts=LocalParts, do_repl=DoRepl, stage=local_cert,
             remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime, rep_dict=RepDict}) ->

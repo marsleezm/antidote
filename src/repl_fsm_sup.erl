@@ -24,7 +24,7 @@
 -export([start_fsm/1,
          start_link/0]).
 
--export([init/1]).
+-export([init/1, generate_data_repl_serv/0]).
 
 
 start_link() ->

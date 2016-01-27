@@ -117,6 +117,11 @@ handle_call({read, Key, TxId, Node}, Sender,
     ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
     {noreply, SD0};
 
+handle_call({clean_data}, _Sender, SD0=#state{cache_log=OldCacheLog}) ->
+    ets:delete(OldCacheLog),
+    CacheLog = tx_utilities:open_private_table(cache_log),
+    {reply, ok, SD0#state{cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}};
+
 handle_call({read, Key, TxId, Node}, Sender, 
 	    SD0=#state{cache_log=CacheLog, do_specula=true, 
             num_attempt_read=NumAttemptRead, num_specula_read=NumSpeculaRead}) ->

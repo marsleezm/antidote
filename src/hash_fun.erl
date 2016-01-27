@@ -89,12 +89,8 @@ get_node_parts(NodeIndex) ->
 
 -spec get_local_servers() -> [term()].
 get_local_servers() ->
-    case ets:lookup(meta_info, local_node) of
-        [{_, PartList}] ->
-            PartList;
-        [] ->
-            lager:info("Something is wrong!!")
-    end.
+    Partitions = get_partitions(),
+    [{P, N} || {P,N}<-Partitions, N==node()].
 
 -spec get_my_previous(chash:index_as_int(), non_neg_integer()) -> preflist().
 get_my_previous(Partition, N) ->
