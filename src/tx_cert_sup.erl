@@ -27,7 +27,7 @@
 -export([start_link/0]).
 
 -export([init/1, certify/4, get_stat/0, get_int_data/3, start_tx/1, single_read/3, clean_all_data/0, clean_data/1, 
-            start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2]).
+            start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, get_pid/1]).
 
 -define(READ_TIMEOUT, 30000).
 
@@ -192,6 +192,9 @@ generate_supervisor_spec(N) ->
              {i_tx_cert_server, start_link, [Module]},
               permanent, 5000, worker, [i_tx_cert_server]}
     end.
+
+get_pid(Name) ->
+    gen_server:call({global, Name}, {get_pid}).
 
 %% @doc Starts the coordinator of a ClockSI interactive transaction.
 init([]) ->

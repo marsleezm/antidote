@@ -80,6 +80,9 @@ handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
     clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
     {noreply, SD0};
 
+handle_call({get_pid}, _Sender, SD0) ->
+      {reply, self(), SD0};
+
 handle_call({get_hash_fun}, _Sender, SD0) ->
     L = hash_fun:get_hash_fun(),
     {reply, L, SD0};

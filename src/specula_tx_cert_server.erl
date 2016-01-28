@@ -123,6 +123,9 @@ handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
     clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
     {noreply, SD0};
 
+handle_call({get_pid}, _Sender, SD0) ->
+    {reply, self(), SD0};
+
 handle_call({start_read_tx}, _Sender, SD0) ->
     TxId = tx_utilities:create_tx_id(0),
     {reply, TxId, SD0};

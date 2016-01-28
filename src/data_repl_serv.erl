@@ -101,6 +101,7 @@ read(Name, Key, TxId, Part) ->
 get_table(Name) ->
     gen_server:call({global, Name}, {get_table}, ?READ_TIMEOUT).
 
+
 single_read(Name, Key) ->
     TxId = tx_utilities:create_tx_id(0),
     gen_server:call({global, Name}, {read, Key, TxId}, ?READ_TIMEOUT).
@@ -167,6 +168,9 @@ init([Name, Parts]) ->
 
 handle_call({get_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
     {reply, ReplicatedLog, SD0};
+
+handle_call({get_pid}, _Sender, SD0) ->
+        {reply, self(), SD0};
 
 handle_call({retrieve_log, LogName},  _Sender,
 	    SD0=#state{replicated_log=ReplicatedLog}) ->

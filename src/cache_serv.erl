@@ -112,6 +112,9 @@ handle_call({num_specula_read}, _Sender,
 	    SD0=#state{num_specula_read=NumSpeculaRead, num_attempt_read=NumAttemptRead}) ->
     {reply, {NumSpeculaRead, NumAttemptRead}, SD0};
 
+handle_call({get_pid}, _Sender, SD0) ->
+        {reply, self(), SD0};
+
 handle_call({read, Key, TxId, Node}, Sender, 
 	    SD0=#state{do_specula=false}) ->
     ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
