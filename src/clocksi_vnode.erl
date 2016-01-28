@@ -606,7 +606,6 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
             false -> 
                 commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, ignore, IfSpecula)
         end,
-     lager:warning("~w: Commit finished!", [Partition]),
     case Result of
         {ok, committed, DepDict1} ->
             %case IfReplicate of
@@ -617,7 +616,6 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
             %        {noreply, State#state{
             %                num_committed=NumCommitted+1}};
             %    false ->
-                     lager:warning("~w: committed for ~w", [Partition, TxId]),
                     {noreply, State#state{dep_dict=DepDict1,
                             num_committed=NumCommitted+1}};
             %end;
@@ -718,7 +716,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
     PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
     case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0, IfCertify) of
 	    {false, InsertedKeys, WaitingKeys, ConflictKey, Reason} ->
-             lager:warning("~w failed, has inserted ~p, waiting for key ~p, ConflictKye ~p", [TxId, InsertedKeys, WaitingKeys, ConflictKey]),
+            %lager:warning("~w failed, has inserted ~p, waiting for key ~p, ConflictKye ~p", [TxId, InsertedKeys, WaitingKeys, ConflictKey]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of
@@ -729,7 +727,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
             %PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
 		    KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
-              lager:warning("Inserting key sets ~w, ~w", [TxId, KeySet]),
+            %lager:warning("Inserting key sets ~w, ~w", [TxId, KeySet]),
 		    {ok, PrepareTime};
         N ->
              lager:warning("~w passed but has ~w deps", [TxId, N]),
@@ -980,7 +978,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             {PPTxId, Record, DepDict1} = deal_with_prepare_deps(Deps, TxCommitTime, DepDict, MyNode),
             case PPTxId of
                 ignore ->
-                   lager:warning("No record!"),
+                   %lager:warning("No record!"),
 					true = ets:delete(PreparedTxs, Key),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
 								 PreparedTxs, DepDict1, Partition, PrepareTime);
@@ -1223,10 +1221,10 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
 read_value(Key, TxId, InMemoryStore) ->
     case ets:lookup(InMemoryStore, Key) of
         [] ->
-             lager:warning("Nothing in store!!"),
+            %lager:warning("Nothing in store!!"),
             {ok, []};
         [{Key, ValueList}] ->
-              lager:warning("Value list is ~p", [ValueList]),
+            %lager:warning("Value list is ~p", [ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
             find_version(ValueList, MyClock)
     end.

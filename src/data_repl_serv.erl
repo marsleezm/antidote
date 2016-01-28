@@ -348,10 +348,10 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts_dict=TsDict, current_dict=CurrentDict, backup_dict=BackupDict}) ->
     case Type of
         prepared ->
-             lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
+             %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
             case dict:find({TxId, Partition}, CurrentDict) of 
                 {ok, aborted} ->
-                     lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                     %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 {ok, committed} ->
                     add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
@@ -359,7 +359,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                 error ->
                     case dict:find({TxId, Partition}, BackupDict) of 
                         {ok, aborted} ->
-                             lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                             %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         {ok, committed} ->
                             add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
