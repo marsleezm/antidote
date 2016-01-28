@@ -634,7 +634,7 @@ handle_command({abort, TxId}, _Sender,
                 true -> specula_utilities:deal_abort_deps(TxId);
                 false -> ok 
             end,
-           lager:warning("Found write set"),
+           %lager:warning("Found write set"),
             DepDict1 = dict:erase(TxId, DepDict),
             DepDict2 = case IfReplicate of
                     true ->
@@ -649,7 +649,7 @@ handle_command({abort, TxId}, _Sender,
                 true -> specula_utilities:deal_abort_deps(TxId);
                 false -> ok
             end,
-           lager:warning("Found key set"),
+           %lager:warning("Found key set"),
             true = ets:delete(PreparedTxs, TxId),
             DepDict1 = case IfReplicate of
                         true ->
@@ -659,7 +659,7 @@ handle_command({abort, TxId}, _Sender,
                     end,
             {noreply, State#state{num_aborted=NumAborted+1, dep_dict=DepDict1}};
         [] ->
-             lager:warning("No key set at all for ~w", [TxId]),
+             %lager:warning("No key set at all for ~w", [TxId]),
             {noreply, State}
     end;
 
@@ -845,7 +845,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, _, _, _, []}| PrepDeps]}] ->
-        lager:warning("clean abort: for key ~p, No reader, prepdeps are ~p", [Key, PrepDeps]),
+        %lager:warning("clean abort: for key ~p, No reader, prepdeps are ~p", [Key, PrepDeps]),
 			%% 0 for commit time means that the first prepared txs will just be prepared
             {PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, MyNode),
             case PPTxId of
@@ -858,7 +858,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 					clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition)
             end;
         [{Key, [{TxId, _, _, _, PendingReaders}|PrepDeps]}] ->
-           lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, PendingReaders, PrepDeps]),
+           %lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, PendingReaders, PrepDeps]),
 			{PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, MyNode),
             Value = case ets:lookup(InMemoryStore, Key) of
 		                [{Key, ValueList}] ->

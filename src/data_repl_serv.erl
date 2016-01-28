@@ -375,7 +375,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                                     true = ets:insert(PendingLog, {Key, NewList}),
                                     [Key|KS]
                             end end, [], WriteSet),
-                             lager:warning("Got repl prepare for ~w, ~p", [TxId, KeySet]),
+                             %lager:warning("Got repl prepare for ~w, ~p", [TxId, KeySet]),
                             ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
                             gen_server:cast({global, Sender}, {ack, Partition, TxId, dict:fetch(Partition, TsDict)}), 
                             {noreply, SD0}
@@ -428,7 +428,7 @@ handle_cast({repl_abort, TxId, Partitions},
     {CurrentDict1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
-                         lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
+                         %lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
                         ets:delete(PendingLog, {TxId, Partition}),
                         MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
                         {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)};
@@ -468,10 +468,8 @@ terminate(_Reason, _SD) ->
 read_value(Key, TxId, InMemoryStore) ->
     case ets:lookup(InMemoryStore, Key) of
         [] ->
-             lager:warning("Nothing in store!!"),
             {ok, []};
         [{Key, ValueList}] ->
-              lager:warning("Value list is ~p", [ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
             find_version(ValueList, MyClock)
     end.
@@ -537,7 +535,7 @@ clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore, TS) ->
 clean_abort_prepared(PendingLog, [Key | Rest], TxId, ReplicatedLog, TS) ->
     [{Key, List}] = ets:lookup(PendingLog, Key),
     {{TxId, _, _, Readers}, RemainList} = delete_item(List, TxId, []),
-    lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, Readers, RemainList]),
+    %lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, Readers, RemainList]),
     case Readers of
         [] ->
             true = ets:insert(PendingLog, {Key, RemainList}),
