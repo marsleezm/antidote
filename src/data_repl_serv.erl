@@ -422,7 +422,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
       end;
 
 handle_cast({repl_abort, TxId, Partitions}, 
-	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_dict=CurrentDict, backup_dict=BackupDict}) ->
+	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_dict=CurrentDict}) ->
    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     {CurrentDict1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of

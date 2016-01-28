@@ -84,20 +84,21 @@
                 fast_reply :: boolean(),
                 inmemory_store :: cache_id(),
                 dep_dict :: dict(),
-                l_abort_dict :: dict(),
-                r_abort_dict :: dict(),
+                %l_abort_dict :: dict(),
+                %r_abort_dict :: dict(),
                 %Statistics
                 max_ts :: non_neg_integer(),
-                debug = false :: boolean(),
-                total_time :: non_neg_integer(),
-                prepare_count :: non_neg_integer(),
-		        relay_read :: {non_neg_integer(), non_neg_integer()},
-                num_specula_read :: non_neg_integer(),
-                num_aborted :: non_neg_integer(),
-                num_blocked :: non_neg_integer(),
-                num_cert_fail :: non_neg_integer(),
-                blocked_time :: non_neg_integer(),
-                num_committed :: non_neg_integer()}).
+                debug = false :: boolean()
+                %total_time :: non_neg_integer(),
+                %prepare_count :: non_neg_integer(),
+		        %relay_read :: {non_neg_integer(), non_neg_integer()},
+                %num_specula_read :: non_neg_integer(),
+                %num_aborted :: non_neg_integer(),
+                %num_blocked :: non_neg_integer(),
+                %num_cert_fail :: non_neg_integer(),
+                %blocked_time :: non_neg_integer(),
+                %num_committed :: non_neg_integer()
+                }).
 
 %%%===================================================================
 %%% API
@@ -225,10 +226,10 @@ init([Partition]) ->
     CommittedTxs = tx_utilities:open_table(Partition, committed),
     InMemoryStore = tx_utilities:open_table(Partition, inmemory_store),
     DepDict = dict:new(),
-    DepDict1 = dict:store(success_wait, 0, DepDict),
-    DepDict2 = dict:store(commit_diff, {0,0}, DepDict1),
-    DepDict3 = dict:store(fucked_by_commit, {0,0}, DepDict2),
-    DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
+    %DepDict1 = dict:store(success_wait, 0, DepDict),
+    %DepDict2 = dict:store(commit_diff, {0,0}, DepDict1),
+    %DepDict3 = dict:store(fucked_by_commit, {0,0}, DepDict2),
+    %DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
     IfCertify = antidote_config:get(do_cert),
     IfReplicate = antidote_config:get(do_repl), 
     IfSpecula = antidote_config:get(do_specula), 
@@ -239,30 +240,31 @@ init([Partition]) ->
                     false ->
                         ok
                 end,
-    LD = dict:new(),
-    RD = dict:new(),
+    %LD = dict:new(),
+    %RD = dict:new(),
     {ok, #state{partition=Partition,
                 committed_txs=CommittedTxs,
                 prepared_txs=PreparedTxs,
-		        relay_read={0,0},
-                l_abort_dict=LD,
-                r_abort_dict=RD,
+		        %relay_read={0,0},
+                %l_abort_dict=LD,
+                %r_abort_dict=RD,
                 if_certify = IfCertify,
                 if_replicate = IfReplicate,
                 if_specula = IfSpecula,
                 fast_reply = FastReply,
                 inmemory_store=InMemoryStore,
-                dep_dict = DepDict4,
-                max_ts=0,
+                dep_dict = DepDict,
+                max_ts=0
 
-                total_time = 0, 
-                prepare_count = 0, 
-                num_aborted = 0,
-                num_blocked = 0,
-                blocked_time = 0,
-                num_specula_read = 0,
-                num_cert_fail = 0,
-                num_committed = 0}}.
+                %total_time = 0, 
+                %prepare_count = 0, 
+                %num_aborted = 0,
+                %num_blocked = 0,
+                %blocked_time = 0,
+                %num_specula_read = 0,
+                %num_cert_fail = 0,
+                %num_committed = 0
+                }}.
 
 handle_command({set_debug, Debug},_Sender,SD0=#state{partition=_Partition}) ->
    %lager:info("~w: Setting debug to be ~w", [Partition, Debug]),
@@ -284,40 +286,40 @@ handle_command({clean_data, Sender}, _Sender, SD0=#state{inmemory_store=OldInMem
     CommittedTxs = tx_utilities:open_table(Partition, committed),
     InMemoryStore = tx_utilities:open_table(Partition, inmemory_store),
     DepDict = dict:new(),
-    DepDict1 = dict:store(success_wait, 0, DepDict),
-    DepDict2 = dict:store(commit_diff, {0,0}, DepDict1),
-    DepDict3 = dict:store(fucked_by_commit, {0,0}, DepDict2),
-    DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
-    LD = dict:new(),
-    RD = dict:new(),
+    %DepDict1 = dict:store(success_wait, 0, DepDict),
+    %DepDict2 = dict:store(commit_diff, {0,0}, DepDict1),
+    %DepDict3 = dict:store(fucked_by_commit, {0,0}, DepDict2),
+    %DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
+    %LD = dict:new(),
+    %RD = dict:new(),
     Sender ! cleaned,
     {noreply, SD0#state{partition=Partition,
                 committed_txs=CommittedTxs,
-                prepared_txs=PreparedTxs, relay_read={0,0},
-                l_abort_dict=LD,
-                r_abort_dict=RD,
+                prepared_txs=PreparedTxs, %relay_read={0,0},
+                %l_abort_dict=LD,
+                %r_abort_dict=RD,
                 inmemory_store=InMemoryStore,
-                dep_dict = DepDict4,
-                max_ts=0, total_time = 0, prepare_count = 0, num_aborted = 0, num_blocked = 0,
-                blocked_time = 0,
-                num_specula_read = 0,
-                num_cert_fail = 0,
-                num_committed = 0}};
+                dep_dict = DepDict}};
+                %max_ts=0, total_time = 0, prepare_count = 0, num_aborted = 0, num_blocked = 0,
+                %blocked_time = 0,
+                %num_specula_read = 0,
+                %num_cert_fail = 0,
+                %num_committed = 0}};
 
-handle_command({relay_read_stat},_Sender,SD0=#state{relay_read=RelayRead}) ->
-    R = helper:handle_relay_read_stat(RelayRead),
-    {reply, R, SD0};
+handle_command({relay_read_stat},_Sender,SD0) -> %=#state{relay_read=RelayRead}) ->
+    %R = helper:handle_relay_read_stat(RelayRead),
+    {reply, 0, SD0};
 
-handle_command({num_specula_read},_Sender,SD0=#state{num_specula_read=NumSpeculaRead}) ->
-    {reply, NumSpeculaRead, SD0};
+handle_command({num_specula_read},_Sender,SD0) -> %=#state{num_specula_read=NumSpeculaRead}) ->
+    {reply, 0, SD0};
 
 handle_command({check_key_record, Key, Type},_Sender,SD0=#state{prepared_txs=PreparedTxs, committed_txs=CommittedTxs}) ->
     R = helper:handle_check_key_record(Key, Type, PreparedTxs, CommittedTxs),
     {reply, R, SD0};
 
-handle_command({check_top_aborted, Len},_Sender,SD0=#state{l_abort_dict=LAbortDict, r_abort_dict=RAbortDict, dep_dict=DepDict}) ->
-    R = helper:handle_check_top_aborted(Len, LAbortDict, RAbortDict, DepDict),
-    {reply, R, SD0};
+handle_command({check_top_aborted, _Len},_Sender,SD0) -> %=#state{l_abort_dict=LAbortDict, r_abort_dict=RAbortDict, dep_dict=DepDict}) ->
+    %R = helper:handle_check_top_aborted(Len, LAbortDict, RAbortDict, DepDict),
+    {reply, ok, SD0};
 
 handle_command({do_reply, TxId}, _Sender, SD0=#state{prepared_txs=PreparedTxs, partition=Partition, if_replicate=IfReplicate}) ->
     [{{pending, TxId}, Result}] = ets:lookup(PreparedTxs, {pending, TxId}),
@@ -344,11 +346,12 @@ handle_command({check_tables_ready},_Sender,SD0=#state{partition=Partition}) ->
     Result = helper:handle_check_tables_ready(Partition), 
     {reply, Result, SD0};
 
-handle_command({print_stat},_Sender,SD0=#state{partition=Partition, num_aborted=NumAborted, blocked_time=BlockedTime,
-                    num_committed=NumCommitted, num_cert_fail=NumCertFail, num_blocked=NumBlocked, total_time=A6, prepare_count=A7}) ->
-    R = helper:handle_print_stat(Partition, NumAborted, BlockedTime,
-                    NumCommitted, NumCertFail, NumBlocked, A6, A7),
-    {reply, R, SD0};
+handle_command({print_stat},_Sender,SD0=#state{partition=_Partition %num_aborted=NumAborted, blocked_time=BlockedTime,
+                    %num_committed=NumCommitted, num_cert_fail=NumCertFail, num_blocked=NumBlocked, total_time=A6, prepare_count=A7}) ->
+                        }) ->
+    %R = helper:handle_print_stat(Partition, NumAborted, BlockedTime,
+    %                NumCommitted, NumCertFail, NumBlocked, A6, A7),
+    {reply, ok, SD0};
     
 handle_command({check_prepared_empty},_Sender,SD0=#state{prepared_txs=PreparedTxs}) ->
     R = helper:handle_command_check_prepared_empty(PreparedTxs),
@@ -367,7 +370,7 @@ handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{max_ts=MaxTS,
    %lager:warning("Reading ~w value is ~w", [Key, Result]),
     {reply, Result, SD0#state{max_ts=MaxTS1}};
 
-handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max_ts=MaxTS,
+handle_command({read, Key, TxId}, Sender, SD0=#state{max_ts=MaxTS, %num_blocked=NumBlocked, 
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=_Partition}) ->
    %lager:info("Got read for ~w", [Key]),
     MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
@@ -375,15 +378,15 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{num_blocked=NumBlocked, max
     case ready_or_block(TxId, Key, PreparedTxs, Sender) of
         not_ready->
             %lager:info("Not ready for ~w", [Key]),
-            {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
+            {noreply, SD0#state{max_ts=MaxTS1}}; %num_blocked=NumBlocked+1
         ready ->
             Result = read_value(Key, TxId, InMemoryStore),
             %lager:info("Got value for ~w, ~w", [Key, Result]),
             {reply, Result, SD0#state{max_ts=MaxTS1}}
     end;
 
-handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_blocked=NumBlocked, relay_read=_RelayRead,
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS, num_specula_read=NumSpeculaRead}) ->
+handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS}) ->
     %{NumRR, AccRR} = RelayRead,
   %lager:error("~w relay read ~p", [TxId, Key]),
     %clock_service:update_ts(TxId#tx_id.snapshot_time),
@@ -393,7 +396,7 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_bl
         no_specula ->
             case ready_or_block(TxId, Key, PreparedTxs, {relay, Reader}) of
                 not_ready->
-                    {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
+                    {noreply, SD0#state{max_ts=MaxTS1}};
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
                     gen_server:reply(Reader, Result), 
@@ -403,12 +406,12 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_bl
         specula ->
             case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
                 not_ready->
-                    {noreply, SD0#state{num_blocked=NumBlocked+1, max_ts=MaxTS1}};
+                    {noreply, SD0#state{max_ts=MaxTS1}};
                 {specula, Value} ->
                     gen_server:reply(Reader, {ok, Value}), 
     		        %T2 = os:timestamp(),
                  %lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
-                    {noreply, SD0#state{max_ts=MaxTS1, num_specula_read=NumSpeculaRead+1}};
+                    {noreply, SD0#state{max_ts=MaxTS1}};
 				        %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
@@ -422,13 +425,8 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{num_bl
 handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                State = #state{partition=Partition,
                               if_replicate=IfReplicate,
-                              l_abort_dict=LAbortDict,
-                              r_abort_dict=RAbortDict,
                               committed_txs=CommittedTxs,
                               if_certify=IfCertify,
-                              total_time=TotalTime,
-                              prepare_count=PrepareCount,
-                              num_cert_fail=NumCertFail,
                               prepared_txs=PreparedTxs,
                               fast_reply=FastReply,
                               dep_dict=DepDict,
@@ -440,12 +438,12 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
     Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, max(MaxTS, ProposedTs), IfCertify),
     case Result of
         {ok, PrepareTime} ->
-            UsedTime = tx_utilities:now_microsec() - PrepareTime,
+            %UsedTime = tx_utilities:now_microsec() - PrepareTime,
            %lager:warning("~w: ~w certification check prepred", [Partition, TxId]),
             case IfReplicate of
                 true ->
-                    case Debug of
-                        false ->
+                    %case Debug of
+                    %    false ->
                             case RepMode of
                                 local ->
                                     PendingRecord = {Sender, false, WriteSet, PrepareTime},
@@ -459,21 +457,20 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
                             end,
-                            {noreply, State#state{total_time=TotalTime+UsedTime, max_ts=PrepareTime, prepare_count=PrepareCount+1}};
-                        true ->
-                            PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
-                           %lager:warning("Inserting pending log for replicate and debug ~w:~w", [TxId, PendingRecord]),
-                            ets:insert(PreparedTxs, {{pending, TxId}, PendingRecord}),
-                            {noreply, State#state{max_ts=PrepareTime}}
-                    end;
+                            {noreply, State#state{max_ts=PrepareTime}};
+                    %    true ->
+                    %        PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
+                    %       %lager:warning("Inserting pending log for replicate and debug ~w:~w", [TxId, PendingRecord]),
+                    %        ets:insert(PreparedTxs, {{pending, TxId}, PendingRecord}),
+                    %        {noreply, State#state{max_ts=PrepareTime}}
+                    %end;
                 false ->
                     %riak_core_vnode:reply(OriginalSender, {prepared, TxId, PrepareTime, Type}),
                     case Debug of
                         false ->
                            %lager:warning("~w prepared with ~w", [TxId, PrepareTime]),
                             gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
-                            {noreply, State#state{total_time=TotalTime+UsedTime, max_ts=PrepareTime, 
-                                prepare_count=PrepareCount+1}};
+                            {noreply, State#state{max_ts=PrepareTime}};
                         true ->
                             ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {prepared, TxId, PrepareTime, RepMode}}}),
                             {noreply, State#state{max_ts=PrepareTime}}
@@ -489,35 +486,32 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                         false -> dict:store(TxId, {NumDeps, PrepareTime, Sender, RepMode}, DepDict)
                     end, 
             {noreply, State#state{max_ts=PrepareTime, dep_dict=NewDepDict}};
-        {error, write_conflict, Key, Reason} ->
+        {error, write_conflict} ->
            %lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
             case Debug of
                 false ->
                     case RepMode of 
                         local ->
                             gen_server:cast(Sender, {aborted, TxId, {Partition, node()}}),
-                            LAbortDict1 = case Reason of 
-                                            {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, {0,0,1,Diff}, LAbortDict);
-                                            {comm, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, {1,Diff,0,0}, LAbortDict)
-                                          end,
-                            {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1, 
-                                    l_abort_dict=LAbortDict1}};
+                    %        LAbortDict1 = case Reason of 
+                    %                        {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, {0,0,1,Diff}, LAbortDict);
+                    %                        {comm, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, {1,Diff,0,0}, LAbortDict)
+                    %                      end,
+                            {noreply, State};
                         local_only ->
                             gen_server:cast(Sender, {aborted, TxId, {Partition, node()}}),
-                            LAbortDict1 = case Reason of 
-                                            {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, {0,0,1,Diff},LAbortDict);
-                                            {comm, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, {1,Diff,0,0},LAbortDict)
-                                          end,
-                            {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1, 
-                                    l_abort_dict=LAbortDict1}};
+                            %LAbortDict1 = case Reason of 
+                            %                {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, {0,0,1,Diff},LAbortDict);
+                            %                {comm, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, {1,Diff,0,0},LAbortDict)
+                            %              end,
+                            {noreply, State};
                         _ ->
                             gen_server:cast(Sender, {aborted, TxId, {Partition, node()}}),
-                            RAbortDict1 = case Reason of 
-                                            {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, {0,0,1,Diff}, RAbortDict);
-                                            {comm, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, {1,Diff,0,0}, RAbortDict)
-                                          end,
-                            {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1, 
-                                    r_abort_dict=RAbortDict1}}
+                            %RAbortDict1 = case Reason of 
+                            %                {prep, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN, CAT, PAN+1, Diff+PAT} end, {0,0,1,Diff}, RAbortDict);
+                            %                {comm, Diff} -> dict:update(Key, fun({CAN, CAT, PAN, PAT}) -> {CAN+1, CAT+Diff, PAN, PAT} end, {1,Diff,0,0}, RAbortDict)
+                            %              end,
+                            {noreply, State}
                     end;
                 true ->
                     ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {aborted, TxId, RepMode}}}),
@@ -532,9 +526,9 @@ handle_command({single_commit, WriteSet}, Sender,
                               committed_txs=CommittedTxs,
                               prepared_txs=PreparedTxs,
                               inmemory_store=InMemoryStore,
-                              num_cert_fail=NumCertFail,
-                              max_ts=MaxTS,
-                              num_committed=NumCommitted
+                              %num_cert_fail=NumCertFail,
+                              max_ts=MaxTS
+                              %num_committed=NumCommitted
                               }) ->
    %lager:warning("Got single commit for ~p", [WriteSet]),
     TxId = tx_utilities:create_tx_id(0),
@@ -547,17 +541,15 @@ handle_command({single_commit, WriteSet}, Sender,
                    %lager:warning("Trying to replicate single commit for ~p", [TxId]),
                     %% Always fast reply in prepare
                     repl_fsm:repl_prepare(Partition, single_commit, TxId, PendingRecord),
-                    {reply, {ok, {committed, CommitTime}}, State#state{max_ts=CommitTime, 
-                            num_committed=NumCommitted+1}};
+                    {reply, {ok, {committed, CommitTime}}, State#state{max_ts=CommitTime}};
                 false ->
                     %gen_server:cast(Sender, {committed, CommitTime}),
                     %Sender ! {ok, {committed, CommitTime}},
-                    {reply, {ok, {committed, CommitTime}}, State#state{max_ts=CommitTime,
-                            num_committed=NumCommitted+1}}
+                    {reply, {ok, {committed, CommitTime}}, State#state{max_ts=CommitTime}}
             end;
         {error, write_conflict} ->
             gen_server:cast(Sender, {aborted, TxId, {Partition, node()}}),
-            {noreply, State#state{num_cert_fail=NumCertFail+1}}
+            {noreply, State}
     end;
 
 handle_command({append_value, Key, Value, CommitTime}, Sender,
@@ -595,7 +587,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
                       prepared_txs=PreparedTxs,
                       inmemory_store=InMemoryStore,
                       dep_dict = DepDict,
-                      num_committed=NumCommitted,
+                      %num_committed=NumCommitted,
                       if_specula=IfSpecula
                       } = State) ->
   %lager:warning("~w: Got commit req for ~w", [Partition, TxId]),
@@ -616,8 +608,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
             %        {noreply, State#state{
             %                num_committed=NumCommitted+1}};
             %    false ->
-                    {noreply, State#state{dep_dict=DepDict1,
-                            num_committed=NumCommitted+1}};
+                    {noreply, State#state{dep_dict=DepDict1}};
             %end;
         {error, no_updates} ->
             {reply, no_tx_record, State}
@@ -625,7 +616,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
 
 handle_command({abort, TxId}, _Sender,
                State = #state{partition=Partition, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore,
-                num_aborted=NumAborted, dep_dict=DepDict, if_replicate=IfReplicate, if_specula=IfSpecula}) ->
+                dep_dict=DepDict, if_replicate=IfReplicate, if_specula=IfSpecula}) ->
   %lager:warning("~w: Aborting ~w", [Partition, TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, {waiting, WriteSet}}] ->
@@ -643,7 +634,7 @@ handle_command({abort, TxId}, _Sender,
                         clean_abort_prepared(PreparedTxs, Keys, TxId, InMemoryStore, DepDict1, ignore)
                 end,
             true = ets:delete(PreparedTxs, TxId),
-            {noreply, State#state{num_aborted=NumAborted+1, dep_dict=DepDict2}};
+            {noreply, State#state{dep_dict=DepDict2}};
         [{TxId, Keys}] ->
             case IfSpecula of
                 true -> specula_utilities:deal_abort_deps(TxId);
@@ -657,7 +648,7 @@ handle_command({abort, TxId}, _Sender,
                         false ->
                             clean_abort_prepared(PreparedTxs, Keys, TxId, InMemoryStore, DepDict, ignore)
                     end,
-            {noreply, State#state{num_aborted=NumAborted+1, dep_dict=DepDict1}};
+            {noreply, State#state{dep_dict=DepDict1}};
         [] ->
              %lager:warning("No key set at all for ~w", [TxId]),
             {noreply, State}
@@ -715,14 +706,14 @@ async_send_msg(Delay, Msg, To) ->
 prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
     PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
     case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0, IfCertify) of
-	    {false, InsertedKeys, WaitingKeys, ConflictKey, Reason} ->
+	    {false, InsertedKeys, WaitingKeys} ->
             %lager:warning("~w failed, has inserted ~p, waiting for key ~p, ConflictKye ~p", [TxId, InsertedKeys, WaitingKeys, ConflictKey]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of
                     [{K, Record}] -> ets:insert(PreparedTxs, {K, droplast(Record)})
                 end end, WaitingKeys),
-	        {error, write_conflict, ConflictKey, Reason};
+	        {error, write_conflict};
         0 ->
             %PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
 		    KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
@@ -806,10 +797,10 @@ commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Pa
                 true -> specula_utilities:deal_commit_deps(TxId, TxCommitTime);
                 false -> ok
             end,
-            DepDict1 = update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, 0),
+            update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, 0),
          %lager:warning("After commit ~w", [TxId]),
             true = ets:delete(PreparedTxs, TxId),
-            {ok, committed, DepDict1};
+            {ok, committed, DepDict};
         [] ->
            %lager:error("Prepared record of ~w has disappeared!", [TxId]),
             error
@@ -906,7 +897,7 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, W
             case CommitTime > SnapshotTime of
                 true ->
                    %lager:warning("~w: False for committed key ~p, Commit time is ~w", [TxId, Key, CommitTime]),
-                    {false, InsertedKeys, WaitingKeys, Key, {comm, CommitTime - SnapshotTime}};
+                    {false, InsertedKeys, WaitingKeys};
                 false ->
                     case check_prepared(PPTime, TxId, PreparedTxs, Key, Value) of
                         true ->
@@ -915,9 +906,9 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, W
                         wait ->
                             check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, 
                                 [Key|WaitingKeys], NumWaiting+1, true);
-                        {false, Reason} ->
+                        false ->
                           %lager:warning("~w: False of prepared for ~p", [TxId, Key]),
-                            {false, InsertedKeys, WaitingKeys, Key, Reason}
+                            {false, InsertedKeys, WaitingKeys}
                     end
             end;
         [] ->
@@ -928,9 +919,9 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, W
                 wait ->
                     check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, [Key|WaitingKeys],
                           NumWaiting+1, true);
-                {false, Reason} ->
+                false ->
                   %lager:warning("~w: False of prepared for ~p", [TxId, Key]),
-                    {false, InsertedKeys, WaitingKeys, Key, Reason}
+                    {false, InsertedKeys, WaitingKeys}
             end
     end.
 
@@ -944,7 +935,7 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
             case OldPPTime > SnapshotTime of
                 true ->
                    %lager:warning("~w fail because prepare time is ~w, PWaiters are ~p", [TxId, PrepareTime, PWaiter]),
-                    {false, {prep, OldPPTime-SnapshotTime}};
+                    false;
                 false ->
                  %lager:warning("~p: ~w waits for ~w with ~w, which is ~p", [Key, TxId, PrepTxId, PrepareTime, PWaiter]),
                     ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, PPTime, PrepValue, RWaiter}|
@@ -958,8 +949,9 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
                                 InMemoryStore :: cache_id(), CommittedTxs :: cache_id(),
                                 PreparedTxs :: cache_id(), DepDict :: dict(), 
                         Partition :: integer(), PrepareTime :: integer() ) -> ok.
-update_store([], _TxId, TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs, DepDict, _Partition, PrepareTime) ->
-    dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
+update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs, DepDict, _Partition, _PrepareTime) ->
+    DepDict;
+    %dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PTime) ->
 %lager:warning("Trying to insert key ~p with for ~w, commit time is ~w", [Key, TxId, TxCommitTime]),
     MyNode = {Partition, node()},
@@ -1140,8 +1132,8 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, M
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     %% Abort should be fast, so send abort to myself directly.. Coord won't send abort to me again.
                     abort([MyNode], TxId),
-                    DepDict1 = dict:update(fucked_by_commit, fun({T, Cnt}) ->  {T+TxCommitTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict1, MyNode)
+                    %DepDict1 = dict:update(fucked_by_commit, fun({T, Cnt}) ->  {T+TxCommitTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, MyNode)
                 %error ->
                 % %lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
                 %    specula_utilities:deal_abort_deps(TxId),
@@ -1174,8 +1166,8 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
                     %NewDepDict = dict:erase(TxId, DepDict),
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     abort([MyNode], TxId),
-                    DepDict1 = dict:update(fucked_by_badprep, fun({T, Cnt}) ->  {T+PPTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
-                    abort_others(PPTime, Rest, DepDict1, Remaining, LastPPTime, MyNode);
+                    %DepDict1 = dict:update(fucked_by_badprep, fun({T, Cnt}) ->  {T+PPTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
+                    abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime, MyNode);
                 error ->
                    %lager:warning("~w aborted already", [TxId]),
                     abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime, MyNode)
