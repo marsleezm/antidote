@@ -116,7 +116,8 @@ read(Name, TxId, Key, Node) ->
         true ->
             gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP + 1)}, {read, Key, TxId, Node}, ?READ_TIMEOUT);
         false ->
-            gen_server:call({global, Name}, {read, Key, TxId, Node}, ?READ_TIMEOUT)
+            gen_server:call(Name, {read, Key, TxId, Node}, ?READ_TIMEOUT)
+            %gen_server:call({global, Name}, {read, Key, TxId, Node}, ?READ_TIMEOUT)
     end.
 
 clean_all_data() ->
