@@ -218,7 +218,7 @@ populate_orderlines(TxServer, WarehouseId, DistrictId, OrderId, OOlCnt, Date, Pa
                     random:seed({WarehouseId, DistrictId, OrderlineId}),
                     {Amount, DDate} = case OrderId >= ?LIMIT_ORDER of
                                         true ->
-                                            {tpcc_order:random_float(0.01, 9999.99, 2), 0};
+                                            {tpcc_tool:random_float(0.01, 9999.99, 2), 0};
                                         false ->
                                             {-1, Date}
                                       end,

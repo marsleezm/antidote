@@ -161,7 +161,7 @@ init([Name, Parts]) ->
                 dict:store(Part, 0, Acc) end, dict:new(), Parts),
     lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size=NumPartitions*Concurrent div 2 +20,
+    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent div 2 +20, 60),
                 pending_log = PendingLog, current_dict = dict:new(), ts_dict=TsDict, do_specula=DoSpecula,
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
@@ -351,7 +351,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
              %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
             case dict:find(TxId, CurrentDict) of 
                 {ok, aborted} ->
-                     %lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                    %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 {ok, committed} ->
                     add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
@@ -359,7 +359,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                 error ->
                     case dict:find(TxId, BackupDict) of 
                         {ok, aborted} ->
-                             %lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                            %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         {ok, committed} ->
                             add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
@@ -381,7 +381,6 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                             {noreply, SD0}
                     end
             end;
-            %end;
         single_commit ->
             AppendFun = fun({Key, Value}) ->
                 case ets:lookup(ReplicatedLog, Key) of
@@ -423,7 +422,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
       end;
 
 handle_cast({repl_abort, TxId, Partitions}, 
-	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_dict=CurrentDict}) ->
+	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_dict=CurrentDict, backup_dict=BackupDict}) ->
    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     {CurrentDict1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
@@ -443,6 +442,7 @@ handle_cast({repl_abort, TxId, Partitions},
     end,
     case dict:size(CurrentDict1) > SetSize of
         true ->
+            %lager:info("Backup set has ~w, current dict has ~w", [dict:to_list(BackupDict), dict:to_list(CurrentDict1)]),
             {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentDict1}};
         false ->
             {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentDict1}}

@@ -5,7 +5,7 @@
 -export([random_num/2, get_key/1, c_last_rand/1, now_nsec/0, non_uniform_random/4, last_name/1,
         create_item/1, create_warehouse/1, create_stock/2, create_district/2, name_by_num/1,
         create_customer/6, create_customer_lookup/3, create_history/4, create_history/8, 
-		create_order/6, create_order/7, create_orderline/6, create_orderline/9, 
+		create_order/6, create_order/7, create_orderline/6, create_orderline/9, random_float/3, 
 		create_neworder/3, get_key_by_param/2, random_data/0]).
 
 last_name(Num) ->
