@@ -27,7 +27,8 @@
 -export([start_link/0]).
 
 -export([init/1, certify/4, get_stat/0, get_int_data/3, start_tx/1, single_read/3, clean_all_data/0, clean_data/1, 
-            start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, get_pid/1, get_global_pid/1]).
+            load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, 
+            get_pid/1, get_global_pid/1]).
 
 -define(READ_TIMEOUT, 30000).
 
@@ -54,8 +55,7 @@ load(Type, Param) ->
     StartTime = os:timestamp(),
     lists:foreach(fun(Node) ->
                     lager:info("Asking ~p to load", [Node]),
-                    CertServer = list_to_atom(atom_to_list(Node) ++ "-cert-" ++ integer_to_list(1)),
-                    gen_server:cast(CertServer, {load, self(), Type, Param})
+                    spawn(rpc, call, [Node, tx_cert_sup, load_local, [self(), Type, Param]])
                  end, AllDcs),
     lager:info("Waiting for results..."),
     lists:foreach(fun(_) ->
@@ -64,6 +64,13 @@ load(Type, Param) ->
                  end, AllDcs),
     EndTime = os:timestamp(),
     lager:info("Totally finished in tx_cert_sup, used ~w secs!!!", [timer:now_diff(EndTime, StartTime)/1000000]).
+
+load_local(Sender, Type, Param) ->
+    CertServer = list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list(1)),
+    gen_server:cast(CertServer, {load, self(), Type, Param}),
+    receive done -> ok end,
+    Sender ! done.
+    
 
 start_tx(Name) ->
     case is_integer(Name) of
