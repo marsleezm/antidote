@@ -55,10 +55,15 @@ load(WPerDc) ->
         lager:info("Finish putting.");
                 _ -> timer:sleep(4000)
     end,
+    try
+        ets:delete(tpcc_load)
+    catch
+        error:badarg ->  lager:warning("Ets table already deleted!")
+    end,
     ets:new(tpcc_load, [named_table, public, set]),
     Part1 = get_partition("COMMIT_TIME", FullPartList, HashLength),
     {ok, COMMIT_TIME} = clocksi_vnode:read_data_item(Part1, "COMMIT_TIME", tx_utilities:create_tx_id(0)),
-    lager:info("Got commit, is ~w", [COMMIT_TIME]),
+    %lager:info("Got commit, is ~w", [COMMIT_TIME]),
     ets:insert(tpcc_load, {"COMMIT_TIME", COMMIT_TIME}),
     
     ToPopulateParts = [{DcId, server}|MyReps],
@@ -70,8 +75,8 @@ load(WPerDc) ->
                                 {rep, S} -> data_repl_serv:get_table(S)
                 end,
         spawn(tpcc_load, thread_load, [Id, Tables, WPerDc, PartList, NumDcs, self()]) end, ToPopulateParts),
-    lager:info("~p waiting for children..", [self()]),
     lists:foreach(fun(_) ->  receive {done, I, S} -> ok, lager:info("Receive a reply from ~w, ~w", [I, S]) end end, ToPopulateParts), 
+    ets:delete(tpcc_load),
     EndTime = os:timestamp(),
     lager:info("Population finished.. used ~w", [timer:now_diff(EndTime, StartTime)/1000000]).
 
