@@ -98,7 +98,7 @@
 %%%===================================================================
 
 start_link(Name) ->
-   %lager:warning("Specula tx cert started wit name ~w", [Name]),
+    lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
     gen_server:start_link({local,Name},
              ?MODULE, [], []).
 
@@ -108,7 +108,6 @@ start_link(Name) ->
 
 init([]) ->
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
-    lager:info("Specula tx starts with ~p", [self()]),
     DoRepl = antidote_config:get(do_repl),
     RepDict = hash_fun:build_rep_dict(DoRepl),
     SpeculaLength = antidote_config:get(specula_length),

@@ -59,7 +59,7 @@
 %%%===================================================================
 
 start_link(Name) ->
-    lager:info("Normal tx cert started wit name ~w", [Name]),
+    lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
     gen_server:start_link({local, Name},
              ?MODULE, [], []).
 
