@@ -162,7 +162,7 @@ init([Name, Parts]) ->
                 dict:store(Part, 0, Acc) end, dict:new(), Parts),
     lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent div 2 +20, 100),
+    {ok, #state{name=Name, set_size= NumPartitions*Concurrent div 2 +20,
                 pending_log = PendingLog, current_dict = dict:new(), ts_dict=TsDict, do_specula=DoSpecula,
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
@@ -355,19 +355,19 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
              %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
             case dict:find(TxId, CurrentDict) of 
                 {ok, aborted} ->
-                    lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                   %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 {ok, committed} ->
-                    lager:warning("~w, ~w committed already", [TxId, Partition]),
+                   %lager:warning("~w, ~w committed already", [TxId, Partition]),
                     add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
                     {noreply, SD0};
                 error ->
                     case dict:find(TxId, BackupDict) of 
                         {ok, aborted} ->
-                            lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                           %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         {ok, committed} ->
-                            lager:warning("~w, ~w committed already", [TxId, Partition]),
+                           %lager:warning("~w, ~w committed already", [TxId, Partition]),
                             add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
                             {noreply, SD0};
                         error ->
@@ -429,7 +429,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_dict=CurrentDict}) ->
-    lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
+   %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     {CurrentDict1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
@@ -438,7 +438,7 @@ handle_cast({repl_abort, TxId, Partitions},
                         MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
                         {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)};
                     [] -> 
-                        lager:warning("Repl abort arrived early! ~w", [TxId]),
+                       %lager:warning("Repl abort arrived early! ~w", [TxId]),
                         {dict:store(TxId, aborted, S), D}
                 end
         end, {CurrentDict, TsDict}, Partitions),
@@ -448,7 +448,7 @@ handle_cast({repl_abort, TxId, Partitions},
     end,
     case dict:size(CurrentDict1) > SetSize of
         true ->
-            lager:warning("Current set is too large!"),
+           %lager:warning("Current set is too large!"),
             {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentDict1}};
         false ->
             {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentDict1}}
@@ -541,7 +541,7 @@ clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore, TS) ->
 clean_abort_prepared(PendingLog, [Key | Rest], TxId, ReplicatedLog, TS) ->
     [{Key, List}] = ets:lookup(PendingLog, Key),
     {{TxId, _, _, Readers}, RemainList} = delete_item(List, TxId, []),
-    lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, Readers, RemainList]),
+   %lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, Readers, RemainList]),
     case Readers of
         [] ->
             true = ets:insert(PendingLog, {Key, RemainList}),
@@ -655,8 +655,8 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                 ready -> ready;
                 {specula, PTxId, Value} ->%lager:warning("Specula reading ~p, from ~w to ~w", [Key, TxId, PTxId]), 
                     add_read_dep(TxId, PTxId, Key), {specula, Value};
-                {not_ready, NewList, PTxId} ->
-                    lager:warning("~w read is blocked by ~w for ~p", [TxId, PTxId, Key]),
+                {not_ready, NewList, _PTxId} ->
+                   %lager:warning("~w read is blocked by ~w for ~p", [TxId, PTxId, Key]),
                     ets:insert(PreparedTxs, {Key, NewList}), not_ready
             end
     end.
@@ -677,7 +677,7 @@ read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sende
     read_or_block(Rest, [{PTxId, PrepTime, Value, Reader}|Prev], SnapshotTime, Sender).
 
 add_read_dep(ReaderTx, WriterTx, _Key) ->
-    lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
+   %lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
