@@ -324,6 +324,7 @@ handle_cast({relay_read, Key, TxId, Reader},
     end;
 
 handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pending_log=OldPendingLog}) ->
+    lager:info("Got request!"),
     ets:delete(OldPendingLog),
     ets:delete(OldReplicatedLog),
     ReplicatedLog = tx_utilities:open_public_table(repl_log),

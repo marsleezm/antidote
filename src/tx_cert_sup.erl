@@ -151,7 +151,7 @@ clean_data(Sender) ->
     lists:foreach(fun(_) -> receive cleaned -> ok end  end, SPL),
     lager:info("Got reply from all tx servers"),
     DataRepls = repl_fsm_sup:generate_data_repl_serv(),
-    lists:foreach(fun({N, _, _, _, _, _}) ->  data_repl_serv:clean_data(N,  MySelf)  end, DataRepls),
+    lists:foreach(fun({N, _, _, _, _, _}) -> lager:info("Sending to ~w", [N]), data_repl_serv:clean_data(N,  MySelf)  end, DataRepls),
     lists:foreach(fun(_) ->  receive cleaned -> ok end  end, DataRepls),
     lager:info("Got reply from all data_repls"),
     S = hash_fun:get_local_servers(),
