@@ -99,7 +99,7 @@
 
 start_link(Name) ->
    %lager:warning("Specula tx cert started wit name ~w", [Name]),
-    gen_server:start_link({global, Name},
+    gen_server:start_link({local,Name},
              ?MODULE, [], []).
 
 %%%===================================================================

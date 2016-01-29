@@ -40,10 +40,10 @@ single_commit(Name, Node, Key, Value) ->
 append_values(Name, Node, KeyValues, CommitTime) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, 
+            gen_server:call(generate_module_name((Name-1) rem ?NUM_SUP +1), 
                     {append_values, Node, KeyValues, CommitTime}, 15000);
         false ->
-            gen_server:call({global, Name}, 
+            gen_server:call(Name, 
                     {append_values, Node, KeyValues, CommitTime}, 15000)
     end.
 
@@ -55,7 +55,7 @@ load(Type, Param) ->
     lists:foreach(fun(Node) ->
                     lager:info("Asking ~p to load", [Node]),
                     CertServer = list_to_atom(atom_to_list(Node) ++ "-cert-" ++ integer_to_list(1)),
-                    gen_server:cast({global, CertServer}, {load, self(), Type, Param})
+                    gen_server:cast(CertServer, {load, self(), Type, Param})
                  end, AllDcs),
     lager:info("Waiting for results..."),
     lists:foreach(fun(_) ->
@@ -68,43 +68,43 @@ load(Type, Param) ->
 start_tx(Name) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {start_tx});
+            gen_server:call(generate_module_name((Name-1) rem ?NUM_SUP +1), {start_tx});
         false ->
-            gen_server:call({global, Name}, {start_tx})
+            gen_server:call(Name, {start_tx})
     end.
 
 start_read_tx(Name) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {start_read_tx});
+            gen_server:call(generate_module_name((Name-1) rem ?NUM_SUP +1), {start_read_tx});
         false ->
-            gen_server:call({global, Name}, {start_read_tx})
+            gen_server:call(Name, {start_read_tx})
     end.
 
 certify(Name, TxId, LocalUpdates, RemoteUpdates) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, 
+            gen_server:call(generate_module_name((Name-1) rem ?NUM_SUP +1), 
                     {certify, TxId, LocalUpdates, RemoteUpdates});
         false ->
-            gen_server:call({global, Name}, 
+            gen_server:call(Name, 
                     {certify, TxId, LocalUpdates, RemoteUpdates})
     end.
 
 get_int_data(Name, Type, Param) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {get_int_data, Type, Param});
+            gen_server:call(generate_module_name((Name-1) rem ?NUM_SUP +1), {get_int_data, Type, Param});
         false ->
-            gen_server:call({global, Name}, {get_int_data, Type, Param})
+            gen_server:call(Name, {get_int_data, Type, Param})
     end.
 
 set_int_data(Name, Type, Param) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP +1)}, {set_int_data, Type, Param});
+            gen_server:call(generate_module_name((Name-1) rem ?NUM_SUP +1), {set_int_data, Type, Param});
         false ->
-            gen_server:call({global, Name}, {set_int_data, Type, Param})
+            gen_server:call(Name, {set_int_data, Type, Param})
     end.
 
 single_read(Name, Key, Node) ->
@@ -114,7 +114,7 @@ single_read(Name, Key, Node) ->
 read(Name, TxId, Key, Node) ->
     case is_integer(Name) of
         true ->
-            gen_server:call({global, generate_module_name((Name-1) rem ?NUM_SUP + 1)}, {read, Key, TxId, Node}, ?READ_TIMEOUT);
+            gen_server:call(generate_module_name((Name-1) rem ?NUM_SUP + 1), {read, Key, TxId, Node}, ?READ_TIMEOUT);
         false ->
             gen_server:call(Name, {read, Key, TxId, Node}, ?READ_TIMEOUT)
             %gen_server:call({global, Name}, {read, Key, TxId, Node}, ?READ_TIMEOUT)
@@ -140,7 +140,7 @@ clean_data(Sender) ->
     SPL = lists:seq(1, ?NUM_SUP),
     MySelf = self(),
     lager:info("~w received", [node()]),
-    lists:foreach(fun(N) -> gen_server:cast({global, generate_module_name(N)}, {clean_data, MySelf}) end, SPL),
+    lists:foreach(fun(N) -> gen_server:cast(generate_module_name(N), {clean_data, MySelf}) end, SPL),
     lists:foreach(fun(_) -> receive cleaned -> ok end  end, SPL),
     lager:info("Got reply from all tx servers"),
     DataRepls = repl_fsm_sup:generate_data_repl_serv(),
@@ -151,7 +151,7 @@ clean_data(Sender) ->
     lists:foreach(fun(N) ->  clocksi_vnode:clean_data(N,  MySelf)  end, S),
     lists:foreach(fun(_) ->  receive cleaned -> ok end  end, S),
     lager:info("Got reply from all local_nodes"),
-    gen_server:call({global, node()}, {clean_data}),
+    gen_server:call(node(), {clean_data}),
     Sender ! cleaned.
 
 get_stat() ->
@@ -195,7 +195,7 @@ generate_supervisor_spec(N) ->
     end.
 
 get_pid(Name) ->
-    gen_server:call({global, Name}, {get_pid}).
+    gen_server:call(Name, {get_pid}).
 
 %% @doc Starts the coordinator of a ClockSI interactive transaction.
 init([]) ->

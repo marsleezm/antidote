@@ -70,7 +70,7 @@
 %%%===================================================================
 
 start_link(Name) ->
-    gen_server:start_link({global, Name},
+    gen_server:start_link({local, Name},
              ?MODULE, [], []).
 
 read(Name, Key, TxId, Node) ->
