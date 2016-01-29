@@ -77,6 +77,7 @@
         replicated_log :: cache_id(),
         pending_log :: cache_id(),
         delay :: non_neg_integer(),
+        init_ts_dict=false :: boolean(),
         num_specula_read=0 :: non_neg_integer(),
         num_read=0 :: non_neg_integer(),
         set_size :: non_neg_integer(),
@@ -151,19 +152,19 @@ clean_data(Name, Sender) ->
 %%%===================================================================
 
 
-init([Name, Parts]) ->
+init([Name, _Parts]) ->
     lager:info("Data repl inited with name ~w", [Name]),
     ReplicatedLog = tx_utilities:open_public_table(repl_log),
     PendingLog = tx_utilities:open_private_table(pending_log),
     NumPartitions = length(hash_fun:get_partitions()),
     DoSpecula = antidote_config:get(do_specula),
     Concurrent = antidote_config:get(concurrent),
-    TsDict = lists:foldl(fun(Part, Acc) ->
-                dict:store(Part, 0, Acc) end, dict:new(), Parts),
-    lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
-    lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
+    %TsDict = lists:foldl(fun(Part, Acc) ->
+    %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
+    %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
+    %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
     {ok, #state{name=Name, set_size= NumPartitions*Concurrent div 2 +20,
-                pending_log = PendingLog, current_dict = dict:new(), ts_dict=TsDict, do_specula=DoSpecula,
+                pending_log = PendingLog, current_dict = dict:new(), ts_dict=dict:new(), do_specula=DoSpecula,
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
 handle_call({get_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
@@ -244,6 +245,16 @@ handle_call({read, Key, TxId, {Part, _}}, Sender,
             end
     end;
 
+handle_call({update_ts, Partitions}, _Sender, SD0=#state{ts_dict=TsDict, init_ts_dict=InitTs}) ->
+    case InitTs of true ->  {reply, ok, SD0};
+                   false ->  
+                            Parts = find_parts_for_name(Partitions),
+                            TsDict1 = lists:foldl(fun(Part, D) ->
+                                dict:store(Part, 0, D)
+                                end, TsDict, Parts),
+                            {reply, ok, SD0#state{ts_dict=TsDict1, init_ts_dict=true}}
+    end;
+
 handle_call({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, Sender, 
 	    SD0=#state{pending_log=PendingLog, ts_dict=TsDict}) ->
     gen_server:reply(Sender, dict:fetch(Partition, TsDict)),
@@ -320,7 +331,7 @@ handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pe
     lager:info("Data repl replying!"),
     Sender ! cleaned,
     {noreply, SD0#state{pending_log = PendingLog, current_dict = dict:new(), backup_dict = dict:new(), 
-                num_specula_read=0, num_read=0, replicated_log = ReplicatedLog}};
+                num_specula_read=0, num_read=0, replicated_log = ReplicatedLog, init_ts_dict=false}};
 
 %% Where shall I put the speculative version?
 %% In ets, faster for read.
@@ -411,7 +422,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
                 [{{TxId, Partition}, KeySet}] ->
                     ets:delete(PendingLog, {TxId, Partition}),
                     MaxTs = update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0),
-                    {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)};
+                    {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, D)};
                 [] ->
                   %lager:warning("Repl commit arrived early! ~w", [TxId]),
                   {dict:store(TxId, committed, S), D}
@@ -436,7 +447,7 @@ handle_cast({repl_abort, TxId, Partitions},
                          %lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
                         ets:delete(PendingLog, {TxId, Partition}),
                         MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
-                        {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, MaxTs, D)};
+                        {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, D)};
                     [] -> 
                        %lager:warning("Repl abort arrived early! ~w", [TxId]),
                         {dict:store(TxId, aborted, S), D}
@@ -694,3 +705,16 @@ add_to_commit_tab(WriteSet, TxCommitTime, Tab) ->
                     true = ets:insert(Tab, {Key, [{TxCommitTime, Value}|RemainList]})
             end
     end, WriteSet).
+
+find_parts_for_name(Partitions) ->
+    Repls = antidote_config:get(to_repl),
+    [ReplNodes] = [L || {N, L} <- Repls, N == node()],
+    lists:foldl(fun(Node, List) ->
+                PartList = [P || {P, N} <- Partitions, N == Node],
+                PartList++List
+                end, [], ReplNodes).
+
+
+
+
+

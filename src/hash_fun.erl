@@ -171,6 +171,8 @@ get_hash_fun() ->
                             dict:store(Node, List++[{Index, Node}], Dict)
                     end
                 end, dict:new(), Partitions),
+                DataRepls = repl_fsm_sup:generate_data_repl_serv(),
+                lists:foreach(fun({N, _, _, _, _, _}) ->  gen_server:call({global, N}, {update_ts, Partitions})  end, DataRepls),
                 AllNodes = [Node  || {Node, _} <- antidote_config:get(to_repl)],
                 PartList = lists:foldr(fun(N, L) ->
                                 [{N, dict:fetch(N, Dict1)}|L] 
