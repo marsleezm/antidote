@@ -74,28 +74,28 @@ start_link(Name) ->
              ?MODULE, [], []).
 
 read(Name, Key, TxId, Node) ->
-    gen_server:call({global, Name}, {read, Key, TxId, Node}).
+    gen_server:call(Name, {read, Key, TxId, Node}).
 
 read(Key, TxId, Node) ->
-    gen_server:call({global, node()}, {read, Key, TxId, Node}).
+    gen_server:call(node(), {read, Key, TxId, Node}).
 
 read(Key, TxId) ->
-    gen_server:call({global, node()}, {read, Key, TxId}).
+    gen_server:call(node(), {read, Key, TxId}).
 
 num_specula_read() ->
-    gen_server:call({global, node()}, {num_specula_read}).
+    gen_server:call(node(), {num_specula_read}).
 
 if_prepared(TxId, Keys) ->
-    gen_server:call({global, node()}, {if_prepared, TxId, Keys}).
+    gen_server:call(node(), {if_prepared, TxId, Keys}).
 
 prepare_specula(TxId, Partition, WriteSet, PrepareTime) ->
-    gen_server:cast({global, node()}, {prepare_specula, TxId, Partition, WriteSet, PrepareTime}).
+    gen_server:cast(node(), {prepare_specula, TxId, Partition, WriteSet, PrepareTime}).
 
 abort_specula(TxId, Partition) -> 
-    gen_server:cast({global, node()}, {abort_specula, TxId, Partition}).
+    gen_server:cast(node(), {abort_specula, TxId, Partition}).
 
 commit_specula(TxId, Partition, CommitTime) -> 
-    gen_server:cast({global, node()}, {commit_specula, TxId, Partition, CommitTime}).
+    gen_server:cast(node(), {commit_specula, TxId, Partition, CommitTime}).
 
 %%%===================================================================
 %%% Internal

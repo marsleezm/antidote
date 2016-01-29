@@ -164,7 +164,7 @@ clean_data(Sender) ->
 get_stat() ->
     SPL = lists:seq(1, ?NUM_SUP),
     {R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, Cnt} = lists:foldl(fun(N, {A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, C}) ->
-                            Res = gen_server:call({global, generate_module_name(N)}, {get_stat}),
+                            Res = gen_server:call(generate_module_name(N), {get_stat}),
                             {T1, T2, T3, T4, T5, T6, T7, T8, T9, T10} = Res,
                             lager:info("Get stat from ~w is ~p", [N, Res]),
                             NewC = case T1 of 0 -> C; _ -> C+1 end, 
