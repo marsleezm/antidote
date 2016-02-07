@@ -220,9 +220,9 @@ handle_call({append_values, KeyValues, CommitTime}, _Sender, SD0=#state{replicat
                 end, KeyValues),
     {reply, ok, SD0};
 
-handle_call({read, Key, TxId, {Part, _}}, Sender, 
+handle_call({read, Key, TxId, {_Part, _}}, Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog, num_read=NumRead, pending_log=PendingLog,
-                num_specula_read=NumSpeculaRead, ts_dict=TsDict, do_specula=DoSpecula}) ->
+                num_specula_read=NumSpeculaRead, do_specula=DoSpecula}) ->
     case DoSpecula of
         false ->
             case ready_or_block(TxId, Key, PendingLog, Sender) of
@@ -230,9 +230,7 @@ handle_call({read, Key, TxId, {Part, _}}, Sender,
                     {noreply, SD0};
                 ready ->
                     Result = read_value(Key, TxId, ReplicatedLog),
-                    MyClock = TxId#tx_id.snapshot_time,
-                    TsDict1 = dict:update(Part, fun(OldTs) -> max(MyClock, OldTs) end, TsDict),
-                    {reply, Result, SD0#state{ts_dict=TsDict1, num_read=NumRead+1}}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
+                    {reply, Result, SD0#state{num_read=NumRead+1}}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
             case specula_read(TxId, Key, PendingLog, Sender) of
@@ -242,9 +240,9 @@ handle_call({read, Key, TxId, {Part, _}}, Sender,
                     {reply, {ok, Value}, SD0#state{num_specula_read=NumSpeculaRead+1}};
                 ready ->
                     Result = read_value(Key, TxId, ReplicatedLog),
-                    MyClock = TxId#tx_id.snapshot_time,
-                    TsDict1 = dict:update(Part, fun(OldTs) -> max(MyClock, OldTs) end, TsDict),
-                    {reply, Result, SD0#state{ts_dict=TsDict1, num_read=NumRead+1}}
+                    %MyClock = TxId#tx_id.snapshot_time,
+                    %TsDict1 = dict:update(Part, fun(OldTs) -> max(MyClock, OldTs) end, TsDict),
+                    {reply, Result, SD0#state{num_read=NumRead+1}}
             end
     end;
 
@@ -441,44 +439,44 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 
 
 handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
-	    SD0=#state{replicated_log=ReplicatedLog, set_size=SetSize, pending_log=PendingLog, ts_dict=TsDict, do_specula=DoSpecula,  current_dict=CurrentDict}) ->
+	    SD0=#state{replicated_log=ReplicatedLog, set_size=SetSize, pending_log=PendingLog, do_specula=DoSpecula,  current_dict=CurrentDict}) ->
      lager:warning("repl commit for ~w ~w", [TxId, Partitions]),
-    {CurrentD1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
+    CurrentD1 = lists:foldl(fun(Partition, S) ->
             case ets:lookup(PendingLog, {TxId, Partition}) of
                 [{{TxId, Partition}, KeySet}] ->
                     ets:delete(PendingLog, {TxId, Partition}),
                     update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog),
-                    {S, D};
+                    S;
                 [] ->
-                   lager:warning("Repl commit arrived early! ~w", [TxId]),
-                  {dict:store(TxId, {committed, CommitTime}, S), D}
-        end end, {CurrentDict, TsDict}, Partitions),
+                    lager:warning("Repl commit arrived early! ~w", [TxId]),
+                    dict:store(TxId, {committed, CommitTime}, S)
+        end end, CurrentDict, Partitions),
     case DoSpecula of
         true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
         _ -> ok
     end,
     case dict:size(CurrentD1) > SetSize of
           true ->
-            {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentD1}};
+            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentD1}};
           false ->
-            {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
+            {noreply, SD0#state{current_dict=CurrentD1}}
       end;
 
 handle_cast({repl_abort, TxId, Partitions}, 
-	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_dict=CurrentDict}) ->
+	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict}) ->
     lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
-    {CurrentDict1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
+    CurrentDict1 = lists:foldl(fun(Partition, S) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
-                          lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
+                        lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
                         ets:delete(PendingLog, {TxId, Partition}),
-                        MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
-                        {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, D)};
+                        _MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
+                        S;
                     [] -> 
                         lager:warning("Repl abort arrived early! ~w", [TxId]),
-                        {dict:store(TxId, aborted, S), D}
+                        dict:store(TxId, aborted, S)
                 end
-        end, {CurrentDict, TsDict}, Partitions),
+        end, CurrentDict, Partitions),
     case DoSpecula of
         true -> specula_utilities:deal_abort_deps(TxId);
         _ -> ok
@@ -486,9 +484,9 @@ handle_cast({repl_abort, TxId, Partitions},
     case dict:size(CurrentDict1) > SetSize of
         true ->
             lager:warning("Current set is too large!"),
-            {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentDict1}};
+            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict1}};
         false ->
-            {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentDict1}}
+            {noreply, SD0#state{current_dict=CurrentDict1}}
     end;
 
 handle_cast(_Info, StateData) ->

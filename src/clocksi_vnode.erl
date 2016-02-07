@@ -785,19 +785,20 @@ prepare_and_commit(TxId, [{Key, Value}], CommittedTxs, PreparedTxs, InMemoryStor
 %    set_prepared(PreparedTxs,Rest,TxId,Time, [Key|KeySet]).
 
 commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula)->
-  lager:warning("Before commit ~w", [TxId]),
+    lager:warning("Before commit ~w", [TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             case IfSpecula of
                 true -> specula_utilities:deal_commit_deps(TxId, TxCommitTime);
                 false -> ok
             end,
+            lager:warning("Before update store!"),
             DepDict1 = update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, 0),
-          lager:warning("After commit ~w", [TxId]),
+            lager:warning("After commit ~w", [TxId]),
             true = ets:delete(PreparedTxs, TxId),
             {ok, committed, DepDict1};
         [] ->
-           %lager:error("Prepared record of ~w has disappeared!", [TxId]),
+            lager:error("Prepared record of ~w has disappeared!", [TxId]),
             error
     end.
 

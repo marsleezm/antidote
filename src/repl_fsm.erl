@@ -204,6 +204,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
                             %    local_fast ->%lager:warning("Replicating local_fast txn! ~w", [TxId]);
                             %    _ -> ok
                             %end,
+                            lager:info("For ~w, current prepare time is ~w", [TxId, PrepareTime]),
                             ets:insert(PendingLog, {{TxId, Partition}, {{prepared, Sender, 
                                     PrepareTime, RepMode}, ReplFactor}}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
@@ -216,6 +217,7 @@ handle_cast({repl_prepare, Partition, PrepType, TxId, LogContent},
     {noreply, SD0};
 
 handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLog}) ->
+    lager:info("Got proposed ts ~w fo ~w", [ProposedTs, TxId]),
     case ets:lookup(PendingLog, {TxId, Partition}) of
         [{{TxId, Partition}, {R, 1}}] ->
         %ToReply = {prepared, TxId, PrepareTime, remote},
@@ -225,7 +227,7 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
             {PrepType, Sender, Timestamp, RepMode} = R,
             case PrepType of
                 prepared ->
-                   %lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w", [Partition, RepMode, TxId, Sender]),
+                   lager:warning("Got enough reply.. Replying ~w for [~w, ~w] to ~w, returning ~w", [Partition, RepMode, TxId, Sender, max(Timestamp, ProposedTs)]),
                     true = ets:delete(PendingLog, {TxId, Partition}),
                     case RepMode of
                         false -> ok;
@@ -239,7 +241,7 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
             end;
         [{{TxId, Partition}, {R, N}}] ->
             {PrepType, Sender, Timestamp, RepMode} = R,
-           %lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
+           lager:warning("Got req from ~w for ~w, ~w more to get, Storing ~w", [Partition, TxId, N-1, max(ProposedTs, Timestamp)]),
             ets:insert(PendingLog, {{TxId, Partition}, {{PrepType, Sender, max(Timestamp,ProposedTs), RepMode}, N-1}});
         [] -> %%The record is appended already, do nothing
             %lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
