@@ -347,7 +347,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                     ?CLOCKSI_VNODE:prepare(NewRemoteUps, TxId, {remote, node()}),
                     gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
                     DepDict1 = dict:store(TxId, {RemoteToAck+PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
-                    {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
+                    {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, pending_list=PendingList++[TxId]}}
             end;
         {ok, {N, ReadDeps, OldPrepTime}} ->
              %lager:warning("~w needs ~w local prep replies", [TxId, N-1]),
