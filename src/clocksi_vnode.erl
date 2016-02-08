@@ -871,12 +871,12 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 					true = ets:insert(PreparedTxs, {Key, [{PPTxId, PPTime, LastReaderTime, LastPPTime, PValue, StillPReaders}|Remaining]}),
 					clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition)
             end;
-        [{Key, [Preped|PrepDeps]}] ->
+        %[{Key, [Preped|PrepDeps]}] ->
             %% Make TxId invalid so the txn coord can notice this later. Instead of going to delete one by one in the list.
-            PrepDeps1 = lists:keydelete(TxId, 1, PrepDeps), 
+            %PrepDeps1 = lists:keydelete(TxId, 1, PrepDeps), 
            %lager:warning("~w for ~w is not prepared! PrepDeps are ~p, after is ~p", [Key, TxId, PrepDeps, PrepDeps]),
-            ets:insert(PreparedTxs, {Key, [Preped|PrepDeps1]}),
-            clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict, Partition);
+            %ets:insert(PreparedTxs, {Key, [Preped|PrepDeps1]}),
+        %    clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict, Partition);
         _ ->
             clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict, Partition)
     end.
