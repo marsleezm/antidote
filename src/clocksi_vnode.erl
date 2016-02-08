@@ -1191,16 +1191,16 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, L
                     deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastReaderTime, MyNode)
             end;
         false ->
-            %case dict:find(TxId, DepDict) of
-                %error ->
+            case dict:find(TxId, DepDict) of
+                error ->
                 %    %% This transaction has been aborted already.
                 %    specula_utilities:deal_abort_deps(TxId),
-                %    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict);
-            %    _ ->
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastReaderTime, MyNode);
+                _ ->
                     {NewDepDict, Remaining, LastPPTime} = abort_others(PPTime, PWaiter, DepDict, MyNode),
                  %lager:error("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
                     {TxId, [{TxId, PPTime, LastReaderTime, LastPPTime, Value, []}|Remaining], NewDepDict}
-            %end
+            end
     end.
 
 abort_others(PPTime, PWaiters, DepDict, MyNode) ->
