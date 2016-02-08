@@ -874,6 +874,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
         [{Key, [Preped|PrepDeps]}] ->
             %% Make TxId invalid so the txn coord can notice this later. Instead of going to delete one by one in the list.
             PrepDeps1 = lists:keydelete(TxId, 1, PrepDeps), 
+            lager:warning("~w for ~w is not prepared! PrepDeps are ~p, after is ~p", [Key, TxId, PrepDeps, PrepDeps]),
             ets:insert(PreparedTxs, {Key, [Preped|PrepDeps1]}),
             clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict, Partition);
         _ ->
@@ -1229,7 +1230,7 @@ abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime
 %% Update its entry in DepDict.. If the transaction can be prepared already, prepare it
 %% (or just replicate it).. Otherwise just update and do nothing. 
 unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
-   lager:warning("Unblocking transaction ~w", [TxId]),
+    lager:warning("Unblocking transaction ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         {ok, {1, PrepareTime, Sender, RepMode}} ->
             case Partition of
