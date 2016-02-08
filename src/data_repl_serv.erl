@@ -695,7 +695,8 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
                     ready
             end;
         [{Key, LastReaderTime}] ->
-            ets:insert(PreparedTxs, {Key, max(SnapshotTime, LastReaderTime)})
+            ets:insert(PreparedTxs, {Key, max(SnapshotTime, LastReaderTime)}),
+            ready
     end.
 
 specula_read(TxId, Key, PreparedTxs, Sender) ->
