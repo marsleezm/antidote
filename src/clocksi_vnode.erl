@@ -32,7 +32,6 @@
         clean_data/2,
         async_send_msg/3,
 
-        check_and_insert/8,
         set_debug/2,
         do_reply/2,
         debug_prepare/4,
@@ -831,10 +830,10 @@ clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore, DepDict, _) ->
 clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Partition) ->
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
-        [{Key, [{TxId, _, LastReaderTime, _, _, []}| PrepDeps]}] ->
+        [{Key, [{TxId, _, LastReaderTime, LastPPTime, _, []}| PrepDeps]}] ->
          lager:warning("clean abort: for key ~p, No reader, prepdeps are ~p", [Key, PrepDeps]),
 			%% 0 for commit time means that the first prepared txs will just be prepared
-            {PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, LastReaderTime, MyNode),
+            {PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, LastReaderTime, LastPPTime, MyNode),
             case PPTxId of
                 ignore ->
 					true = ets:insert(PreparedTxs, {Key, LastReaderTime}),
@@ -844,9 +843,9 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 					true = ets:insert(PreparedTxs, {Key, Record}),
 					clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition)
             end;
-        [{Key, [{TxId, _, LastReaderTime, _, _, PendingReaders}|PrepDeps]}] ->
+        [{Key, [{TxId, _, LastReaderTime, LastPPTime, _, PendingReaders}|PrepDeps]}] ->
             lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, PendingReaders, PrepDeps]),
-			{PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, LastReaderTime, MyNode),
+			{PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, LastReaderTime, LastPPTime, MyNode),
             Value = case ets:lookup(InMemoryStore, Key) of
 		                [{Key, ValueList}] ->
 		                    {_, V} = hd(ValueList),
@@ -912,45 +911,6 @@ certification_check(PrepareTime, TxId, [Key|T], CommittedTxs, PreparedTxs, NumBl
                    false
             end
     end.
-%% @doc Performs a certification check when a transaction wants to move
-%%      to the prepared state.
-check_and_insert(FinalPrepTime, _, [], _, _, _, _, NumWaiting) ->
-    {NumWaiting, FinalPrepTime};
-check_and_insert(PrepTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, WaitingKeys, NumWaiting) ->
-    {Key, Value} = H,
-    SnapshotTime = TxId#tx_id.snapshot_time,
-    case ets:lookup(CommittedTxs, Key) of
-        [{Key, CommitTime}] ->
-            case CommitTime > SnapshotTime of
-                true ->
-                    lager:warning("~w: False for committed key ~p, Commit time is ~w", [TxId, Key, CommitTime]),
-                    {false, InsertedKeys, WaitingKeys};
-                false ->
-                    case check_prepared(PrepTime, TxId, PreparedTxs, Key, Value) of
-                        {true, NewPrepTime} ->
-                            check_and_insert(NewPrepTime, TxId, T, CommittedTxs, PreparedTxs,  
-                                [Key|InsertedKeys], WaitingKeys, NumWaiting);
-                        {wait, NewPrepTime} ->
-                            check_and_insert(NewPrepTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, 
-                                [Key|WaitingKeys], NumWaiting+1);
-                        false ->
-                           lager:warning("~w: False of prepared for ~p", [TxId, Key]),
-                            {false, InsertedKeys, WaitingKeys}
-                    end
-            end;
-        [] ->
-            case check_prepared(PrepTime, TxId, PreparedTxs, Key, Value) of
-                {true, NewPrepTime} ->
-                    check_and_insert(NewPrepTime, TxId, T, CommittedTxs, PreparedTxs, 
-                        [Key|InsertedKeys], WaitingKeys, NumWaiting); 
-                {wait, NewPrepTime} ->
-                    check_and_insert(NewPrepTime, TxId, T, CommittedTxs, PreparedTxs, InsertedKeys, [Key|WaitingKeys],
-                          NumWaiting+1);
-                false ->
-                   lager:warning("~w: False of prepared for ~p", [TxId, Key]),
-                    {false, InsertedKeys, WaitingKeys}
-            end
-    end.
 
 check_prepared(_, TxId, PreparedTxs, Key, _Value) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
@@ -958,10 +918,10 @@ check_prepared(_, TxId, PreparedTxs, Key, _Value) ->
         [] ->
             %ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, PPTime, Value, []}]}),
             {true, 1};
-        [{Key, [{PrepTxId, PrepareTime, LastReaderTime, _OldPPTime, _PrepValue, _RWaiter}|PWaiter]}] ->
-            case PrepareTime > SnapshotTime of
+        [{Key, [{PrepTxId, PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|PWaiter]}] ->
+            case LastPPTime > SnapshotTime of
                 true ->
-                     lager:warning("~w fail because prepare time is ~w, PWaiters are ~p", [TxId, PrepareTime, PWaiter]),
+                     lager:warning("~w fail because prepare time is ~w, LastPPTime is ~w, PWaiters are ~p", [TxId, PrepareTime, LastPPTime, PWaiter]),
                     false;
                 false ->
                     %ToPrepTime = max(LastReaderTime+1, PPTime),
@@ -988,7 +948,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
  lager:warning("Trying to insert key ~p with for ~w, commit time is ~w", [Key, TxId, TxCommitTime]),
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
-        [{Key, [{TxId, PrepareTime, PrepareTime, _, Value, []}|Deps] }] ->		
+        [{Key, [{TxId, PrepareTime, PrepareTime, LastPPTime, Value, []}|Deps] }] ->		
            lager:warning("~w No pending reader! Waiter is ~p", [TxId, Deps]),
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
@@ -999,7 +959,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}|RemainList]})
             end,
 			true = ets:insert(CommittedTxs, {Key, TxCommitTime}),
-            {PPTxId, Record, DepDict1} = deal_with_prepare_deps(Deps, TxCommitTime, DepDict, TxCommitTime, MyNode),
+            {PPTxId, Record, DepDict1} = deal_with_prepare_deps(Deps, TxCommitTime, DepDict, TxCommitTime, LastPPTime, MyNode),
             case PPTxId of
                 ignore ->
                     lager:warning("No record!"),
@@ -1013,7 +973,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
 					update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
 						PreparedTxs, DepDict2, Partition, PrepareTime)
             end;
-        [{Key, [{TxId, PrepareTime, LastReaderTime, _, Value, PendingReaders}|Deps]}] ->
+        [{Key, [{TxId, PrepareTime, LastReaderTime, LastPPTime, Value, PendingReaders}|Deps]}] ->
            lager:warning("~w Pending readers are ~w! Pending writers are ~p", [TxId, PendingReaders, Deps]),
             ets:insert(CommittedTxs, {Key, TxCommitTime}),
             Values = case ets:lookup(InMemoryStore, Key) of
@@ -1026,7 +986,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                             true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}|RemainList]}),
                             [First, Value]
                     end,
-            {PPTxId, Record, DepDict1} = deal_with_prepare_deps(Deps, TxCommitTime, DepDict, LastReaderTime, MyNode),
+            {PPTxId, Record, DepDict1} = deal_with_prepare_deps(Deps, TxCommitTime, DepDict, LastReaderTime, LastPPTime, MyNode),
             case Record of
                 ignore ->
                     %% Can safely reply value
@@ -1167,9 +1127,9 @@ add_read_dep(ReaderTx, WriterTx, Key) ->
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
 %% Abort all transactions that can not prepare and return the record that should be inserted
-deal_with_prepare_deps([], _, DepDict, _LastReaderTime, _) ->
+deal_with_prepare_deps([], _, DepDict, _LastReaderTime, _LastPPTime, _) ->
     {ignore, ignore, DepDict};
-deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, LastReaderTime, MyNode) ->
+deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, LastReaderTime, LastPPTime, MyNode) ->
  lager:warning("Dealing with ~p, ~p, commit time is ~w", [TxId, PPTime, TxCommitTime]),
     case TxCommitTime > TxId#tx_id.snapshot_time of
         true ->
@@ -1184,47 +1144,44 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, L
                     %% Abort should be fast, so send abort to myself directly.. Coord won't send abort to me again.
                     abort([MyNode], TxId),
                     %DepDict1 = dict:update(fucked_by_commit, fun({T, Cnt}) ->  {T+TxCommitTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, NewDepDict, LastReaderTime, MyNode);
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, NewDepDict, LastReaderTime, LastPPTime, MyNode);
                 error ->
                 %  lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
                     %specula_utilities:deal_abort_deps(TxId),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastReaderTime, MyNode)
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastReaderTime, LastPPTime, MyNode)
             end;
         false ->
             case dict:find(TxId, DepDict) of
                 error ->
                 %    %% This transaction has been aborted already.
                 %    specula_utilities:deal_abort_deps(TxId),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastReaderTime, MyNode);
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastReaderTime, LastPPTime, MyNode);
                 _ ->
-                    {NewDepDict, Remaining, LastPPTime} = abort_others(PPTime, PWaiter, DepDict, MyNode),
+                    {NewDepDict, Remaining} = abort_others(PPTime, PWaiter, DepDict, MyNode),
                  %lager:error("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
                     {TxId, [{TxId, PPTime, LastReaderTime, LastPPTime, Value, []}|Remaining], NewDepDict}
             end
     end.
 
-abort_others(PPTime, PWaiters, DepDict, MyNode) ->
-    abort_others(PPTime, PWaiters, DepDict, [], PPTime, MyNode). 
-    
-abort_others(_, [], DepDict, Remaining, LastPPTime, _MyNode) ->
-    {DepDict, Remaining, LastPPTime};
-abort_others(PPTime, [{TxId, PTime, Value}|Rest], DepDict, Remaining, LastPPTime, MyNode) ->
+abort_others(_, [], DepDict, _MyNode) ->
+    {DepDict, []};
+abort_others(PPTime, [{TxId, _PTime, _Value}|Rest]=NonAborted, DepDict, MyNode) ->
     case PPTime > TxId#tx_id.snapshot_time of
         true ->
             case dict:find(TxId, DepDict) of
                 {ok, {_, _, Sender, _Type}} ->
-                    lager:warning("Aborting ~w of others, remaining is ~w ", [TxId, Remaining]),
+                    lager:warning("Aborting ~w of others, remaining is ~w ", [TxId, Rest]),
                     NewDepDict = dict:erase(TxId, DepDict),
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     abort([MyNode], TxId),
                     %DepDict1 = dict:update(fucked_by_badprep, fun({T, Cnt}) ->  {T+PPTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
-                    abort_others(PPTime, Rest, NewDepDict, Remaining, LastPPTime, MyNode);
+                    abort_others(PPTime, Rest, NewDepDict, MyNode);
                 error ->
                     lager:warning("~w aborted already", [TxId]),
-                    abort_others(PPTime, Rest, DepDict, Remaining, LastPPTime, MyNode)
+                    abort_others(PPTime, Rest, DepDict, MyNode)
             end;
         false ->
-            abort_others(PPTime, Rest, DepDict, [{TxId, PTime, Value}|Remaining], max(LastPPTime, PPTime), MyNode)
+            {DepDict, NonAborted}
     end.
         
 %% Update its entry in DepDict.. If the transaction can be prepared already, prepare it
