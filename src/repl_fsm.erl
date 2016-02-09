@@ -58,8 +58,8 @@
 %% States
 -export([repl_prepare/4,
 	    check_table/0,
-         repl_abort/5,
-         repl_commit/6,
+         repl_abort/4,
+         repl_commit/5,
          %repl_abort/4,
          %repl_commit/5,
          quorum_replicate/7,
@@ -296,11 +296,9 @@ get_name(ReplName, N) ->
     end.
     
 %% No replication
-repl_commit(_, _, _, false, _, _) ->
+repl_commit([], _, _, _, _) ->
     ok;
-repl_commit([], _, _, true, _, _) ->
-    ok;
-repl_commit(UpdatedParts, TxId, CommitTime, true, ToCache, RepDict) ->
+repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
@@ -318,11 +316,9 @@ repl_commit(UpdatedParts, TxId, CommitTime, true, ToCache, RepDict) ->
             end end,  Replicas) end,
             NodeParts).
 
-repl_abort(_, _, false, _, _) ->
+repl_abort([], _, _, _) ->
     ok;
-repl_abort([], _, true, _, _) ->
-    ok;
-repl_abort(UpdatedParts, TxId, true, ToCache, RepDict) ->
+repl_abort(UpdatedParts, TxId, ToCache, RepDict) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
