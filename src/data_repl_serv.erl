@@ -719,7 +719,8 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                             {specula, Value};
                         false ->
                             NewReaderTime = max(SnapshotTime, LastReaderTime),
-                            ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, NewReaderTime, Value, [PendingReader]}| PendingPrepare]})
+                            ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, NewReaderTime, Value, [PendingReader]}| PendingPrepare]}),
+                            ready
                     end;
                 false ->
                     case read_or_block(PendingPrepare, [], SnapshotTime, Sender) of
