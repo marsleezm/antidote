@@ -1119,7 +1119,7 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
 %   start_from_list(TxId, L).
 
 start_from_list(TxId, [TxId|_]=L) ->
-    L;
+    {[], L};
 start_from_list(TxId, [H|_T]) when TxId#tx_id.snapshot_time < H#tx_id.snapshot_time ->
     [];
 start_from_list(TxId, L) ->

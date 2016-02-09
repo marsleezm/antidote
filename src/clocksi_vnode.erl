@@ -955,7 +955,6 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]});
                 [{Key, ValueList}] ->
                     {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
-                    [{_CommitTime, _}|_] = RemainList,
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}|RemainList]})
             end,
 			true = ets:insert(CommittedTxs, {Key, TxCommitTime}),
