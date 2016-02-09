@@ -707,21 +707,21 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
         [] ->
             ets:insert(PreparedTxs, {Key, SnapshotTime}),
             ready;
-        [{Key, [{PreparedTxId, PrepareTime, LastReaderTime, Value, PendingReader}| PendingPrepare]}] ->
+        [{Key, [{PreparedTxId, PrepareTime, LastReaderTime, Value, PendingReaders}| PendingPrepare]}] ->
         %[{Key, VersionList}] ->
             case SnapshotTime >= PrepareTime of
                 true ->
                     case prepared_by_local(PreparedTxId) of
                         true ->
                             case SnapshotTime > LastReaderTime of
-                                true -> ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, SnapshotTime, Value, PendingReader}| PendingPrepare]});
+                                true -> ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, SnapshotTime, Value, PendingReaders}| PendingPrepare]});
                                 false -> ok
                             end,
                             add_read_dep(TxId, PreparedTxId, Key), 
                             {specula, Value};
                         false ->
                             NewReaderTime = max(SnapshotTime, LastReaderTime),
-                            ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, NewReaderTime, Value, [PendingReader]}| PendingPrepare]}),
+                            ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, NewReaderTime, Value, PendingReaders}| PendingPrepare]}),
                             ready
                     end;
                 false ->
@@ -729,7 +729,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                         ready -> ready;
                         {specula, PTxId, Value} ->%lager:warning("Specula reading ~p, from ~w to ~w", [Key, TxId, PTxId]), 
                             case SnapshotTime > LastReaderTime of
-                                true -> ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, SnapshotTime, Value, [{SnapshotTime, Sender}|PendingReader]}| PendingPrepare]});
+                                true -> ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, SnapshotTime, Value, [{SnapshotTime, Sender}|PendingReaders]}| PendingPrepare]});
                                 false -> ok
                             end,
                             add_read_dep(TxId, PTxId, Key), 
