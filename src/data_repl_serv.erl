@@ -554,10 +554,12 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, PreparedTxs) ->
                 [] -> ets:insert(PreparedTxs, {Key, max(TxCommitTime, LastReaderTS)});
                 [{NTxId, NPT, NV, NPendingReader}|Others] -> ets:insert(PreparedTxs, {Key, [{NTxId, NPT, max(TxCommitTime, LastReaderTS), NV, NPendingReader}|Others]})
             end,
+            lager:warning("For ~w, My Readers are ~w", [TxId, Readers]),
             {Readers, PrepValue};
         [{Key, [{OtherTxId, OtherPT, LastReaderTS, OtherValue, OtherPendingReaders}|PendingOthers]}] ->
             {{TxId, _PrepTime, PrepValue, Readers}, RemainPending} = delete_item(PendingOthers, TxId, []),
             ets:insert(PreparedTxs, {Key, [{OtherTxId, OtherPT, max(LastReaderTS, TxCommitTime), OtherValue, OtherPendingReaders}|RemainPending]}),
+            lager:warning("For ~w, Readers are ~w, previous list is ~w", [TxId, Readers, PendingOthers]),
             {Readers, PrepValue} 
     end,
     Values = case ets:lookup(InMemoryStore, Key) of
