@@ -583,17 +583,17 @@ clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore, TS) ->
     TS;
 clean_abort_prepared(PendingLog, [Key | Rest], TxId, ReplicatedLog, TS) ->
     %[{Key, List}] = ets:lookup(PendingLog, Key),
-    {PendingReaders, Value} = case ets:lookup(PendingLog, Key) of
-        [{Key, [{TxId, _PT, LastReaderTS, PrepValue, Readers}|PendingOthers]}] ->
+    PendingReaders = case ets:lookup(PendingLog, Key) of
+        [{Key, [{TxId, _PT, LastReaderTS, _PrepValue, Readers}|PendingOthers]}] ->
             case PendingOthers of
                 [] -> ets:delete(PendingLog, Key);
                 [{NTxId, NPT, NV, NPendingReader}|Others] -> ets:insert(PendingLog, {Key, [{NTxId, NPT, LastReaderTS, NV, NPendingReader}|Others]})
             end,
-            {Readers, PrepValue};
+            Readers;
         [{Key, [{OtherTxId, OtherPT, LastReaderTS, OtherValue, OtherPendingReaders}|PendingOthers]}] ->
-            {{TxId, _PrepTime, PrepValue, Readers}, RemainPending} = delete_item(PendingOthers, TxId, []),
+            {{TxId, _PrepTime, _PrepValue, Readers}, RemainPending} = delete_item(PendingOthers, TxId, []),
             ets:insert(PendingLog, {Key, [{OtherTxId, OtherPT, LastReaderTS, OtherValue, OtherPendingReaders}|RemainPending]}),
-            {Readers, PrepValue}
+            Readers
     end,
     %lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, Readers, RemainList]),
     case PendingReaders of
