@@ -1047,9 +1047,9 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
           %lager:warning("~p Not ready.. ~w waits for ~w with ~w, others are ~w", [Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
             case PrepareTime =< SnapshotTime of
                 true ->
-                    ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, max(LastReaderTime, SnapshotTime), LastPPTime, Value,
+                    ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastReaderTime, LastPPTime, Value,
                         [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
-                 %lager:error("~w non_specula reads ~p is blocked by ~w! PrepareTime is ~w", [TxId, Key, PreparedTxId, PrepareTime]),
+                    lager:error("~w non_specula reads ~p is blocked by ~w! PrepareTime is ~w", [TxId, Key, PreparedTxId, PrepareTime]),
                     not_ready;
                 false ->
                     ready
