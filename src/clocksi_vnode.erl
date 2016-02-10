@@ -699,13 +699,14 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTime, _IfCertify)->
             %    end end, WaitingKeys),
 	        {error, write_conflict};
         {0, PrepareTime} ->
+            lager:warning("~w passed prepare with ~w", [TxId, PrepareTime]),
             lists:foreach(fun({K, V}) ->
                     ets:insert(PreparedTxs, {K, [{TxId, PrepareTime, PrepareTime, PrepareTime, V, []}]})
                     end, TxWriteSet),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
 		    {ok, PrepareTime};
         {N, PrepareTime} ->
-           %lager:warning("~w passed but has ~w deps", [TxId, N]),
+            lager:warning("~w passed but has ~w deps, prepare with ~w", [TxId, N, PrepareTime]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             lists:foreach(fun({K, V}) ->
                           case ets:lookup(PreparedTxs, K) of
