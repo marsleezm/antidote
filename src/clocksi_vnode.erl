@@ -888,7 +888,7 @@ certification_check(PrepareTime, TxId, [Key|T], CommittedTxs, PreparedTxs, NumBl
         [{Key, CommitTime}] ->
             case CommitTime > SnapshotTime of
                 true ->
-                   %lager:warning("~w: False for committed key ~p, Commit time is ~w", [TxId, Key, CommitTime]),
+                    lager:warning("False for committed key ~p, Snapshot is ~w, diff with commit ~w", [Key, TxId#tx_id.snapshot_time, CommitTime-TxId#tx_id.snapshot_time]),
                     false;
                 false ->
                     case check_prepared(whatever, TxId, PreparedTxs, Key, whatever) of
@@ -907,8 +907,8 @@ certification_check(PrepareTime, TxId, [Key|T], CommittedTxs, PreparedTxs, NumBl
                 {wait, NewPrepTime} ->
                     certification_check(max(NewPrepTime, PrepareTime), TxId, T, CommittedTxs, PreparedTxs, NumBlocked+1);
                 false -> 
-                  %lager:warning("~w: False of prepared for ~p", [TxId, Key]),
-                   false
+                    lager:warning("~w: False of prepared for ~p", [TxId, Key]),
+                    false
             end
     end.
 
@@ -921,7 +921,7 @@ check_prepared(_, TxId, PreparedTxs, Key, _Value) ->
         [{Key, [{_PrepTxId, _PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|_PWaiter]}] ->
             case LastPPTime > SnapshotTime of
                 true ->
-                    %lager:warning("~w fail because prepare time is ~w, LastPPTime is ~w, PWaiters are ~p", [TxId, PrepareTime, LastPPTime, PWaiter]),
+                    lager:warning("~w fail LastPPTime is ~w, last reader time is ~w", [TxId, LastPPTime, LastReaderTime]),
                     false;
                 false ->
                     %ToPrepTime = max(LastReaderTime+1, PPTime),
@@ -949,6 +949,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, PrepareTime, PrepareTime, LastPPTime, Value, []}|Deps] }] ->		
+            lager:warning("Trying to insert key ~p with for ~w, preptime is ~w, diff with commit~w", [Key, TxId, PrepareTime, TxCommitTime-PrepareTime]),
           %lager:warning("~w No pending reader! Waiter is ~p", [TxId, Deps]),
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
@@ -973,6 +974,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
 						PreparedTxs, DepDict2, Partition, PrepareTime)
             end;
         [{Key, [{TxId, PrepareTime, LastReaderTime, LastPPTime, Value, PendingReaders}|Deps]}] ->
+            lager:warning("Trying to insert key ~p with for ~w, preptime is ~w, diff with commit~w", [Key, TxId, PrepareTime, TxCommitTime-PrepareTime]),
           %lager:warning("~w Pending readers are ~w! Pending writers are ~p", [TxId, PendingReaders, Deps]),
             ets:insert(CommittedTxs, {Key, TxCommitTime}),
             Values = case ets:lookup(InMemoryStore, Key) of
@@ -1027,7 +1029,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             end;
          [] ->
             %[{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
-         %lager:warning("Something is wrong!!! A txn updated two same keys ~p!", [Key]),
+            lager:error("Something is wrong!!! A txn updated two same keys ~p!", [Key]),
             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PTime);
           R ->
             lager:error("Record is ~p", [R]),
