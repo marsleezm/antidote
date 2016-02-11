@@ -416,7 +416,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                                                 true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]})
                             end end,  WriteSet),
 
-                             %lager:warning("Got repl prepare for ~w, ~p", [TxId, KeySet]),
+                            lager:warning("Got repl prepare for ~w and propoes ~p", [TxId, ToPrepTS]),
                             ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
                             gen_server:cast({global, Sender}, {ack, Partition, TxId, ToPrepTS}), 
                             {noreply, SD0}

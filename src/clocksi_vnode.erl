@@ -1204,7 +1204,7 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
                         local_fast -> lager:warning("Going for local_fast"), 
                                       repl_fsm:ack_pending_prep(TxId, Partition);
                         _ -> 
-                            lager:warning("Going for local_fast"),
+                            lager:warning("Non local fast, Repmode is ~w", [RepMode]),
                             PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                             repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord) 
                     end
