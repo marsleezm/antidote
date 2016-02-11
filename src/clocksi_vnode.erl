@@ -1067,7 +1067,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
             ets:insert(PreparedTxs, {Key, SnapshotTime}),
             ready;
         [{Key, [{PreparedTxId, PrepareTime, LastReaderTime, LastPPTime, Value, PendingReader}| PendingPrepare]}] ->
-           %lager:warning("~p Not ready.. ~w waits for ~w with ~w, lastpp time is ~w, others are ~w",[Key, TxId, PreparedTxId, PrepareTime, LastPPTime, PendingReader]),
+            lager:warning("~p Not ready.. ~w waits for ~w with ~w, lastpp time is ~w, others are ~w",[Key, TxId, PreparedTxId, PrepareTime, LastPPTime, PendingReader]),
             case PrepareTime =< SnapshotTime of
                 true ->
                     %% The read is not ready, may read from speculative version 
@@ -1138,9 +1138,9 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, L
             %% Check the preparedtxs table to delete all its inserted keys and reply abort to sender
             %% But the second step can be done by the coordinator..
             case dict:find(TxId, DepDict) of
-                {ok, {_, _, Sender, _Type}} ->
+                {ok, {_, _, Sender, Type}} ->
                     NewDepDict = dict:erase(TxId, DepDict),
-                    %lager:warning("Prepare not valid anymore! For ~w, sending '~w' abort to ~w", [TxId, Type, Sender]),
+                    lager:warning("Prepare not valid anymore! For ~w, sending '~w' abort to ~w", [TxId, Type, Sender]),
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     %% Abort should be fast, so send abort to myself directly.. Coord won't send abort to me again.
                     abort([MyNode], TxId),
@@ -1159,7 +1159,7 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, L
                     deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastReaderTime, LastPPTime, MyNode);
                 _ ->
                     {NewDepDict, Remaining} = abort_others(PPTime, PWaiter, DepDict, MyNode),
-                 %lager:error("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
+                    lager:error("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
                     {TxId, [{TxId, PPTime, LastReaderTime, LastPPTime, Value, []}|Remaining], NewDepDict}
             end
     end.
@@ -1186,7 +1186,7 @@ abort_others(PPTime, [{TxId, _PTime, _Value}|Rest]=NonAborted, DepDict, MyNode) 
 %% Update its entry in DepDict.. If the transaction can be prepared already, prepare it
 %% (or just replicate it).. Otherwise just update and do nothing. 
 unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
-   %lager:warning("Unblocking transaction ~w", [TxId]),
+   lager:warning("Unblocking transaction ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         {ok, {1, PrepareTime, Sender, RepMode}} ->
             case Partition of
@@ -1197,7 +1197,7 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
                         _ -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}) 
                     end;
                 _ ->
-                   %lager:warning("~w unblocked, replicating writeset", [TxId]),
+                   lager:warning("~w unblocked, replicating writeset", [TxId]),
                     [{TxId, {waiting, WriteSet}}] = ets:lookup(PreparedTxs, TxId),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
                     case RepMode of
