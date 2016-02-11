@@ -402,10 +402,10 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                                                         case ets:lookup(PendingLog, Key) of
                                                             [] -> {[Key|KS], Ts};
                                                             [{Key, [{PrepTxId, _, LastReaderTS, _, _}|_Rest]}] ->
-                                                                lager:warning("For ~w, last read ts is ~w by ~w", [Key, LastReaderTS, PrepTxId]),
+                                                                lager:warning("For ~p, last read ts is ~w by ~w", [Key, LastReaderTS, PrepTxId]),
                                                                 {[Key|KS], max(Ts, LastReaderTS+1)};
                                                             [{Key, LastReaderTS}] ->%lager:warning("LastReaderTS is ~w, Ts is ~w", [LastReaderTS, Ts]), 
-                                                                lager:warning("For ~w, last reader ts is ~w", [Key, LastReaderTS]),
+                                                                lager:warning("For ~p, last reader ts is ~w", [Key, LastReaderTS]),
                                                                 {[Key|KS], max(Ts, LastReaderTS+1)}
                                                         end end, {[], TimeStamp}, WriteSet),
                             lists:foreach(fun({Key, Value}) ->
