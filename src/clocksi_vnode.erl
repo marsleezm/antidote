@@ -425,7 +425,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
     case Result of
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
-           %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
+           lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
             case IfReplicate of
                 true ->
                     case Debug of
@@ -461,7 +461,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     end 
             end;
         {wait, NumDeps, PrepareTime} ->
-           %lager:warning("~w waiting with ~w", [TxId, PrepareTime]),
+            lager:warning("~w waiting with ~w", [TxId, PrepareTime]),
             NewDepDict = case (FastReply == true) and (RepMode == local) of 
                                 %% local_fast
                         true ->  gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime}),
@@ -1067,7 +1067,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
             ets:insert(PreparedTxs, {Key, SnapshotTime}),
             ready;
         [{Key, [{PreparedTxId, PrepareTime, LastReaderTime, LastPPTime, Value, PendingReader}| PendingPrepare]}] ->
-            lager:warning("~p Not ready.. ~w waits for ~w with ~w, lastpp time is ~w, others are ~w",[Key, TxId, PreparedTxId, PrepareTime, LastPPTime, PendingReader]),
+            %lager:warning("~p Not ready.. ~w waits for ~w with ~w, lastpp time is ~w, others are ~w",[Key, TxId, PreparedTxId, PrepareTime, LastPPTime, PendingReader]),
             case PrepareTime =< SnapshotTime of
                 true ->
                     %% The read is not ready, may read from speculative version 
@@ -1159,7 +1159,7 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, L
                     deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastReaderTime, LastPPTime, MyNode);
                 _ ->
                     {NewDepDict, Remaining} = abort_others(PPTime, PWaiter, DepDict, MyNode),
-                    lager:error("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
+                    %lager:error("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
                     {TxId, [{TxId, PPTime, LastReaderTime, LastPPTime, Value, []}|Remaining], NewDepDict}
             end
     end.
