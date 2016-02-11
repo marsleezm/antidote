@@ -226,11 +226,11 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
 handle_cast({ack_pending_prep, TxId, Partition}, SD0=#state{pending_log=PendingLog}) ->
     case ets:lookup(PendingLog, {TxId, Partition}) of
         [{{TxId, Partition}, Sender, Timestamp, pending_prepared, N}] ->
-            lager:info("Pending prep of ~w still waiting.. With time ~w", [TxId, Timestamp]),
+            lager:warning("Pending prep of ~w still waiting.. With time ~w", [TxId, Timestamp]),
             ets:insert(PendingLog, {{TxId, Partition}, Sender, Timestamp, remote, N});
         [{{TxId, Partition}, Sender, Timestamp}] ->
             ets:delete(PendingLog, {TxId, Partition}),
-            lager:info("Ack pending with time ~w", [Timestamp]),
+            lager:warning("~w ack pending with time ~w", [TxId, Timestamp]),
             gen_server:cast(Sender, {prepared, TxId, Timestamp})
     end,
     {noreply, SD0};

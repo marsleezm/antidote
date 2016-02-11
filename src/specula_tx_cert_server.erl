@@ -857,6 +857,7 @@ try_to_abort(PendingList, ToAbortTxs, DepDict, RepDict, PendingTxs, ReadAborted)
 %% Same reason, no need for RemoteParts
 commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
     DepList = ets:lookup(dependency, TxId),
+    lager:warning("Committing tx ~w with ~w", [TxId, CommitTime]),
   %lager:warning("~w: My read dependncy are ~w", [TxId, DepList]),
     {DepDict1, ToAbortTxs} = solve_read_dependency(CommitTime, DepDict, DepList),
   %lager:warning("Commit ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
@@ -869,7 +870,7 @@ commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
     {DepDict1, ToAbortTxs}.
 
 commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs) ->
-  %lager:warning("Committing specula tx ~w with ~w", [TxId, CommitTime]),
+    lager:warning("Committing specula tx ~w with ~w", [TxId, CommitTime]),
     [{TxId, {LocalParts, RemoteParts, SpeculaTime}}] = ets:lookup(PendingTxs, TxId),
     true = ets:delete(PendingTxs, TxId),
     %%%%%%%%% Time stat %%%%%%%%%%%

@@ -574,7 +574,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
                       %num_committed=NumCommitted,
                       if_specula=IfSpecula
                       } = State) ->
-  %lager:warning("~w: Got commit req for ~w", [Partition, TxId]),
+    lager:warning("~w: Got commit req for ~w with ~w", [Partition, TxId, TxCommitTime]),
     Result = 
         case IfReplicate of
             true ->
@@ -1201,8 +1201,10 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
                     [{TxId, {waiting, WriteSet}}] = ets:lookup(PreparedTxs, TxId),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
                     case RepMode of
-                        local_fast -> repl_fsm:ack_pending_prep(TxId, Partition);
+                        local_fast -> lager:warning("Going for local_fast"), 
+                                      repl_fsm:ack_pending_prep(TxId, Partition);
                         _ -> 
+                            lager:warning("Going for local_fast"),
                             PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                             repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord) 
                     end
