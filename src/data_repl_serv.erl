@@ -253,7 +253,7 @@ handle_call({update_ts, Partitions}, _Sender, SD0=#state{ts_dict=TsDict, init_ts
                             TsDict1 = lists:foldl(fun(Part, D) ->
                                 dict:store(Part, 0, D)
                                 end, TsDict, Parts),
-                            {reply, ok, SD0#state{ts_dict=TsDict1, init_ts_dict=true}}
+                            {reply, ok, SD0#state{ts_dict=TsDict1, init_ts_dict=false}}
     end;
 
 handle_call({get_ts, WriteSet}, _Sender, SD0=#state{pending_log=PendingLog}) ->
