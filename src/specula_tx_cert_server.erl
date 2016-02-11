@@ -131,7 +131,7 @@ handle_call({start_read_tx}, _Sender, SD0) ->
 handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS}) ->
     NewSnapshotTS = max(MinSnapshotTS, MinCommitTS) + 1, 
     TxId = tx_utilities:create_tx_id(NewSnapshotTS),
-    lager:warning("Starting txid ~w, MinSnapshotTS is ~w", [TxId, MinSnapshotTS+1]),
+    %lager:warning("Starting txid ~w, MinSnapshotTS is ~w", [TxId, MinSnapshotTS+1]),
     D1 = dict:store(TxId, {0, [], 0}, D),
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS, pending_prepares=0}};
 
@@ -857,7 +857,7 @@ try_to_abort(PendingList, ToAbortTxs, DepDict, RepDict, PendingTxs, ReadAborted)
 %% Same reason, no need for RemoteParts
 commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
     DepList = ets:lookup(dependency, TxId),
-    lager:warning("Committing tx ~w with ~w", [TxId, CommitTime]),
+    %lager:warning("Committing tx ~w with ~w", [TxId, CommitTime]),
   %lager:warning("~w: My read dependncy are ~w", [TxId, DepList]),
     {DepDict1, ToAbortTxs} = solve_read_dependency(CommitTime, DepDict, DepList),
   %lager:warning("Commit ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
@@ -870,7 +870,7 @@ commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
     {DepDict1, ToAbortTxs}.
 
 commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs) ->
-    lager:warning("Committing specula tx ~w with ~w", [TxId, CommitTime]),
+   %ning("Committing specula tx ~w with ~w", [TxId, CommitTime]),
     [{TxId, {LocalParts, RemoteParts, SpeculaTime}}] = ets:lookup(PendingTxs, TxId),
     true = ets:delete(PendingTxs, TxId),
     %%%%%%%%% Time stat %%%%%%%%%%%

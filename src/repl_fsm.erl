@@ -165,7 +165,7 @@ handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
 handle_cast({repl_prepare, Partition, prepared, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, pending_log=PendingLog, except_replicas=ExceptReplicas, 
             my_name=MyName, mode=Mode, repl_factor=ReplFactor, fast_reply=_FastReply}) ->
-    lager:info("Repl prepare for ~w, ~w", [TxId, Partition]),
+    %lager:info("Repl prepare for ~w, ~w", [TxId, Partition]),
     %case PrepType of
     %    single_commit ->
     %        {Sender, WriteSet, CommitTime} = LogContent,
@@ -226,11 +226,11 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
 handle_cast({ack_pending_prep, TxId, Partition}, SD0=#state{pending_log=PendingLog}) ->
     case ets:lookup(PendingLog, {TxId, Partition}) of
         [{{TxId, Partition}, Sender, Timestamp, pending_prepared, N}] ->
-            lager:warning("Pending prep of ~w still waiting.. With time ~w", [TxId, Timestamp]),
+            %lager:warning("Pending prep of ~w still waiting.. With time ~w", [TxId, Timestamp]),
             ets:insert(PendingLog, {{TxId, Partition}, Sender, Timestamp, remote, N});
         [{{TxId, Partition}, Sender, Timestamp}] ->
             ets:delete(PendingLog, {TxId, Partition}),
-            lager:warning("~w ack pending with time ~w", [TxId, Timestamp]),
+            %lager:warning("~w ack pending with time ~w", [TxId, Timestamp]),
             gen_server:cast(Sender, {prepared, TxId, Timestamp})
     end,
     {noreply, SD0};
