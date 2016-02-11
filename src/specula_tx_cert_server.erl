@@ -131,10 +131,9 @@ handle_call({start_read_tx}, _Sender, SD0) ->
 handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS}) ->
     NewSnapshotTS = max(MinSnapshotTS, MinCommitTS) + 1, 
     TxId = tx_utilities:create_tx_id(NewSnapshotTS),
-   %lager:warning("Starting txid ~w, MinSnapshotTS is ~w", [TxId, MinSnapshotTS+1]),
+    %lager:warning("Starting txid ~w, MinSnapshotTS is ~w", [TxId, MinSnapshotTS+1]),
     D1 = dict:store(TxId, {0, [], 0}, D),
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS, pending_prepares=0}};
-
 
 handle_call({get_stat}, _Sender, SD0=#state{cert_aborted=CertAborted, committed=Committed, read_aborted=ReadAborted, cascade_aborted=CascadeAborted, num_specula_read=NumSpeculaRead, pending_txs=PendingTxs, read_invalid=ReadInvalid}) ->
    %lager:warning("Num of read cert_aborted ~w, Num of cert_aborted is ~w, Num of committed is ~w, NumSpeculaRead is ~w", [ReadAborted, CascadeAborted, Committed, NumSpeculaRead]),
@@ -1078,7 +1077,7 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                     case DepTxId#tx_id.snapshot_time >= CommitTime of
                         %% This read is still valid
                         true ->
-                         %lager:warning("Read still valid for ~w", [DepTxId]),
+                         %lager:warning("Read still valid for ~w, CommitTime is ~w", [DepTxId, CommitTime]),
                             case TxServer of
                                 Self ->
                                  %lager:warning("~w is my own, read valid", [DepTxId]),
