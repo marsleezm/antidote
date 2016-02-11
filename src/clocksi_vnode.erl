@@ -1,4 +1,3 @@
-%%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
 %% except in compliance with the License.  You may obtain
@@ -446,10 +445,10 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                         false ->
                             case RepMode of
                                 local ->
-                                    PendingRecord = {Sender, false, WriteSet, PrepareTime},
-                                    gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
+                                    PendingRecord = {Sender, local, WriteSet, PrepareTime},
+                                    gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime}),
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
-                                local_only ->
+                                local_only -> %% Later on should fast reply for specula
                                     PendingRecord = {Sender, local, WriteSet, PrepareTime},
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
                                 _ ->
@@ -476,12 +475,12 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
             end;
         {wait, NumDeps, PrepareTime} ->
            %lager:warning("~w waiting with ~w", [TxId, PrepareTime]),
-            NewDepDict = case (FastReply == true) and (RepMode == local) of 
-                                %% local_fast
+            NewDepDict = case (FastReply == true) and ((RepMode == local) or (RepMode == local_only)) of
+                                %% local_aggr
                         true ->  gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime}),
                                  PendingRecord = {Sender, pending_prepared, WriteSet, PrepareTime},
                                  repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
-                                 dict:store(TxId, {NumDeps, PrepareTime, Sender, local_fast}, DepDict);
+                                 dict:store(TxId, {NumDeps, PrepareTime, Sender, local_aggr}, DepDict);
                         false -> dict:store(TxId, {NumDeps, PrepareTime, Sender, RepMode}, DepDict)
                     end, 
             {noreply, State#state{max_ts=PrepareTime, dep_dict=NewDepDict}};
@@ -1035,7 +1034,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             end;
          [] ->
             %[{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
-         %lager:warning("Something is wrong!!! A txn updated two same keys ~p!", [Key]),
+           %lager:warning("Something is wrong!!! A txn updated two same keys ~p!", [Key]),
             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PTime)
     end.
 
@@ -1158,11 +1157,6 @@ abort_others(PPTime, [{TxId, _PTime, _Value}|Rest]=NonAborted, DepDict, MyNode) 
     case PPTime > TxId#tx_id.snapshot_time of
         true ->
             case dict:find(TxId, DepDict) of
-                {ok, {_, _, Sender, local_fast}} ->
-                    NewDepDict = dict:erase(TxId, DepDict),
-                    gen_server:cast(Sender, {aborted, TxId, MyNode}),
-                    abort([MyNode], TxId),
-                    abort_others(PPTime, Rest, NewDepDict, MyNode);
                 {ok, {_, _, Sender, _}} ->
                     NewDepDict = dict:erase(TxId, DepDict),
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
@@ -1185,16 +1179,17 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
             case Partition of
                 ignore ->
                %lager:warning("No more dependency, sending reply back for ~w", [TxId]),
-                    case RepMode of
-                        local_fast -> gen_server:cast(Sender, {real_prepared, TxId, PrepareTime});
-                        _ -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}) 
-                    end;
+                    %case RepMode of
+                    %    local_aggr -> gen_server:cast(Sender, {real_prepared, TxId, PrepareTime});
+                    %    _ -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}) 
+                    %end;
+                    gen_server:cast(Sender, {prepared, TxId, PrepareTime}); 
                 _ ->
                    %lager:warning("~w unblocked, replicating writeset", [TxId]),
                     [{TxId, {waiting, WriteSet}}] = ets:lookup(PreparedTxs, TxId),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
                     case RepMode of
-                        local_fast -> repl_fsm:ack_pending_prep(TxId, Partition);
+                        local_aggr -> repl_fsm:ack_pending_prep(TxId, Partition);
                         _ -> 
                             PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                             repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord) 

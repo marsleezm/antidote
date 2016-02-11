@@ -246,10 +246,11 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
         [{{TxId, Partition}, Sender, Timestamp, RepMode, 1}] ->
             case RepMode of
                 false -> true = ets:delete(PendingLog, {TxId, Partition}), ok;
-                local_fast -> true = ets:delete(PendingLog, {TxId, Partition}),
-                              gen_server:cast(Sender, {real_prepared, TxId, max(Timestamp, ProposedTs)});
+                %local_fast -> true = ets:delete(PendingLog, {TxId, Partition}),
+                %              gen_server:cast(Sender, {real_prepared, TxId, max(Timestamp, ProposedTs)});
                 pending_prepared -> ets:insert(PendingLog, {{TxId, Partition}, Sender, max(Timestamp,ProposedTs)});
-                _ -> gen_server:cast(Sender, {prepared, TxId, max(Timestamp, ProposedTs)})
+                _ -> true = ets:delete(PendingLog, {TxId, Partition}),
+                     gen_server:cast(Sender, {prepared, TxId, max(Timestamp, ProposedTs)})
             end;
         [{{TxId, Partition}, Sender, Timestamp, RepMode, N}] ->
            %lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
