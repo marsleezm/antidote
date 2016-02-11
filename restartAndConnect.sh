@@ -23,10 +23,10 @@ sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev1/antidot
 sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev2/antidote.config
 sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev3/antidote.config
 sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev4/antidote.config
-sudo sed -i '' "s/{specula_length,.*/{specula_length, $FastReply}./g" ./dev/dev1/antidote.config
-sudo sed -i '' "s/{specula_length,.*/{specula_length, $FastReply}./g" ./dev/dev2/antidote.config
-sudo sed -i '' "s/{specula_length,.*/{specula_length, $FastReply}./g" ./dev/dev3/antidote.config
-sudo sed -i '' "s/{specula_length,.*/{specula_length, $FastReply}./g" ./dev/dev4/antidote.config
+sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/dev1/antidote.config
+sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/dev2/antidote.config
+sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/dev3/antidote.config
+sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/dev4/antidote.config
 
 ./dev/dev1/bin/antidote stop
 ./dev/dev2/bin/antidote stop
