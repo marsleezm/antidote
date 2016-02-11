@@ -263,7 +263,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
                     DepDict1 = dict:update(TxId, 
                             fun({_, B, _}) ->
                              {length(LocalUpdates), ReadDepTxs--B, LastCommitTs+1} end, DepDict),
-                    % %lager:warning("Prepare ~w", [TxId]),
+                   %lager:warning("Prepare ~w to ~w", [TxId, LocalPartitions]),
                     case RemoteUpdates of
                         [] ->
                             ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local_only);

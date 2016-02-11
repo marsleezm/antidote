@@ -442,12 +442,11 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
            %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
             case IfReplicate of
                 true ->
-                    %case Debug of
-                    %    false ->
+                    case Debug of
+                        false ->
                             case RepMode of
                                 local ->
                                     PendingRecord = {Sender, false, WriteSet, PrepareTime},
-                                    %gen_server:cast(Sender, {prepared, TxId, PrepareTime, RepMode}),
                                     gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
                                 local_only ->
@@ -458,14 +457,13 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
                             end,
                             {noreply, State#state{max_ts=PrepareTime}};
-                    %    true ->
-                    %        PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
+                        true ->
+                            PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                     %       %lager:warning("Inserting pending log for replicate and debug ~w:~w", [TxId, PendingRecord]),
-                    %        ets:insert(PreparedTxs, {{pending, TxId}, PendingRecord}),
-                    %        {noreply, State#state{max_ts=PrepareTime}}
-                    %end;
+                            ets:insert(PreparedTxs, {{pending, TxId}, PendingRecord}),
+                            {noreply, State#state{max_ts=PrepareTime}}
+                    end;
                 false ->
-                    %riak_core_vnode:reply(OriginalSender, {prepared, TxId, PrepareTime, Type}),
                     case Debug of
                         false ->
                            %lager:warning("~w prepared with ~w", [TxId, PrepareTime]),
@@ -481,7 +479,8 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
             NewDepDict = case (FastReply == true) and (RepMode == local) of 
                                 %% local_fast
                         true ->  gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime}),
-                                %lager:warning("Pending prepared for ~w", [TxId]),
+                                 PendingRecord = {Sender, pending_prepared, WriteSet, PrepareTime},
+                                 repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
                                  dict:store(TxId, {NumDeps, PrepareTime, Sender, local_fast}, DepDict);
                         false -> dict:store(TxId, {NumDeps, PrepareTime, Sender, RepMode}, DepDict)
                     end, 
@@ -718,7 +717,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
             %PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
 		    KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
-            %lager:warning("Inserting key sets ~w, ~w", [TxId, KeySet]),
+            %lager:warning("Inserting key sets ~w, ~p", [TxId, KeySet]),
 		    {ok, PrepareTime};
         N ->
            %lager:warning("~w passed but has ~w deps", [TxId, N]),
@@ -1111,7 +1110,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
     end.
 
 add_read_dep(ReaderTx, WriterTx, _Key) ->
-  %lager:warning("Inserting anti_dep from ~w to ~w for ~p", [ReaderTx, WriterTx, Key]),
+   %lager:warning("Inserting anti_dep from ~w to ~w for ~p", [ReaderTx, WriterTx, Key]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
@@ -1127,29 +1126,29 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, L
             %% But the second step can be done by the coordinator..
             case dict:find(TxId, DepDict) of
                 {ok, {_, _, Sender, _Type}} ->
-                    %NewDepDict = dict:erase(TxId, DepDict),
+                    NewDepDict = dict:erase(TxId, DepDict),
                     %lager:warning("Prepare not valid anymore! For ~w, sending '~w' abort to ~w", [TxId, Type, Sender]),
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     %% Abort should be fast, so send abort to myself directly.. Coord won't send abort to me again.
                     abort([MyNode], TxId),
                     %DepDict1 = dict:update(fucked_by_commit, fun({T, Cnt}) ->  {T+TxCommitTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastPPTime, MyNode)
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, NewDepDict, LastPPTime, MyNode)
                 %error ->
                 % %lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
                 %    specula_utilities:deal_abort_deps(TxId),
                 %    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict)
             end;
         false ->
-            %case dict:find(TxId, DepDict) of
-                %error ->
+            case dict:find(TxId, DepDict) of
+                error ->
                 %    %% This transaction has been aborted already.
                 %    specula_utilities:deal_abort_deps(TxId),
-                %    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict);
-            %    _ ->
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastPPTime, MyNode);
+                _ ->
                     {NewDepDict, Remaining} = abort_others(PPTime, PWaiter, DepDict, MyNode),
                  %lager:error("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
                     {TxId, [{TxId, PPTime, LastPPTime, Value, []}|Remaining], NewDepDict}
-            %end
+            end
     end.
 
     
@@ -1159,13 +1158,16 @@ abort_others(PPTime, [{TxId, _PTime, _Value}|Rest]=NonAborted, DepDict, MyNode) 
     case PPTime > TxId#tx_id.snapshot_time of
         true ->
             case dict:find(TxId, DepDict) of
-                {ok, {_, _, Sender, _Type}} ->
-                   %lager:warning("Aborting ~w of others, remaining is ~w ", [TxId, Remaining]),
-                    %NewDepDict = dict:erase(TxId, DepDict),
+                {ok, {_, _, Sender, local_fast}} ->
+                    NewDepDict = dict:erase(TxId, DepDict),
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     abort([MyNode], TxId),
-                    %DepDict1 = dict:update(fucked_by_badprep, fun({T, Cnt}) ->  {T+PPTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
-                    abort_others(PPTime, Rest, DepDict, MyNode);
+                    abort_others(PPTime, Rest, NewDepDict, MyNode);
+                {ok, {_, _, Sender, _}} ->
+                    NewDepDict = dict:erase(TxId, DepDict),
+                    gen_server:cast(Sender, {aborted, TxId, MyNode}),
+                    abort([MyNode], TxId),
+                    abort_others(PPTime, Rest, NewDepDict, MyNode);
                 error ->
                    %lager:warning("~w aborted already", [TxId]),
                     abort_others(PPTime, Rest, DepDict, MyNode)
@@ -1188,16 +1190,15 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
                         _ -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}) 
                     end;
                 _ ->
+                   %lager:warning("~w unblocked, replicating writeset", [TxId]),
                     [{TxId, {waiting, WriteSet}}] = ets:lookup(PreparedTxs, TxId),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
-                    %case RepMode of
-                    %    local_fast ->%lager:warning("Unblocking local_fast txn! ~w", [TxId]);
-                    %    _ -> ok
-                    %end,
-                   %lager:warning("~w unblocked, replicating writeset", [TxId]),
-                    PendingRecord = {Sender,
-                        RepMode, WriteSet, PrepareTime},
-                    repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord)
+                    case RepMode of
+                        local_fast -> repl_fsm:ack_pending_prep(TxId, Partition);
+                        _ -> 
+                            PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
+                            repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord) 
+                    end
             end,
             DepDict1 = dict:update_counter(success_wait, 1, DepDict), 
             dict:erase(TxId, DepDict1);
