@@ -49,6 +49,8 @@
         stage :: read | local_cert | remote_cert,
         local_parts :: [],
         remote_parts :: [],
+        do_repl :: boolean(),
+        pending_to_ack :: non_neg_integer(),
         sender :: term(),
         last_commit_ts :: non_neg_integer(),
         to_ack :: non_neg_integer()}).
@@ -87,7 +89,7 @@ handle_call({get_hash_fun}, _Sender, SD0) ->
 
 handle_call({start_tx}, _Sender, SD0=#state{last_commit_ts=LastCommitTS}) ->
     TxId = tx_utilities:create_tx_id(LastCommitTS+1),
-    {reply, TxId, SD0#state{last_commit_ts=LastCommitTS+1, stage=read}};
+    {reply, TxId, SD0#state{last_commit_ts=LastCommitTS+1, stage=read, pending_to_ack=0}};
 
 handle_call({start_read_tx}, _Sender, SD0) ->
     TxId = tx_utilities:create_tx_id(0),
@@ -136,8 +138,45 @@ handle_cast({clean_data, Sender}, SD0) ->
     Sender ! cleaned,
     {noreply, SD0};
 
+handle_cast({pending_prepared, TxId, PrepareTime},
+        SD0=#state{to_ack=N, pending_to_ack=PN, tx_id=TxId, stage=local_cert,
+            remote_parts=RemoteUpdates, prepare_time=OldPrepTime}) ->
+    %lager:info("Got prepared local"),
+    case N of
+        1 ->
+            RemoteParts = [Part || {Part, _} <- RemoteUpdates],
+            case length(RemoteParts) of
+                0 ->
+                    %lager:info("Trying to prepare!!"),
+                    CommitTime = max(PrepareTime, OldPrepTime),
+                    {noreply, SD0#state{prepare_time=CommitTime, stage=remote_cert, to_ack=1+PN}};
+                L ->
+                    MaxPrepTime = max(PrepareTime, OldPrepTime),
+                    clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
+                    %lager:info("~w: Updates are ~p, to ack is ~w, parts are ~w", [TxId, RemoteUpdates, length(RemoteParts), RemoteParts]),
+                    {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=L+PN+1,
+                        remote_parts=RemoteParts, stage=remote_cert}}
+                end;
+        _ ->
+            %lager:info("~w, needs ~w", [TxId, N-1]),
+            %lager:info("Not done for ~w", [TxId]),
+            MaxPrepTime = max(OldPrepTime, PrepareTime),
+            {noreply, SD0#state{to_ack=N-1, prepare_time=MaxPrepTime, pending_to_ack=PN+1}}
+    end;
+
+handle_cast({pending_prepared, _OtherTxId, _PrepareTime}, SD0) -> 
+    {noreply, SD0};
+
+%handle_cast({real_prepared, TxId, PrepareTime},
+%        SD0=#state{pending_to_ack=PN, tx_id=TxId, prepare_time=OldPrepTime, stage=local_cert}) ->
+%    {noreply, SD0#state{pending_to_ack=PN-1, prepare_time=max(PrepareTime, OldPrepTime)}};
+
+%handle_cast({real_prepared, _OtherTxId, _PrepareTime},
+%        SD0=#state{stage=local_cert}) ->
+%    {noreply, SD0};
+
 handle_cast({prepared, TxId, PrepareTime}, 
-	    SD0=#state{to_ack=N, tx_id=TxId, local_parts=LocalParts, stage=local_cert,
+	    SD0=#state{to_ack=N, tx_id=TxId, pending_to_ack=PN, local_parts=LocalParts, stage=local_cert,
             remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime, rep_dict=RepDict}) ->
     %lager:info("Got prepared local"),
     case N of
@@ -145,12 +184,16 @@ handle_cast({prepared, TxId, PrepareTime},
             RemoteParts = [Part || {Part, _} <- RemoteUpdates],
             case length(RemoteParts) of
                 0 ->
-                    %lager:info("Trying to prepare!!"),
-                    CommitTime = max(PrepareTime, OldPrepTime),
-                    clocksi_vnode:commit(LocalParts, TxId, CommitTime),
-                    repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
-                    gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-                    {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
+                    case PN of
+                        0 ->
+                            CommitTime = max(PrepareTime, OldPrepTime),
+                            clocksi_vnode:commit(LocalParts, TxId, CommitTime),
+                            repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
+                            gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+                            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
+                        _ ->
+                            {noreply, SD0#state{to_ack=PN, prepare_time=max(PrepareTime, OldPrepTime), stage=remote_cert}}
+                    end;
                 L ->
                     MaxPrepTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
@@ -180,6 +223,12 @@ handle_cast({aborted, TxId, FromNode}, SD0=#state{tx_id=TxId, local_parts=LocalP
 handle_cast({aborted, _, _}, SD0=#state{stage=local_cert}) ->
     %lager:info("Received abort for previous txn ~w", [OtherTxId]),
     {noreply, SD0};
+
+%handle_cast({real_prepared, TxId, PrepareTime}, SD0=#state{stage=remote_cert, tx_id=TxId}) ->
+%    handle_cast({prepared, TxId, PrepareTime}, SD0);
+
+%handle_cast({real_prepared, _OtherTxId, _PrepareTime}, SD0=#state{stage=remote_cert}) ->
+%    {noreply, SD0};
 
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, rep_dict=RepDict, 

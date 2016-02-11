@@ -357,13 +357,13 @@ handle_cast({pending_prepared, TxId, PrepareTime},
 handle_cast({pending_prepared, _OtherTxId, _}, SD0) ->
     {noreply, SD0}; 
 
-handle_cast({real_prepared, TxId, _}, SD0=#state{pending_prepares=PendingPrepares, tx_id=TxId, stage=local_cert}) ->
-     %lager:warning("Real prepare in local cert for ~w", [TxId]),
-    {noreply, SD0#state{pending_prepares=PendingPrepares-1}};
+%handle_cast({real_prepared, TxId, _}, SD0=#state{pending_prepares=PendingPrepares, tx_id=TxId, stage=local_cert}) ->
+%     %lager:warning("Real prepare in local cert for ~w", [TxId]),
+%    {noreply, SD0#state{pending_prepares=PendingPrepares-1}};
 
-handle_cast({real_prepared, TxId, PrepareTime}, SD0) ->
-      %lager:warning("Real prepare in not local cert ~w", [TxId]),
-    handle_cast({prepared, TxId, PrepareTime}, SD0); 
+%handle_cast({real_prepared, TxId, PrepareTime}, SD0) ->
+%      %lager:warning("Real prepare in not local cert ~w", [TxId]),
+%    handle_cast({prepared, TxId, PrepareTime}, SD0); 
 
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{tx_id=TxId, local_updates=LocalParts, stage=local_cert, 
