@@ -462,7 +462,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
             end;
         {wait, NumDeps, PrepareTime} ->
             lager:warning("~w waiting with ~w", [TxId, PrepareTime]),
-            NewDepDict = case (FastReply == true) and (RepMode == local) of 
+            NewDepDict = case (FastReply == true) and ((RepMode == local) or (RepMode == local_only)) of 
                                 %% local_fast
                         true ->  gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime}),
                                  PendingRecord = {Sender, pending_prepared, WriteSet, PrepareTime},
