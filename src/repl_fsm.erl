@@ -187,7 +187,7 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                     case RepMode of
                         %% This is for non-specula version
                         {remote, ignore} ->
-                            lager:warning("Ignor Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition]),
+                            lager:warning("Ignor Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, Sender, 
                                     PrepareTime, remote, ReplFactor}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
