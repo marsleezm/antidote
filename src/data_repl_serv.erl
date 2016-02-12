@@ -735,7 +735,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                             add_read_dep(TxId, PTxId, Key), 
                             {specula, Value};
                         {not_ready, NewList, _PTxId} ->
-                            ets:insert(PreparedTxs, {Key, NewList}), not_ready
+                            ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastReaderTime, Value, PendingReaders}|NewList]}), not_ready
                     end
             end;
         [{Key, LastReaderTime}] ->
