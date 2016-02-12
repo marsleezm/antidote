@@ -721,13 +721,13 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                 false ->
                     case read_or_block(PendingPrepare, [], SnapshotTime, Sender) of
                         ready -> ready;
-                        {specula, PTxId, Value} ->%lager:warning("Specula reading ~p, from ~w to ~w", [Key, TxId, PTxId]), 
+                        {specula, PTxId, SpeculaValue} ->%lager:warning("Specula reading ~p, from ~w to ~w", [Key, TxId, PTxId]), 
                             case SnapshotTime > LastReaderTime of
                                 true -> ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, SnapshotTime, Value, [{SnapshotTime, Sender}|PendingReaders]}| PendingPrepare]});
                                 false -> ok
                             end,
                             add_read_dep(TxId, PTxId, Key), 
-                            {specula, Value};
+                            {specula, SpeculaValue};
                         {not_ready, NewList, _PTxId} ->
                             ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastReaderTime, Value, PendingReaders}|NewList]}), not_ready
                     end
