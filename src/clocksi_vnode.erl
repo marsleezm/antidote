@@ -431,8 +431,8 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                         false ->
                             case RepMode of
                                 local ->
-                                    PendingRecord = {Sender, false, WriteSet, PrepareTime},
-                                    gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
+                                    PendingRecord = {Sender, local, WriteSet, PrepareTime},
+                                    gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime}),
                                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord);
                                 local_only -> %% Later on should fast reply for specula
                                     PendingRecord = {Sender, local, WriteSet, PrepareTime},

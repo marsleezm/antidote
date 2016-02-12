@@ -213,6 +213,7 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                             %    local_fast ->%lager:warning("Replicating local_fast txn! ~w", [TxId]);
                             %    _ -> ok
                             %end,
+                            lager:warning("Repl request for ~w ~w", [TxId, Partition]),
                             ets:insert(PendingLog, {{TxId, Partition}, Sender, 
                                     PrepareTime, RepMode, ReplFactor}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
@@ -253,6 +254,7 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
                 %              gen_server:cast(Sender, {real_prepared, TxId, max(Timestamp, ProposedTs)});
                 pending_prepared -> ets:insert(PendingLog, {{TxId, Partition}, Sender, max(Timestamp,ProposedTs)});
                 _ -> true = ets:delete(PendingLog, {TxId, Partition}),
+                     lager:warning("Replying for ~w", [TxId]),
                      gen_server:cast(Sender, {prepared, TxId, max(Timestamp, ProposedTs)})
             end;
         [{{TxId, Partition}, Sender, Timestamp, RepMode, N}] ->
