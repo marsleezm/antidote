@@ -143,7 +143,7 @@ handle_cast({clean_data, Sender}, SD0) ->
 handle_cast({pending_prepared, TxId, PrepareTime},
         SD0=#state{to_ack=N, pending_to_ack=PN, tx_id=TxId, stage=local_cert,
             remote_parts=RemoteUpdates, prepare_time=OldPrepTime}) ->
-    lager:info("Got pending prepare for ~w, to akc is ~w, pending ack is ~w", [TxId, N, PN]),
+    %lager:warning("Got pending prepare for ~w, to akc is ~w, pending ack is ~w", [TxId, N, PN]),
     case N of
         1 ->
             RemoteParts = [Part || {Part, _} <- RemoteUpdates],
