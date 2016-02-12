@@ -465,7 +465,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
                                 min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
-                                      cascade_aborted=CascadAborted+NumAborted+CFlowAbort,  committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(NumAborted-1, 0)+CFlowAbort,  committed=NewCommitted}};
                         {abort_remote, CFlowAbort, CReadInvalid} ->
                            %lager:warning("Abort remote txn"),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
@@ -475,7 +475,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
                                 min_commit_ts=NewMaxPT,  read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
-                                      cascade_aborted=CascadAborted+NumAborted+CFlowAbort, committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(NumAborted-1,0)+CFlowAbort, committed=NewCommitted}};
                         wait -> 
                            %lager:warning("Local txn waits"),
                             {noreply, SD0#state{pending_list=NewPendingList, dep_dict=DepDict2, 
@@ -574,7 +574,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
                                 min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1) + CReadInvalid,
-                                      cascade_aborted=CascadAborted+NumAborted+CFlowAbort, committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(0, NumAborted-1)+CFlowAbort, committed=NewCommitted}};
                         {abort_remote, CFlowAbort, CReadInvalid} ->
                            %lager:warning("Abort remote Txn"),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
@@ -584,7 +584,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
                                 min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
-                                      cascade_aborted=CascadAborted+NumAborted+CFlowAbort, committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(0, NumAborted-1)+CFlowAbort, committed=NewCommitted}};
                         wait ->
                            %lager:warning("Wait "),
                             {noreply, SD0#state{pending_list=NewPendingList, dep_dict=DepDict2, 
