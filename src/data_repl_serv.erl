@@ -57,6 +57,7 @@
         append_values/3,
         get_table/1,
 	    check_key/2,
+        add_to_commit_tab/3,
         clean_data/2,
 	    check_table/1,
         verify_table/2,
@@ -369,19 +370,19 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                 {ok, aborted} ->
                    %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
-                {ok, committed} ->
-                   %lager:warning("~w, ~w committed already", [TxId, Partition]),
-                    add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
-                    {noreply, SD0};
+                %{ok, committed} ->
+                %   %lager:warning("~w, ~w committed already", [TxId, Partition]),
+                %    add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
+                %    {noreply, SD0};
                 error ->
                     case dict:find(TxId, BackupDict) of 
                         {ok, aborted} ->
                            %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
-                        {ok, committed} ->
+                        %{ok, committed} ->
                            %lager:warning("~w, ~w committed already", [TxId, Partition]),
-                            add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
-                            {noreply, SD0};
+                        %    add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
+                        %    {noreply, SD0};
                         error ->
                             KeySet = lists:foldl(fun({Key, Value}, KS) ->
                             case ets:lookup(PendingLog, Key) of
@@ -416,28 +417,30 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 
 
 handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
-	    SD0=#state{replicated_log=ReplicatedLog, set_size=SetSize, pending_log=PendingLog, ts_dict=TsDict, do_specula=DoSpecula,  current_dict=CurrentDict}) ->
+	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict, do_specula=DoSpecula}) ->
     %lager:warning("repl commit for ~w ~w", [TxId, Partitions]),
-    {CurrentD1, TsDict1} = lists:foldl(fun(Partition, {S, D}) ->
+    TsDict1 = lists:foldl(fun(Partition, D) ->
             case ets:lookup(PendingLog, {TxId, Partition}) of
                 [{{TxId, Partition}, KeySet}] ->
                     ets:delete(PendingLog, {TxId, Partition}),
                     MaxTs = update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0),
-                    {S, dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, D)};
-                [] ->
-                  %lager:warning("Repl commit arrived early! ~w", [TxId]),
-                  {dict:store(TxId, committed, S), D}
-        end end, {CurrentDict, TsDict}, Partitions),
+                    dict:update(Partition, fun(OldTs) -> max(MaxTs, OldTs) end, D)
+            end
+                %[] ->
+                %  %lager:warning("Repl commit arrived early! ~w", [TxId]),
+                %  {dict:store(TxId, committed, S), D}
+        end, TsDict, Partitions),
     case DoSpecula of
         true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
         _ -> ok
     end,
-    case dict:size(CurrentD1) > SetSize of
-          true ->
-            {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentD1}};
-          false ->
-            {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
-      end;
+    {noreply, SD0#state{ts_dict=TsDict1}};
+    %case dict:size(CurrentD1) > SetSize of
+    %      true ->
+    %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentD1}};
+    %      false ->
+    %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
+    %  end;
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, ts_dict=TsDict, do_specula=DoSpecula, current_dict=CurrentDict}) ->
