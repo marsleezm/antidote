@@ -25,6 +25,7 @@
 
 -define(NO_TXN, nil).
 -define(FLOW_ABORT, -1).
+-define(MAX, 9999).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -473,7 +474,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
                                 min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
-                                      cascade_aborted=CascadAborted+NumAborted+CFlowAbort,  committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(NumAborted-1, 0)+CFlowAbort,  committed=NewCommitted}};
                         {abort_remote, CFlowAbort, CReadInvalid} ->
                            %lager:warning("Abort remote txn"),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
@@ -483,7 +484,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
                                 min_commit_ts=NewMaxPT,  read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
-                                      cascade_aborted=CascadAborted+NumAborted+CFlowAbort, committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(NumAborted-1,0)+CFlowAbort, committed=NewCommitted}};
                         wait -> 
                            %lager:warning("Local txn waits"),
                             {noreply, SD0#state{pending_list=NewPendingList, dep_dict=DepDict2, 
@@ -497,8 +498,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
                                 dict:erase(CurrentTxId, DepDict2), RepDict),
                             gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
-                            {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN, read_invalid=ReadInvalid+min(NumAborted, 1),
-                                      cascade_aborted=CascadAborted+max(0, NumAborted-1),   
+                            {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN, 
                                   pending_list=[], committed=NewCommitted+1, dep_dict=DepDict3}};
                         specula -> %% Can not commit, but can specualte (due to the number of specula txns decreased)
                            %lager:warning("Specula current txn ~w", [CurrentTxId]),
@@ -512,8 +512,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, os:timestamp()}}),
                             {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict3,
                                     pending_list=PendingList1, min_commit_ts=NewMaxPT, min_snapshot_ts=SpeculaPrepTime,
-                                    read_invalid=ReadInvalid+min(NumAborted, 1),
-                                      cascade_aborted=CascadAborted+max(0, NumAborted-1), committed=NewCommitted}}
+                                      committed=NewCommitted}}
                     end;
                 _ ->
                     DepDict1 = dict:store(PendingTxId, {0, [], max(PendingPT, OldPrepTime)}, DepDict),
@@ -580,6 +579,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                     %        0, Committed),
                     %% Only needs local parts and remote parts when need to commit/abort/specula_commit,
                     %% so identify when needs to abort.
+                    %lager:warning("Pendinglist is ~w, NumAborted is ~w", [PendingTxId, NumAborted]),
                     case decide_after_cascade(NewPendingList, DepDict2, NumAborted, CurrentTxId, Stage) of
                         invalid -> %% Should be cert_aborted later
                           %lager:warning("Tnx invalid"),
@@ -595,7 +595,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
                                 min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1) + CReadInvalid,
-                                      cascade_aborted=CascadAborted+NumAborted+CFlowAbort, committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(0, NumAborted-1)+CFlowAbort, committed=NewCommitted}};
                         {abort_remote, CFlowAbort, CReadInvalid} ->
                            %lager:warning("Abort remote Txn"),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
@@ -605,7 +605,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
                                 min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
-                                      cascade_aborted=CascadAborted+NumAborted+CFlowAbort, committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(0, NumAborted-1)+CFlowAbort, committed=NewCommitted}};
                         wait ->
                            %lager:warning("Wait "),
                             {noreply, SD0#state{pending_list=NewPendingList, dep_dict=DepDict2, 
@@ -619,8 +619,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
                                 dict:erase(CurrentTxId, DepDict2), RepDict),
                             gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
-                            {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN,read_invalid=ReadInvalid+min(NumAborted, 1),
-                                      cascade_aborted=CascadAborted+max(0, NumAborted-1), 
+                            {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN,
                                 pending_list=[], committed=NewCommitted+1, dep_dict=DepDict3}};
                         specula -> %% Can not commit, but can specualte (due to the number of specula txns decreased)
                            %lager:warning("Specula current txn ~w", [CurrentTxId]),
@@ -634,8 +633,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, os:timestamp()}}),
                             {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict3,
                                     pending_list=PendingList1, min_commit_ts=NewMaxPT, min_snapshot_ts=SpeculaPrepTime, 
-                                    read_invalid=ReadInvalid+min(NumAborted, 1),
-                                      cascade_aborted=CascadAborted+max(0, NumAborted-1),committed=NewCommitted}}
+                                      committed=NewCommitted}}
                     end;
                 _ ->
                     DepDict1 = dict:store(PendingTxId, {0, [], OldPrepTime}, DepDict),
@@ -690,6 +688,7 @@ handle_cast({aborted, PendingTxId, FromNode},
             DepDict1 = abort_specula_list(L, RepDict, DepDict, PendingTxs, FromNode),
             case CurrentTxId of
                 ?NO_TXN ->
+                    %lager:warning("No current txn, Pendinglist is ~w, NumAborted is ~w", [PendingTxId, Length-1]),
                     {noreply, SD0#state{dep_dict=DepDict1, 
                         pending_list=Prev,
                         cert_aborted=CertAborted+1, cascade_aborted=CascadeAborted+Length-1}};
@@ -778,15 +777,16 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
             end;
         {Prev, L} ->
             RD = abort_specula_list(L, RepDict, DepDict, PendingTxs),
+            Length = length(L),
             %lager:warning("Abort due to read invalid, Pending list is ~w, PendingTxId is ~w, List is ~w", [PendingList, TxId, L]),
             case CurrentTxId of
                 ?NO_TXN ->
+                    %lager:warning("No current txn, Pendinglist is ~w, NumAborted is ~w", [PendingList, Length-1]),
                     {noreply, SD0#state{dep_dict=RD, 
                         pending_list=Prev,
-                        read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+length(L)-1}};
+                        read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length-1}};
                 _ ->
                   %lager:warning("Current tx is ~w, Stage is ~w", [CurrentTxId, Stage]),
-                    Length = length(L),
                     case Stage of
                         local_cert -> 
                             abort_tx(CurrentTxId, LocalParts, [], RepDict),
@@ -796,6 +796,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
                                 pending_list=Prev,
                                 read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length}};
                         remote_cert -> 
+                            %lager:warning("Has current txn remote, Pendinglist is ~w, NumAborted is ~w", [PendingList, Length]),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, RepDict),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
@@ -804,6 +805,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
                                 pending_list=Prev,
                                 read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length}};
                         read ->
+                            %lager:warning("Has current txn read, Pendinglist is ~w, NumAborted is ~w", [PendingList, Length-1]),
                             case (MyCommitTime == -1) or (InvalidTS == -1) of
                                 true ->
                                     {noreply, SD0#state{dep_dict=RD, invalid_ts=-1,
@@ -857,14 +859,18 @@ decide_after_cascade(PendingList, DepDict, NumAborted, TxId, Stage) ->
 
 try_to_abort(PendingList, ToAbortTxs, DepDict, RepDict, PendingTxs, ReadAborted) ->
   %lager:warning("Trying to abort ~w ~n", [ToAbortTxs]),
-    MinIndex = find_min_index(ToAbortTxs, PendingList),
-    FullLength = length(PendingList),
-  %lager:warning("Min index is ~w, FulLength is ~w, ReadAborted is ~w ~n", [MinIndex, FullLength, ReadAborted]),
-    L = lists:sublist(PendingList, MinIndex, FullLength),
-    RD = abort_specula_list(L, RepDict, DepDict, PendingTxs),
-    %% Remove entries so that the current txn (which is not in pending list) knows that it should be cert_aborted. 
-    RD1 = lists:foldl(fun(T, D) -> dict:erase(T, D) end, RD, ToAbortTxs),
-    {RD1, lists:sublist(PendingList, MinIndex-1), ReadAborted+FullLength-MinIndex+1}.
+    case find_min_index(ToAbortTxs, PendingList) of
+        ?MAX ->
+            DepDict1 = lists:foldl(fun(T, D) -> dict:erase(T, D) end, DepDict, ToAbortTxs),
+            {DepDict1, PendingList, ReadAborted};
+        MinIndex ->
+            FullLength = length(PendingList),
+            L = lists:sublist(PendingList, MinIndex, FullLength),
+            RD = abort_specula_list(L, RepDict, DepDict, PendingTxs),
+            %% Remove entries so that the current txn (which is not in pending list) knows that it should be cert_aborted. 
+            RD1 = lists:foldl(fun(T, D) -> dict:erase(T, D) end, RD, ToAbortTxs),
+            {RD1, lists:sublist(PendingList, MinIndex-1), ReadAborted+FullLength-MinIndex+1}
+    end.
 
 %% Same reason, no need for RemoteParts
 commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
@@ -1147,13 +1153,15 @@ start_from(H, [H|_]=L, Prev)->
 start_from(H, [NH|T], Prev) ->
     start_from(H, T, [NH|Prev]).
 
+find_min_index(_, []) ->
+    ?MAX;
 find_min_index(FirstList, FullList) ->
     Set = sets:from_list(FirstList),
     {_, MinIndex} = lists:foldl(fun(E, {Index, Num}) ->
                 case sets:is_element(E, Set) of
                     true ->  {Index+1, min(Index, Num)};
                     false -> {Index+1, Num}
-                end end, {1, 1}, FullList),
+                end end, {1, ?MAX}, FullList),
     MinIndex.
 
 get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->

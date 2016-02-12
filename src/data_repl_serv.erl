@@ -166,7 +166,7 @@ init([Name, _Parts]) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent, 40),
+    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent div 2, 30),
                 pending_log = PendingLog, current_dict = dict:new(), ts_dict=dict:new(), do_specula=DoSpecula,
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
@@ -384,19 +384,18 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                 {ok, aborted} ->
                    %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
-                {ok, {committed, CommitTS}} ->
-                   %lager:warning("~w, ~w committed already", [TxId, Partition]),
-                   add_to_commit_tab(WriteSet, CommitTS, ReplicatedLog),
-                   {noreply, SD0};
+                %{ok, committed} ->
+                %   %lager:warning("~w, ~w committed already", [TxId, Partition]),
+                %    add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
+                %    {noreply, SD0};
                 error ->
                     case dict:find(TxId, BackupDict) of 
                         {ok, aborted} ->
                            %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
-                        {ok, {committed, CommitTS}} ->
-                           %lager:warning("~w, ~w committed already", [TxId, Partition]),
-                            add_to_commit_tab(WriteSet, CommitTS, ReplicatedLog),
-                            {noreply, SD0};
+                        %{ok, committed} ->
+                        %    add_to_commit_tab(WriteSet, TimeStamp, ReplicatedLog),
+                        %    {noreply, SD0};
                         error ->
                             {KeySet, ToPrepTS} =   lists:foldl(fun({Key, _Value}, {KS, Ts}) ->
                                                         case ets:lookup(PendingLog, Key) of
@@ -441,30 +440,23 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 
 
 handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
-	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, do_specula=DoSpecula, current_dict=CurrentSet, set_size=SetSize}) ->
-    %lager:warning("repl commit for ~w ~w", [TxId, Partitions]),
-    CurrentD1 = lists:foldl(fun(Partition, S) ->
-    %lists:foreach(fun(Partition) ->
-            case ets:lookup(PendingLog, {TxId, Partition}) of
-                [{{TxId, Partition}, KeySet}] -> %= ets:lookup(PendingLog, {TxId, Partition}), 
+	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, do_specula=DoSpecula}) ->
+    lists:foreach(fun(Partition) ->
+                    [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
                     ets:delete(PendingLog, {TxId, Partition}),
-                    update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog),
-                    S;
-                [] ->
-                   %lager:warning("Repl commit arrived early! ~w", [TxId]),
-                    dict:store(TxId, {committed, CommitTime}, S)
-        end end, CurrentSet, Partitions),
+                    update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog)
+        end, Partitions),
     case DoSpecula of
         true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
         _ -> ok
     end,
-    %{noreply, SD0};
-    case dict:size(CurrentD1) > SetSize of
-          true ->
-            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentD1}};
-          false ->
-            {noreply, SD0#state{current_dict=CurrentD1}}
-    end;
+    {noreply, SD0};
+    %case dict:size(CurrentD1) > SetSize of
+    %      true ->
+    %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentD1}};
+    %      false ->
+    %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
+    %  end;
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict}) ->
@@ -767,17 +759,6 @@ add_read_dep(ReaderTx, WriterTx, _Key) ->
 
 prepared_by_local(TxId) ->
     node(TxId#tx_id.server_pid) == node().
-
-add_to_commit_tab(WriteSet, TxCommitTime, Tab) ->
-    lists:foreach(fun({Key, Value}) ->
-            case ets:lookup(Tab, Key) of
-                [] ->
-                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}]});
-                [{Key, ValueList}] ->
-                    {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}|RemainList]})
-            end
-    end, WriteSet).
 
 find_parts_for_name(Partitions) ->
     Repls = antidote_config:get(to_repl),

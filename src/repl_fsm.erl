@@ -144,6 +144,7 @@ chain_replicate(_Replicas, _TxId, _WriteSet, _TimeStamp, _ToReply) ->
 init([Name]) ->
     hash_fun:build_rev_replicas(),
     [{_, Replicas}] = ets:lookup(meta_info, node()), 
+   %lager:warning("Replicas are ~w", [Replicas]),
     PendingLog = tx_utilities:open_private_table(pending_log),
     NewDict = generate_except_replicas(Replicas),
     Lists = antidote_config:get(to_repl),
@@ -165,7 +166,7 @@ handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
 handle_cast({repl_prepare, Partition, prepared, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, pending_log=PendingLog, except_replicas=ExceptReplicas, 
             my_name=MyName, mode=Mode, repl_factor=ReplFactor, fast_reply=_FastReply}) ->
-    %lager:info("Repl prepare for ~w, ~w", [TxId, Partition]),
+   %lager:warning("Repl prepare for ~w, ~w", [TxId, Partition]),
     %case PrepType of
     %    single_commit ->
     %        {Sender, WriteSet, CommitTime} = LogContent,
@@ -186,7 +187,7 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                     case RepMode of
                         %% This is for non-specula version
                         {remote, ignore} ->
-                           %lager:warning("Ignor Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition]),
+                           %lager:warning("Ignor Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, Sender, 
                                     PrepareTime, remote, ReplFactor}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
@@ -208,7 +209,7 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                             end;
                         _ ->
-                            %lager:warning("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
+                            %lager:warning("Local prepared request for {~w, ~w}, Sending to ~w, ReplFactor is ~w", [TxId, Partition, Replicas, ReplFactor]),
                             %case RepMode of
                             %    local_fast ->%lager:warning("Replicating local_fast txn! ~w", [TxId]);
                             %    _ -> ok
@@ -248,6 +249,7 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
     %lager:info("Got proposed ts ~w fo ~w", [ProposedTs, TxId]),
     case ets:lookup(PendingLog, {TxId, Partition}) of
         [{{TxId, Partition}, Sender, Timestamp, RepMode, 1}] ->
+           %lager:warning("Got all replis, replying for ~w, ~w", [TxId, Partition]),
             case RepMode of
                 false -> true = ets:delete(PendingLog, {TxId, Partition}), ok;
                 %local_fast -> true = ets:delete(PendingLog, {TxId, Partition}),
