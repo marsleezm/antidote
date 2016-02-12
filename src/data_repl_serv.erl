@@ -448,7 +448,8 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
             case ets:lookup(PendingLog, {TxId, Partition}) of
                 [{{TxId, Partition}, KeySet}] -> %= ets:lookup(PendingLog, {TxId, Partition}), 
                     ets:delete(PendingLog, {TxId, Partition}),
-                    {S, update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog)};
+                    update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog),
+                    S;
                 [] ->
                    %lager:warning("Repl commit arrived early! ~w", [TxId]),
                     dict:store(TxId, {committed, CommitTime}, S)
@@ -463,7 +464,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
             {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentD1}};
           false ->
             {noreply, SD0#state{current_dict=CurrentD1}}
-      end;
+    end;
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict}) ->
