@@ -458,10 +458,12 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
                             lager:warning("ReadInvalid is now ~w, cascade_aborted is ~w", [ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
+                            %% If NumAborted is 0: then cascade_abort(or read_invalid) is 1;
+                            %% If NumAborted is 1 or larger, then cascade_abort is NumAborted-1+1
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
                                 min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1),
-                                      cascade_aborted=CascadAborted+NumAborted,  committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(1, NumAborted),  committed=NewCommitted}};
                         abort_remote ->
                            %lager:warning("Abort remote txn"),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
@@ -472,7 +474,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
                                 min_commit_ts=NewMaxPT,  read_invalid=ReadInvalid+min(NumAborted, 1),
-                                      cascade_aborted=CascadAborted+NumAborted, committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(1, NumAborted), committed=NewCommitted}};
                         wait -> 
                            %lager:warning("Local txn waits"),
                             {noreply, SD0#state{pending_list=NewPendingList, dep_dict=DepDict2, 
@@ -572,7 +574,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
                                 min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1),
-                                      cascade_aborted=CascadAborted+NumAborted, committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(1, NumAborted), committed=NewCommitted}};
                         abort_remote ->
                            %lager:warning("Abort remote Txn"),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
@@ -583,7 +585,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
                                 min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1),
-                                      cascade_aborted=CascadAborted+NumAborted, committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(1, NumAborted), committed=NewCommitted}};
                         wait ->
                            %lager:warning("Wait "),
                             {noreply, SD0#state{pending_list=NewPendingList, dep_dict=DepDict2, 
@@ -803,13 +805,15 @@ decide_after_cascade(PendingList, DepDict, NumAborted, TxId, Stage) ->
         ?NO_TXN -> wait;
         _ -> 
             case NumAborted > 0 of
-                true -> case Stage of read -> invalid; %% Abort due to flow dependency. 
+                true -> lager:warning("Abort due to flow dep"),
+                        case Stage of read -> invalid; %% Abort due to flow dependency. 
                                      local_cert -> abort_local;
                                      remote_cert -> abort_remote
                         end;
                 false ->
                     case dict:find(TxId, DepDict) of %% TODO: should give a invalid_ts 
-                        error -> case Stage of read -> invalid;
+                        error -> lager:warning("Abort due to read dep"),
+                                 case Stage of read -> invalid;
                                              local_cert -> abort_local;
                                              remote_cert -> abort_remote
                                  end;
