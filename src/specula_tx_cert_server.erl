@@ -456,7 +456,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                            %lager:warning("Abort local txn"),
                             abort_tx(CurrentTxId, LocalParts, [], DoRepl, RepDict),
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
-                            lager:warning("ReadInvalid is now ~w, cascade_aborted is ~w", [ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
+                            lager:warning("ReadInvalid is now ~w, cascade_aborted is ~w", [CurrentTxId, ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             %% If NumAborted is 0: then cascade_abort(or read_invalid) is 1;
                             %% If NumAborted is 1 or larger, then cascade_abort is NumAborted-1+1
@@ -470,7 +470,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, DoRepl, RepDict),
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
-                            lager:warning("ReadInvalid is now ~w, cascade_aborted is ~w", [ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
+                            lager:warning("CurrentTxId is ~w, ReadInvalid is now ~w, cascade_aborted is ~w", [CurrentTxId, ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
                                 min_commit_ts=NewMaxPT,  read_invalid=ReadInvalid+min(NumAborted, 1),
@@ -569,7 +569,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                           %lager:warning("Abort local Txn"),
                             abort_tx(CurrentTxId, LocalParts, [], DoRepl, RepDict),
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
-                            lager:warning("invalid! ReadInvalid is now ~w, cascade_aborted is ~w", [ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
+                            lager:warning("TxId ~w, read invalid! ReadInvalid is now ~w, cascade_aborted is ~w", [CurrentTxId,ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
@@ -580,7 +580,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, DoRepl, RepDict),
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
-                            lager:warning("read invalid! ReadInvalid is now ~w, cascade_aborted is ~w", [ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
+                            lager:warning("Txid ~w, read invalid! ReadInvalid is now ~w, cascade_aborted is ~w", [CurrentTxId, ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
@@ -1010,7 +1010,7 @@ add_to_table([{{Partition, Node}, Updates}|Rest], TxId, PrepareTime, RepDict) ->
 
 %% Deal dependencies and check if any following transactions can be committed.
 try_to_commit(LastCommitTime, [], _RepDict, DepDict, _DoRepl, _PendingTxs, NumAborted, Committed) ->
-      %lager:warning("Returning ~w ~w ~w ~w ~w", [[], LastCommitTime, DepDict, NumAborted, Committed]),
+    lager:warning("Returning ~w ~w ~w ~w ~w", [[], LastCommitTime, DepDict, NumAborted, Committed]),
     {[], LastCommitTime, DepDict, NumAborted, Committed};
 try_to_commit(LastCommitTime, [H|Rest]=PendingList, RepDict, DepDict, 
                         DoRepl, PendingTxs, NumAborted, Committed) ->
@@ -1023,12 +1023,12 @@ try_to_commit(LastCommitTime, [H|Rest]=PendingList, RepDict, DepDict,
     %lager:warning("If can commit decision for ~w is ~w", [H, Result]),
     case Result of
         false ->
-             %lager:warning("Returning ~w ~w ~w ~w ~w", [PendingList, LastCommitTime, DepDict, NumAborted, Committed]),
+            lager:warning("Returning ~w ~w ~w ~w ~w", [PendingList, LastCommitTime, DepDict, NumAborted, Committed]),
             {PendingList, LastCommitTime, DepDict, NumAborted, Committed};
         {true, CommitTime} ->
             {DepDict1, ToAbortTxs} = commit_specula_tx(H, CommitTime, DoRepl,
                dict:erase(H, DepDict), RepDict, PendingTxs),
-             %lager:warning("Before commit specula tx, ToAbortTs are ~w, dict is ~w", [ToAbortTxs, DepDict1]),
+            lager:warning("Before commit specula tx, ToAbortTs are ~w, dict is ~w", [ToAbortTxs, DepDict1]),
             case ToAbortTxs of
                 [] ->
                     try_to_commit(CommitTime, Rest, RepDict, DepDict1, DoRepl, PendingTxs, NumAborted, Committed+1);
@@ -1087,7 +1087,7 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                             %% Read is not valid
                             case TxServer of
                                 Self ->
-                                 %lager:warning("~w is my own, read invalid", [DepTxId]),
+                                    lager:warning("~w is my own, read invalid", [DepTxId]),
                                     {RD, [DepTxId|ToAbort]};
                                 _ ->
                                  %lager:warning("~w is not my own, read invalid", [DepTxId]),
