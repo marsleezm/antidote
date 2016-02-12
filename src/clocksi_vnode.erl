@@ -1130,12 +1130,11 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, L
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     %% Abort should be fast, so send abort to myself directly.. Coord won't send abort to me again.
                     abort([MyNode], TxId),
-                    %DepDict1 = dict:update(fucked_by_commit, fun({T, Cnt}) ->  {T+TxCommitTime-TxId#tx_id.snapshot_time, Cnt+1} end, DepDict),
-                    deal_with_prepare_deps(PWaiter, TxCommitTime, NewDepDict, LastPPTime, MyNode)
-                %error ->
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, NewDepDict, LastPPTime, MyNode);
+                error ->
                 % %lager:warning("Prepare not valid anymore! For ~w, but it's aborted already", [TxId]),
                 %    specula_utilities:deal_abort_deps(TxId),
-                %    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict)
+                    deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastPPTime, MyNode)
             end;
         false ->
             case dict:find(TxId, DepDict) of
