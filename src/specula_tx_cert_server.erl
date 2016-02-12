@@ -279,8 +279,10 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
         -1 -> 
             %% Some read is invalid even before the txn starts.. If invalid_ts is larger than 0, it can possibly be saved.
            %lager:warning("Aborting txn due to invalidTS ~w!", [TxId]),
+            lager:warning("~w Read aborted! ReadAborted is now ~w", [TxId, ReadAborted+1]),
             {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict), read_aborted=ReadAborted+1}};
         _ ->
+            lager:warning("~w Read invalid! ReadInvalid is now ~w", [TxId, ReadInvalid+1]),
             {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict), read_invalid=ReadInvalid+1}}
     end;
 
@@ -454,6 +456,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                            %lager:warning("Abort local txn"),
                             abort_tx(CurrentTxId, LocalParts, [], DoRepl, RepDict),
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
+                            lager:warning("ReadInvalid is now ~w, cascade_aborted is ~w", [ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
@@ -465,6 +468,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, DoRepl, RepDict),
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
+                            lager:warning("ReadInvalid is now ~w, cascade_aborted is ~w", [ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
                                 min_commit_ts=NewMaxPT,  read_invalid=ReadInvalid+min(NumAborted, 1),
@@ -563,6 +567,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                           %lager:warning("Abort local Txn"),
                             abort_tx(CurrentTxId, LocalParts, [], DoRepl, RepDict),
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
+                            lager:warning("invalid! ReadInvalid is now ~w, cascade_aborted is ~w", [ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
@@ -573,6 +578,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, DoRepl, RepDict),
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
+                            lager:warning("read invalid! ReadInvalid is now ~w, cascade_aborted is ~w", [ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
@@ -632,6 +638,7 @@ handle_cast({aborted, TxId, FromNode}, SD0=#state{tx_id=TxId, local_updates=Loca
         do_repl=DoRepl, sender=Sender, dep_dict=DepDict, stage=local_cert, cert_aborted=CertAborted, rep_dict=RepDict}) ->
     abort_tx(TxId, lists:delete(FromNode, LocalParts), [], DoRepl, RepDict),
     DepDict1 = dict:erase(TxId, DepDict),
+    lager:warning("~w local abort! Cert aborted is now ~w", [TxId, CertAborted+1]),
     gen_server:reply(Sender, {aborted, local}),
     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_aborted=CertAborted+1}};
 %% Aborting the current transaction
@@ -642,6 +649,7 @@ handle_cast({aborted, TxId, FromNode},
     RemoteParts = [P || {P, _} <- RemoteUpdates],
     abort_tx(TxId, LocalParts, lists:delete(FromNode, RemoteParts), DoRepl, RepDict),
     DepDict1 = dict:erase(PendingTxs, DepDict),
+    lager:warning("~w remote abort! Cert aborted is now ~w", [TxId, CertAborted+1]),
     gen_server:reply(Sender, {aborted, remote}),
     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_aborted=CertAborted+1}};
 %% Not aborting current transaction
@@ -676,6 +684,7 @@ handle_cast({aborted, PendingTxId, FromNode},
                         _ ->
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, DoRepl, RepDict),
                             DepDict2 = dict:erase(CurrentTxId, DepDict1),
+                            lager:warning("~w remote abort current! Cert aborted is now ~w", [CurrentTxId, CertAborted+1]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             %% The current transaction is cert_aborted! So replying to client.
                             %% But don't count it!
@@ -713,6 +722,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
     {RAD1, RID1} = case Type of read_aborted -> {ReadAborted+1, ReadInvalid};
                                 read_invalid -> {ReadAborted, ReadInvalid+1}
                    end,
+    lager:warning("Tx ~w aborted! ReadAborted is ~w, ReadInvalid is ~w", [TxId, RAD1, RID1]),
     case dict:find(TxId, DepDict) of
         {ok, {read_only, _, _}} ->
             {noreply, SD0#state{dep_dict=dict:erase(TxId, DepDict), read_aborted=ReadAborted+1}};
