@@ -25,6 +25,7 @@
 
 -define(NO_TXN, nil).
 -define(FLOW_ABORT, -1).
+-define(MAX, 9999).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -835,14 +836,18 @@ decide_after_cascade(PendingList, DepDict, NumAborted, TxId, Stage) ->
 
 try_to_abort(PendingList, ToAbortTxs, DepDict, RepDict, PendingTxs, DoRepl, ReadAborted) ->
   %lager:warning("Trying to abort ~w ~n", [ToAbortTxs]),
-    MinIndex = find_min_index(ToAbortTxs, PendingList),
-    FullLength = length(PendingList),
-  %lager:warning("Min index is ~w, FulLength is ~w, ReadAborted is ~w ~n", [MinIndex, FullLength, ReadAborted]),
-    L = lists:sublist(PendingList, MinIndex, FullLength),
-    RD = abort_specula_list(L, RepDict, DepDict, DoRepl, PendingTxs),
-    %% Remove entries so that the current txn (which is not in pending list) knows that it should be cert_aborted. 
-    RD1 = lists:foldl(fun(T, D) -> dict:erase(T, D) end, RD, ToAbortTxs),
-    {RD1, lists:sublist(PendingList, MinIndex-1), ReadAborted+FullLength-MinIndex+1}.
+    case find_min_index(ToAbortTxs, PendingList) of
+        ?MAX ->
+            DepDict1 = lists:foldl(fun(T, D) -> dict:erase(T, D) end, DepDict, ToAbortTxs),
+            {DepDict1, PendingList, ReadAborted};
+        MinIndex ->
+            FullLength = length(PendingList),
+            L = lists:sublist(PendingList, MinIndex, FullLength),
+            RD = abort_specula_list(L, RepDict, DepDict, DoRepl, PendingTxs),
+            %% Remove entries so that the current txn (which is not in pending list) knows that it should be cert_aborted. 
+            RD1 = lists:foldl(fun(T, D) -> dict:erase(T, D) end, RD, ToAbortTxs),
+            {RD1, lists:sublist(PendingList, MinIndex-1), ReadAborted+FullLength-MinIndex+1}
+    end.
 
 %% Same reason, no need for RemoteParts
 commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DoRepl, DepDict, RepDict) ->
@@ -1109,13 +1114,15 @@ start_from(H, [H|T])->
 start_from(H, [_|T]) ->
     start_from(H, T).
 
+find_min_index(_, []) ->
+    ?MAX;
 find_min_index(FirstList, FullList) ->
     Set = sets:from_list(FirstList),
     {_, MinIndex} = lists:foldl(fun(E, {Index, Num}) ->
                 case sets:is_element(E, Set) of
                     true ->  {Index+1, min(Index, Num)};
                     false -> {Index+1, Num}
-                end end, {1, 1}, FullList),
+                end end, {1, ?MAX}, FullList),
     MinIndex.
 
 get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->
