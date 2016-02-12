@@ -787,11 +787,11 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
                                 true ->
                                     {noreply, SD0#state{dep_dict=RD, invalid_ts=-1,
                                         pending_list=lists:sublist(PendingList, length(PendingList)-Length),
-                                        read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length-1}};
+                                        cascade_aborted=CascadAborted+Length-1}};
                                 _ -> 
                                     {noreply, SD0#state{dep_dict=RD, invalid_ts=max(MyCommitTime, InvalidTS), 
                                         pending_list=lists:sublist(PendingList, length(PendingList)-Length),
-                                        read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length-1}}
+                                        cascade_aborted=CascadAborted+Length-1}}
                             end
                     end
             end
