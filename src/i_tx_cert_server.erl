@@ -142,7 +142,7 @@ handle_cast({clean_data, Sender}, SD0) ->
 handle_cast({pending_prepared, TxId, PrepareTime},
         SD0=#state{to_ack=N, pending_to_ack=PN, tx_id=TxId, stage=local_cert,
             remote_parts=RemoteUpdates, prepare_time=OldPrepTime}) ->
-    %lager:info("Got prepared local"),
+    lager:info("Got pending prepare for ~w", [TxId]),
     case N of
         1 ->
             RemoteParts = [Part || {Part, _} <- RemoteUpdates],
@@ -179,7 +179,7 @@ handle_cast({pending_prepared, _OtherTxId, _PrepareTime}, SD0) ->
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, pending_to_ack=PN, local_parts=LocalParts, do_repl=DoRepl, stage=local_cert,
             remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime, rep_dict=RepDict}) ->
-    %lager:info("Got prepared local"),
+    lager:warning("Got prepared local for ~w", [TxId]),
     case N of
         1 -> 
             RemoteParts = [Part || {Part, _} <- RemoteUpdates],
@@ -234,7 +234,7 @@ handle_cast({aborted, _, _}, SD0=#state{stage=local_cert}) ->
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, do_repl=DoRepl, rep_dict=RepDict, 
             prepare_time=MaxPrepTime, to_ack=N, local_parts=LocalParts, stage=remote_cert}) ->
-    %lager:info("Received remote prepare ~w, ~w, N is ~w", [TxId, PrepareTime, N]),
+    lager:warning("Received remote prepare ~w, ~w, N is ~w", [TxId, PrepareTime, N]),
     case N of
         1 ->
             %lager:info("Decided to commit a txn ~w, prepare time is ~w", [TxId, PrepareTime]),
