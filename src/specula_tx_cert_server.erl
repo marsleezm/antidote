@@ -470,7 +470,6 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, DoRepl, RepDict),
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
-                            %lager:warning("CurrentTxId is ~w, ReadInvalid is now ~w, cascade_aborted is ~w", [CurrentTxId, ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
                                 min_commit_ts=NewMaxPT,  read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
@@ -479,7 +478,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                            %lager:warning("Local txn waits"),
                             {noreply, SD0#state{pending_list=NewPendingList, dep_dict=DepDict2, 
                                     read_invalid=ReadInvalid+min(NumAborted, 1),
-                                      cascade_aborted=CascadAborted+NumAborted, committed=NewCommitted}};
+                                      cascade_aborted=CascadAborted+max(0, NumAborted-1), committed=NewCommitted}};
                         {commit, OldCurPrepTime} ->
                            %lager:warning("Commit local txn"),
                             CurCommitTime = max(NewMaxPT+1, OldCurPrepTime),
@@ -580,7 +579,6 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, DoRepl, RepDict),
                             DepDict3 = dict:erase(CurrentTxId, DepDict2),
-                            %lager:warning("Txid ~w, read invalid! ReadInvalid is now ~w, cascade_aborted is ~w", [CurrentTxId, ReadInvalid+min(NumAborted, 1), CascadAborted+NumAborted]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             {noreply, SD0#state{
                               pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3, 
