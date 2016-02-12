@@ -144,7 +144,7 @@ chain_replicate(_Replicas, _TxId, _WriteSet, _TimeStamp, _ToReply) ->
 init([Name]) ->
     hash_fun:build_rev_replicas(),
     [{_, Replicas}] = ets:lookup(meta_info, node()), 
-    lager:warning("Replicas are ~w", [Replicas]),
+   %lager:warning("Replicas are ~w", [Replicas]),
     PendingLog = tx_utilities:open_private_table(pending_log),
     NewDict = generate_except_replicas(Replicas),
     Lists = antidote_config:get(to_repl),
@@ -166,13 +166,13 @@ handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
 handle_cast({repl_prepare, Partition, prepared, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, pending_log=PendingLog, except_replicas=ExceptReplicas, 
             my_name=MyName, mode=Mode, repl_factor=ReplFactor, fast_reply=_FastReply}) ->
-    lager:warning("Repl prepare for ~w, ~w", [TxId, Partition]),
+   %lager:warning("Repl prepare for ~w, ~w", [TxId, Partition]),
     %case PrepType of
     %    single_commit ->
     %        {Sender, WriteSet, CommitTime} = LogContent,
     %        case Mode of
     %            quorum ->
-    %                 lager:warning("Got single_commit request for ~w, Sending to ~w", [TxId, Replicas]),
+    %                %lager:warning("Got single_commit request for ~w, Sending to ~w", [TxId, Replicas]),
     %                ets:insert(PendingLog, {{TxId, Partition}, single_commit, Sender, 
     %                        CommitTime, ignore, ReplFactor}),
     %                quorum_replicate(Replicas, single_commit, TxId, Partition, WriteSet, CommitTime, MyName);
@@ -187,7 +187,7 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                     case RepMode of
                         %% This is for non-specula version
                         {remote, ignore} ->
-                            lager:warning("Ignor Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
+                           %lager:warning("Ignor Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                             ets:insert(PendingLog, {{TxId, Partition}, Sender, 
                                     PrepareTime, remote, ReplFactor}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
@@ -198,20 +198,20 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                                 {ok, []} ->
                                     gen_server:cast(Sender, {prepared, TxId, PrepareTime});
                                 {ok, R} -> 
-                                    lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
+                                   %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
                                     ets:insert(PendingLog, {{TxId, Partition}, Sender, 
                                             PrepareTime, remote, ReplFactor-1}),
                                     quorum_replicate(R, prepared, TxId, Partition, WriteSet, PrepareTime, MyName);
                                 error ->
-                                    lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
+                                   %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
                                     ets:insert(PendingLog, {{TxId, Partition}, Sender, 
                                             PrepareTime, remote, ReplFactor}),
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                             end;
                         _ ->
-                             lager:warning("Local prepared request for {~w, ~w}, Sending to ~w, ReplFactor is ~w", [TxId, Partition, Replicas, ReplFactor]),
+                            %lager:warning("Local prepared request for {~w, ~w}, Sending to ~w, ReplFactor is ~w", [TxId, Partition, Replicas, ReplFactor]),
                             %case RepMode of
-                            %    local_fast -> lager:warning("Replicating local_fast txn! ~w", [TxId]);
+                            %    local_fast ->%lager:warning("Replicating local_fast txn! ~w", [TxId]);
                             %    _ -> ok
                             %end,
                             ets:insert(PendingLog, {{TxId, Partition}, Sender, 
@@ -245,7 +245,7 @@ handle_cast({abort_pending_prep, TxId, Partition}, SD0=#state{pending_log=Pendin
 handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLog}) ->
     case ets:lookup(PendingLog, {TxId, Partition}) of
         [{{TxId, Partition}, Sender, Timestamp, RepMode, 1}] ->
-            lager:warning("Got all replis, replying for ~w, ~w", [TxId, Partition]),
+           %lager:warning("Got all replis, replying for ~w, ~w", [TxId, Partition]),
             case RepMode of
                 false -> true = ets:delete(PendingLog, {TxId, Partition}), ok;
                 %local_fast -> true = ets:delete(PendingLog, {TxId, Partition}),
@@ -255,10 +255,10 @@ handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLo
                      gen_server:cast(Sender, {prepared, TxId, max(Timestamp, ProposedTs)})
             end;
         [{{TxId, Partition}, Sender, Timestamp, RepMode, N}] ->
-            lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
+           %lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
             ets:insert(PendingLog, {{TxId, Partition}, Sender, max(Timestamp,ProposedTs), RepMode, N-1});
         [] -> %%The record is appended already, do nothing
-             lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
+            %lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
             ok
     end,
     {noreply, SD0};
@@ -282,7 +282,7 @@ terminate(_Reason, _SD) ->
 
 send_after(Delay, To, Msg) ->
     timer:sleep(Delay),
-     lager:warning("Sending info after ~w", [Delay]),
+    %lager:warning("Sending info after ~w", [Delay]),
     gen_server:cast(To, Msg).
 
 get_repl_name() ->

@@ -60,7 +60,7 @@
 %%%===================================================================
 
 start_link(Name) ->
-    lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
+   %lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
     gen_server:start_link({local, Name},
              ?MODULE, [], []).
 
@@ -115,7 +115,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{la
         N ->
             LocalParts = [Part || {Part, _} <- LocalUpdates],
             %lager:info("Local updates are ~w", [LocalUpdates]),
-            lager:warning("~w need ~w local prepare ", [TxId, N]),
+           %lager:warning("~w need ~w local prepare ", [TxId, N]),
             case RemoteUpdates of
                 [] ->
                     clocksi_vnode:prepare(LocalUpdates, TxId, local_only);
@@ -180,7 +180,7 @@ handle_cast({pending_prepared, _OtherTxId, _PrepareTime}, SD0) ->
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, pending_to_ack=PN, local_parts=LocalParts, do_repl=DoRepl, stage=local_cert,
             remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime, rep_dict=RepDict}) ->
-    lager:warning("Got prepared local for ~w, to ack is ~w, pn is ~w", [TxId, N, PN]),
+   %lager:warning("Got prepared local for ~w, to ack is ~w, pn is ~w", [TxId, N, PN]),
     case N of
         1 -> 
             RemoteParts = [Part || {Part, _} <- RemoteUpdates],
