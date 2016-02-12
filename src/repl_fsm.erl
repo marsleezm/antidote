@@ -144,6 +144,7 @@ chain_replicate(_Replicas, _TxId, _WriteSet, _TimeStamp, _ToReply) ->
 init([Name]) ->
     hash_fun:build_rev_replicas(),
     [{_, Replicas}] = ets:lookup(meta_info, node()), 
+    lager:warning("Replicas are ~w", [Replicas]),
     PendingLog = tx_utilities:open_private_table(pending_log),
     NewDict = generate_except_replicas(Replicas),
     Lists = antidote_config:get(to_repl),
@@ -208,7 +209,7 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, MyName)
                             end;
                         _ ->
-                             lager:warning("Local prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
+                             lager:warning("Local prepared request for {~w, ~w}, Sending to ~w, ReplFactor is ~w", [TxId, Partition, Replicas, ReplFactor]),
                             %case RepMode of
                             %    local_fast -> lager:warning("Replicating local_fast txn! ~w", [TxId]);
                             %    _ -> ok
