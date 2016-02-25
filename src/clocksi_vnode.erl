@@ -432,7 +432,6 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                               max_ts=MaxTS,
                               debug=Debug
                               }) ->
-  %lager:warning("~w: Got prepare of ~w, ~w", [Partition, TxId, RepMode]),
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
     Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, max(MaxTS, ProposedTs), IfCertify),
     case Result of
@@ -702,10 +701,9 @@ async_send_msg(Delay, Msg, To) ->
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
 prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
-    PrepareTime = increment_ts(TxId#tx_id.snapshot_time, MaxTS),
+    PrepareTime = max(increment_ts(TxId#tx_id.snapshot_time, MaxTS), tx_utilities:now_microsec()),
     case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0, IfCertify) of
 	    {false, InsertedKeys, WaitingKeys} ->
-            %lager:warning("~w failed, has inserted ~p, waiting for key ~p", [TxId, InsertedKeys, WaitingKeys]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of
@@ -713,13 +711,10 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS, IfCertify)->
                 end end, WaitingKeys),
 	        {error, write_conflict};
         0 ->
-            %PrepareTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
 		    KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
-            %lager:warning("Inserting key sets ~w, ~p", [TxId, KeySet]),
 		    {ok, PrepareTime};
         N ->
-           %lager:warning("~w passed but has ~w deps", [TxId, N]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, {waiting, TxWriteSet}}),
             {wait, N, PrepareTime}
