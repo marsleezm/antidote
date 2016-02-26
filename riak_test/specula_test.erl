@@ -17,9 +17,12 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
+%%%%%% Specula length has to be 5 here!!!!!! %%%%%%%%
+
+
 -module(specula_test).
 
--export([confirm/0, spawn_receive/5, replicates/1, specula_test2/1]).
+-export([confirm/0, spawn_receive/5, replicates/1, specula_test2/1, specula_test3/1]).
 
 -include_lib("eunit/include/eunit.hrl").
 -define(HARNESS, (rt_config:get(rt_harness))).
@@ -31,8 +34,6 @@ confirm() ->
              rpc:call(N, hash_fun, init_hash_fun, [])
             end, Nodes),
     specula_test1(Nodes),
-    specula_test2(Nodes),
-    specula_test3(Nodes),
     rt:clean_cluster(Nodes),
     pass.
 
@@ -71,9 +72,9 @@ specula_test1(Nodes) ->
 
     %% Replica of partition 3 is prepared since prepare is not blocked 
     check_txn_preparing_state(TxId1, Node1, PartUp3, true, true),
-    %% Replica of partition 2 and 4 are blocked
-    check_txn_preparing_state(TxId1, Node1, PartUp2, true, false),
-    check_txn_preparing_state(TxId1, Node1, PartUp4, true, false),
+    %% Replica of partition 2 and 4 are blocked (but replicated...)
+    check_txn_preparing_state(TxId1, Node1, PartUp2, true, true),
+    check_txn_preparing_state(TxId1, Node1, PartUp4, true, true),
 
     lager:info("Before replying first"),
     %% After allowing partnode2 to prepare, some of its replicas get prepared
@@ -81,7 +82,7 @@ specula_test1(Nodes) ->
     timer:sleep(500),
     lager:info("After replying first"),
     check_txn_preparing_state(TxId1, Node1, PartUp2, true, true),
-    check_txn_preparing_state(TxId1, Node1, PartUp4, true, false),
+    check_txn_preparing_state(TxId1, Node1, PartUp4, true, true),
 
     %% The transaction will be committed.
     lager:info("Before replying second"),
@@ -139,6 +140,7 @@ specula_test2(Nodes) ->
     {ok, Result0} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId1, LUp1, RUp1]),
     ?assertMatch({specula_commit, _}, Result0),
 
+    timer:sleep(200),
     TxId2 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
 
     Dep1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, dependency, TxId1]),
@@ -147,9 +149,9 @@ specula_test2(Nodes) ->
     ?assertEqual([], AntiDep1),
     ReadR1 = rpc:call(Node1, cache_serv, read, [K4, TxId2]),
     ?assertEqual({ok, 4}, ReadR1),
-    ReadR2 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K2, TxId2]),
+    ReadR2 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K2, TxId2, PartNode1]),
     ?assertEqual({ok, 2}, ReadR2),
-    ReadR3 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K3, TxId2]),
+    ReadR3 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K3, TxId2, PartNode1]),
     ?assertEqual({ok, []}, ReadR3),
     Dep2 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, dependency, TxId1]),
     ?assertEqual([{TxId1, TxId2}], Dep2),
@@ -164,12 +166,13 @@ specula_test2(Nodes) ->
     lager:info("Cert t2 ~w", [TxId2]),
     {ok, Result2} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId2, LUp2, RUp2]),
     ?assertMatch({specula_commit, _}, Result2),
+    timer:sleep(200),
     lager:info("Specula commit for t2"),
     IntDep = rpc:call(Node1, tx_cert_sup, get_int_data, [1, read_dep, TxId2]),
     ?assertEqual([TxId1], IntDep),
     
     TxId3 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
-    ReadR4 = rpc:call(Node1, data_repl_serv, read, [DataRepl2, K3, TxId3]),
+    ReadR4 = rpc:call(Node1, data_repl_serv, read, [DataRepl2, K3, TxId3, PartNode1]),
     ?assertEqual({ok, 3}, ReadR4),
     ReadR5 = rpc:call(Node1, tx_cert_sup, read, [1, TxId3, K5, PartNode1]),
     ?assertEqual({ok, 25}, ReadR5),
@@ -187,6 +190,7 @@ specula_test2(Nodes) ->
     lager:info("Cert t3 ~w", [TxId3]),
     {ok, Result3} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId3, LUp3, RUp3]),
     ?assertMatch({specula_commit, _}, Result3),
+    timer:sleep(200),
     IntDep2 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, read_dep, TxId3]),
     ?assertEqual([TxId1, TxId2], IntDep2),
 
@@ -194,23 +198,26 @@ specula_test2(Nodes) ->
     %% will commit with larger ts then its snapshot, but since it has no read dependency
     %% with its previous txn, it can still commit.
     TxId4 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
+    timer:sleep(100),
     LUp4 = [{PartNode1, [{K13, 41}]}],
     PartUp34 = {PartNode3, [{K15, 43}]},
     PartUp44 = {PartNode4, [{K16, 44}]},
     RUp4 = [PartUp34, PartUp44], 
     lager:info("Cert t4 ~w", [TxId4]),
     {ok, Result4} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId4, LUp4, RUp4]),
+    TxId5 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
     ?assertMatch({specula_commit, _}, Result4),
+    timer:sleep(200),
 
     %% Because of read dedendency, although has received all preps, still can not commit
-    TxId5 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
-    ReadR6 = rpc:call(Node1, data_repl_serv, read, [DataRepl2, K15, TxId5]),
+    ReadR6 = rpc:call(Node1, data_repl_serv, read, [DataRepl2, K15, TxId5, PartNode1]),
     ?assertEqual({ok, 43}, ReadR6),
     PartUp45 = {PartNode4, [{K20, 54}]},
     RUp5 = [PartUp45], 
     lager:info("Cert t5 ~w", [TxId5]),
     {ok, Result5} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId5, [], RUp5]),
     ?assertMatch({specula_commit, _}, Result5),
+    timer:sleep(200),
 
     TxId6 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
     LUp6 = [{PartNode1, [{K17, 61}]}],
@@ -232,11 +239,17 @@ specula_test2(Nodes) ->
     timer:sleep(500),
     read_txn_data(Node1, LUp1, RUp1),
     check_txn_local_states(TxId1, Node1, RUp1, false),
+    lager:info("Pass1"),
     check_txn_preparing_state(TxId1, Node1, LUp1, false, false),
+    lager:info("Pass2"),
     check_txn_preparing_state(TxId1, Node1, PartUp2, false, false),
+    lager:info("Pass3"),
     check_txn_preparing_state(TxId1, Node1, PartUp3, false, false),
+    lager:info("Pass4"),
     check_txn_preparing_state(TxId1, Node1, PartUp4, false, false),
+    lager:info("Pass5"),
 
+    %% T6 specula committed
     receive 
         Something ->
             ?assertMatch({ok, {specula_commit, _}}, Something)
@@ -251,7 +264,7 @@ specula_test2(Nodes) ->
     timer:sleep(500),
     read_txn_data(Node1, LUp2, RUp2),
 
-    %% Tx3 gets aborted 
+    %% Tx3 gets committed 
     lager:info("Commit t3"),
     ok = rpc:call(Node1, clocksi_vnode, do_reply, [PartNode2, TxId3]),
     timer:sleep(500),
@@ -340,7 +353,7 @@ specula_test3(Nodes) ->
     lager:info("Cert tx2 ~w", [TxId2]),
     ReadR1 = rpc:call(Node1, cache_serv, read, [K4, TxId2]),
     ?assertEqual({ok, 4}, ReadR1),
-    ReadR2 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K2, TxId2]),
+    ReadR2 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K2, TxId2, PartNode1]),
     ?assertEqual({ok, 2}, ReadR2),
 
     LUp2 = [{PartNode1, [{K5, 11}]}],
@@ -513,7 +526,7 @@ check_txn_local_states(TxId, LocalNode, PartUpdates, IfPrepared) ->
                     R1 = rpc:call(LocalNode, data_repl_serv, if_prepared, [DataRepl, TxId, Keys]),
                     ?assertEqual(IfPrepared, R1),
                     R2 = rpc:call(LocalNode, data_repl_serv, if_bulk_prepared, [DataRepl, TxId, UpdatedPart]),
-                    ?assertEqual(false, R2)
+                    ?assertEqual(IfPrepared, R2)
             end
         end, PartUpdates).
 
@@ -536,7 +549,7 @@ check_txn_preparing_state(TxId, LocalNode, PartUpdates, IfMPrepared, IfSPrepared
                     ?assertEqual(IfSPrepared, RR2)
             end
         end, Replicas),
-    R3 = rpc:call(LocalNode, clocksi_vnode, if_prepared, [{UpdatedPart, UpdatedNode}, TxId, Keys]),
+    R3 = rpc:call(LocalNode, helper, if_prepared, [{UpdatedPart, UpdatedNode}, TxId, Keys]),
     ?assertEqual(IfMPrepared, R3).
 
 replicas('dev1@127.0.0.1') ->
