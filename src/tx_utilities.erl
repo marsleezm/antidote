@@ -34,8 +34,6 @@
 create_tx_id(ClientClock) ->
     %% Seed the random because you pick a random read server, this is stored in the process state
     %{A1,A2,A3} = now(),
-    _A = ClientClock,
-    %_ = random:seed(A1, A2, A3),
     TransactionId = #tx_id{snapshot_time=max(ClientClock, now_microsec()), server_pid=self()},
     TransactionId.
 
