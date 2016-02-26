@@ -49,7 +49,7 @@ clocksi_test1(Nodes, PartList) ->
     lager:info("Waiting for first prep"),
     receive
         Msg1 ->
-            ?assertMatch({prepared, TxId1, _}, parse_msg(Msg1))
+            ?assertMatch({pending_prepared, TxId1, _}, parse_msg(Msg1))
     end,
     lager:info("Waiting for second prep"),
     receive
@@ -82,7 +82,7 @@ clocksi_test2(Nodes, PartList) ->
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS1, TxId1, local, self()]),
     receive
         Msg1 ->
-            ?assertMatch({prepared, TxId1, _}, parse_msg(Msg1))
+            ?assertMatch({pending_prepared, TxId1, _}, parse_msg(Msg1))
     end,
     receive
         Msg2 ->
@@ -137,12 +137,12 @@ clocksi_test3(Nodes, PartList) ->
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS1P1, TxId1, local, self()]),
     receive
         Msg1 ->
-            ?assertMatch({prepared, TxId1, _}, parse_msg(Msg1))
+            ?assertMatch({pending_prepared, TxId1, _}, parse_msg(Msg1))
     end,
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS1P2, TxId1, local, self()]),
     receive
         Msg2 ->
-            ?assertMatch({prepared, TxId1, _}, parse_msg(Msg2))
+            ?assertMatch({pending_prepared, TxId1, _}, parse_msg(Msg2))
     end,
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS2P1, TxId2, local, self()]),
     true = nothing_after_wait(500),
