@@ -321,10 +321,12 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs}) ->
     PendingTxs = tx_utilities:open_private_table(pending_txs),
     ets:insert(PendingTxs, {commit, 0, 0}),
     ets:insert(PendingTxs, {abort, 0, 0}),
+    [{_, Replicas}] = ets:lookup(meta_info, node()),
+    TotalReplFactor = length(Replicas)+1,
     %SpeculaData = tx_utilities:open_private_table(specula_data),
     Sender ! cleaned,
     {noreply, #state{pending_txs=PendingTxs, dep_dict=dict:new(), 
-            specula_length=SpeculaLength, rep_dict=RepDict}};
+            specula_length=SpeculaLength, rep_dict=RepDict, total_repl_factor=TotalReplFactor}};
 
 %% Receiving local prepare. Can only receive local prepare for two kinds of transaction
 %%  Current transaction that has not finished local cert phase
