@@ -61,7 +61,7 @@
 %%%===================================================================
 
 start_link(Name) ->
-    lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
+   %lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
     gen_server:start_link({local, Name},
              ?MODULE, [], []).
 
@@ -93,7 +93,7 @@ handle_call({get_hash_fun}, _Sender, SD0) ->
 
 handle_call({start_tx}, _Sender, SD0=#state{last_commit_ts=LastCommitTS}) ->
     TxId = tx_utilities:create_tx_id(LastCommitTS+1),
-    lager:warning("Starting tx ~w", [TxId]),
+   %lager:warning("Starting tx ~w", [TxId]),
     {reply, TxId, SD0#state{last_commit_ts=LastCommitTS+1, stage=read, pending_to_ack=0}};
 
 handle_call({start_read_tx}, _Sender, SD0) ->
@@ -106,7 +106,7 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{last_commit_ts=LastCommitTs, 
             total_repl_factor=TotalReplFactor}) ->
-    lager:warning("Certifying tx ~w", [TxId]),
+   %lager:warning("Certifying tx ~w", [TxId]),
     case length(LocalUpdates) of
         0 ->
             case length(RemoteUpdates) of
@@ -120,7 +120,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{la
             end;
         N ->
             LocalParts = [Part || {Part, _} <- LocalUpdates],
-            lager:info("Sending certify to ~w", [LocalParts]),
+            %lager:warning("Sending certify to ~w", [LocalParts]),
             case RemoteUpdates of
                 [] ->
                     clocksi_vnode:prepare(LocalUpdates, TxId, local_only);
@@ -148,7 +148,7 @@ handle_cast({clean_data, Sender}, SD0) ->
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, pending_to_ack=PN, local_parts=LocalParts, do_repl=DoRepl, stage=local_cert,
             remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime, total_repl_factor=TotalReplFactor,rep_dict=RepDict}) ->
-    lager:warning("Got prepared local for ~w, to ack is ~w, pn is ~w", [TxId, N, PN]),
+   %lager:warning("Got prepared local for ~w, to ack is ~w, pn is ~w", [TxId, N, PN]),
     case N of
         1 -> 
             RemoteParts = [Part || {Part, _} <- RemoteUpdates],
@@ -167,13 +167,13 @@ handle_cast({prepared, TxId, PrepareTime},
                 L ->
                     MaxPrepTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
-                     lager:info("~w: Updates are ~p, to ack is ~w, parts are ~w", [TxId, RemoteUpdates, length(RemoteParts), RemoteParts]),
+                    %lager:warning("~w: Updates are ~p, to ack is ~w, parts are ~w", [TxId, RemoteUpdates, length(RemoteParts), RemoteParts]),
                     {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=L*TotalReplFactor+PN, pending_to_ack=0,
                         remote_parts=RemoteParts, stage=remote_cert}}
                 end;
         _ ->
-             lager:info("~w, needs ~w", [TxId, N-1]),
-             lager:info("Not done for ~w", [TxId]),
+            %lager:warning("~w, needs ~w", [TxId, N-1]),
+            %lager:warning("Not done for ~w", [TxId]),
             MaxPrepTime = max(OldPrepTime, PrepareTime),
             {noreply, SD0#state{to_ack=N-1, prepare_time=MaxPrepTime}}
     end;
@@ -184,7 +184,7 @@ handle_cast({prepared, _OtherTxId, _},
 
 handle_cast({aborted, TxId, FromNode}, SD0=#state{tx_id=TxId, local_parts=LocalParts, 
             do_repl=DoRepl, sender=Sender, stage=local_cert, rep_dict=RepDict}) ->
-     lager:info("Local abort ~w", [TxId]),
+    %lager:warning("Local abort ~w", [TxId]),
     LocalParts1 = lists:delete(FromNode, LocalParts), 
     clocksi_vnode:abort(LocalParts1, TxId),
     repl_fsm:repl_abort(LocalParts1, TxId, DoRepl, false, RepDict),
@@ -202,10 +202,10 @@ handle_cast({aborted, _, _}, SD0=#state{stage=local_cert}) ->
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, do_repl=DoRepl, rep_dict=RepDict, 
             prepare_time=MaxPrepTime, to_ack=N, local_parts=LocalParts, stage=remote_cert}) ->
-     lager:warning("Received remote prepare ~w, ~w, N is ~w", [TxId, PrepareTime, N]),
+    %lager:warning("Received remote prepare ~w, ~w, N is ~w", [TxId, PrepareTime, N]),
     case N of
         1 ->
-             lager:info("Decided to commit a txn ~w, prepare time is ~w", [TxId, PrepareTime]),
+            %lager:warning("Decided to commit a txn ~w, prepare time is ~w", [TxId, PrepareTime]),
             CommitTime = max(MaxPrepTime, PrepareTime),
             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
             clocksi_vnode:commit(RemoteParts, TxId, CommitTime),
@@ -214,7 +214,7 @@ handle_cast({prepared, TxId, PrepareTime},
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
             {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
         N ->
-             lager:info("Need ~w more replies for ~w", [N-1, TxId]),
+            %lager:warning("Need ~w more replies for ~w", [N-1, TxId]),
             {noreply, SD0#state{to_ack=N-1, prepare_time=max(MaxPrepTime, PrepareTime)}}
     end;
 handle_cast({prepared, _, _}, 
@@ -224,7 +224,7 @@ handle_cast({prepared, _, _},
 handle_cast({aborted, TxId, FromNode}, 
 	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, 
         local_parts=LocalParts, do_repl=DoRepl, stage=remote_cert, rep_dict=RepDict}) ->
-     lager:info("Remote abort ~w", [TxId]),
+     %lager:warning("Remote abort ~w", [TxId]),
     RemoteParts1 = lists:delete(FromNode, RemoteParts),
     clocksi_vnode:abort(LocalParts, TxId),
     clocksi_vnode:abort(RemoteParts1, TxId),

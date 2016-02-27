@@ -978,10 +978,10 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                     lists:foreach(fun({SnapshotTime, Sender}) ->
                             case SnapshotTime >= TxCommitTime of
                                 true ->
-                                     lager:info("Replying to ~w of second value", [Sender]),
+                                     %lager:info("Replying to ~w of second value", [Sender]),
                                     reply(Sender, {ok, lists:nth(2,Values)});
                                 false ->
-                                     lager:info("Replying to ~w of first value", [Sender]),
+                                     %lager:info("Replying to ~w of first value", [Sender]),
                                     reply(Sender, {ok, hd(Values)})
                             end end,
                         PendingReaders),
