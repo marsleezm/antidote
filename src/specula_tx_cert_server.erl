@@ -117,7 +117,7 @@ init([]) ->
     ets:insert(PendingTxs, {abort, 0, 0}),
     [{_, Replicas}] = ets:lookup(meta_info, node()),
     TotalReplFactor = length(Replicas)+1,
-    lager:warning("TotalReplFactor is ~w", [TotalReplFactor]),
+   %lager:warning("TotalReplFactor is ~w", [TotalReplFactor]),
     %SpeculaData = tx_utilities:open_private_table(specula_data),
     {ok, #state{pending_txs=PendingTxs, dep_dict=dict:new(), total_repl_factor=TotalReplFactor, 
             specula_length=SpeculaLength, rep_dict=RepDict}}.
