@@ -120,12 +120,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{la
         N ->
             LocalParts = [Part || {Part, _} <- LocalUpdates],
             lager:info("Sending certify to ~w", [LocalParts]),
-            case RemoteUpdates of
-                [] ->
-                    clocksi_vnode:prepare(LocalUpdates, TxId, local_only);
-                _ ->
-                    clocksi_vnode:prepare(LocalUpdates, TxId, local)
-            end,
+            clocksi_vnode:prepare(LocalUpdates, TxId, local),
             {noreply, SD0#state{tx_id=TxId, to_ack=N, pending_to_ack=N*(TotalReplFactor-1), local_parts=LocalParts, remote_parts=
                 RemoteUpdates, sender=Sender, stage=local_cert}}
     end;

@@ -156,7 +156,7 @@ handle_check_key_record(Key, Type, PreparedTxs, CommittedTxs) ->
 handle_if_prepared(TxId, Keys, PreparedTxs) ->
     Result = lists:all(fun(Key) ->
             case ets:lookup(PreparedTxs, Key) of
-                [{Key, [{TxId, _, _, _, _}|_]}] -> lager:info("Found sth for key ~w", [Key]), true;
+                [{Key, [{TxId, _, _, _, _, _}|_]}] -> lager:info("Found sth for key ~w", [Key]), true;
                 _ -> lager:info("Nothing for key ~w", [Key]), false
             end end, Keys),
     Result.

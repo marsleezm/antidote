@@ -72,8 +72,8 @@ specula_test1(Nodes) ->
     %% Replica of partition 3 is prepared since prepare is not blocked 
     check_txn_preparing_state(TxId1, Node1, PartUp3, true, true),
     %% Replica of partition 2 and 4 are blocked
-    check_txn_preparing_state(TxId1, Node1, PartUp2, true, false),
-    check_txn_preparing_state(TxId1, Node1, PartUp4, true, false),
+    check_txn_preparing_state(TxId1, Node1, PartUp2, true, true),
+    check_txn_preparing_state(TxId1, Node1, PartUp4, true, true),
 
     lager:info("Before replying first"),
     %% After allowing partnode2 to prepare, some of its replicas get prepared
@@ -81,7 +81,7 @@ specula_test1(Nodes) ->
     timer:sleep(500),
     lager:info("After replying first"),
     check_txn_preparing_state(TxId1, Node1, PartUp2, true, true),
-    check_txn_preparing_state(TxId1, Node1, PartUp4, true, false),
+    check_txn_preparing_state(TxId1, Node1, PartUp4, true, true),
 
     %% The transaction will be committed.
     lager:info("Before replying second"),
@@ -147,9 +147,9 @@ specula_test2(Nodes) ->
     ?assertEqual([], AntiDep1),
     ReadR1 = rpc:call(Node1, cache_serv, read, [K4, TxId2]),
     ?assertEqual({ok, 4}, ReadR1),
-    ReadR2 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K2, TxId2]),
+    ReadR2 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K2, TxId2, PartNode1]),
     ?assertEqual({ok, 2}, ReadR2),
-    ReadR3 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K3, TxId2]),
+    ReadR3 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K3, TxId2, PartNode1]),
     ?assertEqual({ok, []}, ReadR3),
     Dep2 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, dependency, TxId1]),
     ?assertEqual([{TxId1, TxId2}], Dep2),
@@ -169,7 +169,7 @@ specula_test2(Nodes) ->
     ?assertEqual([TxId1], IntDep),
     
     TxId3 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
-    ReadR4 = rpc:call(Node1, data_repl_serv, read, [DataRepl2, K3, TxId3]),
+    ReadR4 = rpc:call(Node1, data_repl_serv, read, [DataRepl2, K3, TxId3, PartNode1]),
     ?assertEqual({ok, 3}, ReadR4),
     ReadR5 = rpc:call(Node1, tx_cert_sup, read, [1, TxId3, K5, PartNode1]),
     ?assertEqual({ok, 25}, ReadR5),
@@ -204,7 +204,7 @@ specula_test2(Nodes) ->
 
     %% Because of read dedendency, although has received all preps, still can not commit
     TxId5 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
-    ReadR6 = rpc:call(Node1, data_repl_serv, read, [DataRepl2, K15, TxId5]),
+    ReadR6 = rpc:call(Node1, data_repl_serv, read, [DataRepl2, K15, TxId5, PartNode1]),
     ?assertEqual({ok, 43}, ReadR6),
     PartUp45 = {PartNode4, [{K20, 54}]},
     RUp5 = [PartUp45], 
@@ -251,7 +251,7 @@ specula_test2(Nodes) ->
     timer:sleep(500),
     read_txn_data(Node1, LUp2, RUp2),
 
-    %% Tx3 gets aborted 
+    %% Tx3 gets committed 
     lager:info("Commit t3"),
     ok = rpc:call(Node1, clocksi_vnode, do_reply, [PartNode2, TxId3]),
     timer:sleep(500),
@@ -285,8 +285,10 @@ specula_test2(Nodes) ->
     %% Tx6 will also be aborted because TxId5 is aborted!
     lager:info("Abort t6"),
     read_txn_data(Node1, LUp4, RUp4),
-    ReadAborted1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, read_aborted, ignore]),
-    ?assertEqual(2, ReadAborted1),
+    ReadInvalid1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, read_invalid, ignore]),
+    ?assertEqual(1, ReadInvalid1),
+    CascadeAborted1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, cascade_aborted, ignore]),
+    ?assertEqual(1, CascadeAborted1),
     Committed1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, committed, ignore]),
     ?assertEqual(5, Committed1),
     check_txn_preparing_state(TxId6, Node1, LUp6, false, false),
@@ -307,9 +309,9 @@ specula_test3(Nodes) ->
     PartNode4 = rpc:call(Node4, hash_fun, get_local_vnode_by_id, [1]),
     %{Part4, _} = PartNode4,
 
-    ReadAborted1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, aborted, ignore]),
-    ReadAborted2 = rpc:call(Node1, tx_cert_sup, get_int_data, [2, aborted, ignore]),
-    ReadAborted3 = rpc:call(Node1, tx_cert_sup, get_int_data, [3, aborted, ignore]),
+    %ReadAborted1 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, aborted, ignore]),
+    %ReadAborted2 = rpc:call(Node1, tx_cert_sup, get_int_data, [2, aborted, ignore]),
+    %ReadAborted3 = rpc:call(Node1, tx_cert_sup, get_int_data, [3, aborted, ignore]),
 
     K1=t3p1k1, K2=t3p2k1, K3=t3p3k1, K4=t3p4k1,
     K5=t3p1k2, _K6=t3p2k2, K7=t3p3k2, K8=t3p4k2,
@@ -340,7 +342,7 @@ specula_test3(Nodes) ->
     lager:info("Cert tx2 ~w", [TxId2]),
     ReadR1 = rpc:call(Node1, cache_serv, read, [K4, TxId2]),
     ?assertEqual({ok, 4}, ReadR1),
-    ReadR2 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K2, TxId2]),
+    ReadR2 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K2, TxId2, PartNode1]),
     ?assertEqual({ok, 2}, ReadR2),
 
     LUp2 = [{PartNode1, [{K5, 11}]}],
@@ -366,7 +368,7 @@ specula_test3(Nodes) ->
     %% Tx4 is from thread 1(the same thread as Tx1) and reads from Tx1 and Tx3
     TxId4 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
     lager:info("Cert tx4 ~w", [TxId4]),
-    ReadR5 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K2, TxId4]),
+    ReadR5 = rpc:call(Node1, data_repl_serv, read, [DataRepl1, K2, TxId4, PartNode1]),
     ?assertEqual({ok, 2}, ReadR5),
     ReadR6 = rpc:call(Node1, tx_cert_sup, read, [1, TxId4, K9, PartNode1]),
     ?assertEqual({ok, 21}, ReadR6),
@@ -438,12 +440,12 @@ specula_test3(Nodes) ->
     check_txn_local_states(TxId7, Node1, RUp7, false),
     check_txn_preparing_state(TxId7, Node1, RUp7, false, false),
 
-    ReadAborted12 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, aborted, ignore]),
-    ?assertEqual(ReadAborted12, ReadAborted1+2),
-    ReadAborted22 = rpc:call(Node1, tx_cert_sup, get_int_data, [2, aborted, ignore]),
-    ?assertEqual(ReadAborted22, ReadAborted2+1),
-    ReadAborted32 = rpc:call(Node1, tx_cert_sup, get_int_data, [3, aborted, ignore]),
-    ?assertEqual(ReadAborted32, ReadAborted3+1),
+    %ReadAborted12 = rpc:call(Node1, tx_cert_sup, get_int_data, [1, aborted, ignore]),
+    %?assertEqual(ReadAborted12, ReadAborted1+2),
+    %ReadAborted22 = rpc:call(Node1, tx_cert_sup, get_int_data, [2, aborted, ignore]),
+    %?assertEqual(ReadAborted22, ReadAborted2+1),
+    %ReadAborted32 = rpc:call(Node1, tx_cert_sup, get_int_data, [3, aborted, ignore]),
+    %?assertEqual(ReadAborted32, ReadAborted3+1),
 
     ok = rpc:call(Node1, clocksi_vnode, set_debug, [PartNode2, false]),
     ok = rpc:call(Node1, clocksi_vnode, set_debug, [PartNode3, false]).
@@ -513,7 +515,7 @@ check_txn_local_states(TxId, LocalNode, PartUpdates, IfPrepared) ->
                     R1 = rpc:call(LocalNode, data_repl_serv, if_prepared, [DataRepl, TxId, Keys]),
                     ?assertEqual(IfPrepared, R1),
                     R2 = rpc:call(LocalNode, data_repl_serv, if_bulk_prepared, [DataRepl, TxId, UpdatedPart]),
-                    ?assertEqual(false, R2)
+                    ?assertEqual(IfPrepared, R2)
             end
         end, PartUpdates).
 
@@ -536,7 +538,7 @@ check_txn_preparing_state(TxId, LocalNode, PartUpdates, IfMPrepared, IfSPrepared
                     ?assertEqual(IfSPrepared, RR2)
             end
         end, Replicas),
-    R3 = rpc:call(LocalNode, clocksi_vnode, if_prepared, [{UpdatedPart, UpdatedNode}, TxId, Keys]),
+    R3 = rpc:call(LocalNode, helper, if_prepared, [{UpdatedPart, UpdatedNode}, TxId, Keys]),
     ?assertEqual(IfMPrepared, R3).
 
 replicas('dev1@127.0.0.1') ->
