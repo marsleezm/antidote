@@ -47,13 +47,17 @@
         rep_dict :: dict(),
         prepare_time = 0 :: non_neg_integer(),
         stage :: read | local_cert | remote_cert,
+        lp_start :: term(),
+        rp_start :: term(),
         local_parts :: [],
         remote_parts :: [],
+        txn_type :: term(),
         do_repl :: boolean(),
         pending_to_ack :: non_neg_integer(),
         sender :: term(),
         total_repl_factor :: non_neg_integer(),
         last_commit_ts :: non_neg_integer(),
+        stat_dict :: dict(),
         to_ack :: non_neg_integer()}).
 
 %%%===================================================================
@@ -74,10 +78,23 @@ init([]) ->
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
     [{_, Replicas}] = ets:lookup(meta_info, node()),
     TotalReplFactor = length(Replicas)+1,
-    {ok, #state{do_repl=antidote_config:get(do_repl), total_repl_factor=TotalReplFactor, last_commit_ts=0, rep_dict=RepDict}}.
+    StatDict = dict:new(),
+    D1 = dict:store({new_order, commit}, {0, 0, 0}, StatDict),
+    D2 = dict:store({new_order, abort}, {0, 0, 0}, D1),
+    D3 = dict:store({payment, commit}, {0, 0, 0}, D2),
+    D4 = dict:store({payment, abort}, {0, 0, 0}, D3),
+    D5 = dict:store({vanilla, commit}, {0, 0, 0}, D4),
+    D6 = dict:store({vanilla, abort}, {0, 0, 0}, D5),
+    {ok, #state{do_repl=antidote_config:get(do_repl), stat_dict=D6, total_repl_factor=TotalReplFactor, last_commit_ts=0, rep_dict=RepDict}}.
 
-handle_call({get_stat}, _Sender, SD0) ->
-    {reply, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, SD0};
+handle_call({get_stat}, _Sender, SD0=#state{stat_dict=StatDict}) ->
+    {CLP1, CRP1, C1} = dict:fetch({new_order, commit}, StatDict),
+    {ALP1, ARP1, A1} = dict:store({new_order, abort}, StatDict),
+    {CLP2, CRP2, C2} = dict:store({payment, commit}, StatDict),
+    {ALP2, ARP2, A2} = dict:store({payment, abort}, StatDict),
+    {CLP3, CRP3, C3} = dict:store({vanilla, commit}, StatDict),
+    {ALP3, ARP3, A3} = dict:store({vanilla, abort}, StatDict),
+    {reply, [0, 0, 0, 0, 0, 0, 0, 0, CLP1 div C1, CRP1 div C1, ALP1 div A1, ARP1 div A1, CLP2 div C2, CRP2 div C2, ALP2 div A2, ARP2 div A2, CLP3 div C3, CRP3 div C3, ALP3 div A3, ARP3 div A3], SD0};
 
 handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
     clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
@@ -103,9 +120,10 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
     clocksi_vnode:relay_read(Node, Key, TxId, Sender, no_specula),
     {noreply, SD0};
 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{last_commit_ts=LastCommitTs, 
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, vanilla}, Sender, SD0); 
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=#state{last_commit_ts=LastCommitTs, 
             total_repl_factor=TotalReplFactor}) ->
-    lager:warning("Certifying tx ~w", [TxId]),
     case length(LocalUpdates) of
         0 ->
             case length(RemoteUpdates) of
@@ -114,15 +132,14 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{la
                 _ -> 
                     RemoteParts = [P || {P, _} <- RemoteUpdates],
                     clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
-                    {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates)*TotalReplFactor, local_parts=[], remote_parts=
-                        RemoteParts, sender=Sender, stage=remote_cert}}
+                    Now = os:timestamp(),
+                    {noreply, SD0#state{tx_id=TxId, lp_start=Now, rp_start=Now, to_ack=length(RemoteUpdates)*TotalReplFactor, local_parts=[], remote_parts=RemoteParts, sender=Sender, stage=remote_cert, txn_type=TxnType}}
             end;
         N ->
             LocalParts = [Part || {Part, _} <- LocalUpdates],
-            lager:info("Sending certify to ~w", [LocalParts]),
             clocksi_vnode:prepare(LocalUpdates, TxId, local),
             {noreply, SD0#state{tx_id=TxId, to_ack=N, pending_to_ack=N*(TotalReplFactor-1), local_parts=LocalParts, remote_parts=
-                RemoteUpdates, sender=Sender, stage=local_cert}}
+                RemoteUpdates, sender=Sender, stage=local_cert, lp_start=os:timestamp(), rp_start=0}}
     end;
 
 handle_call({go_down},_Sender,SD0) ->
@@ -141,8 +158,7 @@ handle_cast({clean_data, Sender}, SD0) ->
 
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, pending_to_ack=PN, local_parts=LocalParts, stage=local_cert,
-            remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime, total_repl_factor=TotalReplFactor,rep_dict=RepDict}) ->
-    lager:warning("Got prepared local for ~w, to ack is ~w, pn is ~w", [TxId, N, PN]),
+            remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime, total_repl_factor=TotalReplFactor, rep_dict=RepDict}) ->
     case N of
         1 -> 
             RemoteParts = [Part || {Part, _} <- RemoteUpdates],
@@ -156,18 +172,15 @@ handle_cast({prepared, TxId, PrepareTime},
                             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
                             {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
                         _ ->
-                            {noreply, SD0#state{to_ack=PN, pending_to_ack=0, prepare_time=max(PrepareTime, OldPrepTime), stage=remote_cert}}
+                            {noreply, SD0#state{to_ack=PN, pending_to_ack=0, rp_start=os:timestamp(), prepare_time=max(PrepareTime, OldPrepTime), stage=remote_cert}}
                     end;
                 L ->
                     MaxPrepTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
-                     lager:info("~w: Updates are ~p, to ack is ~w, parts are ~w", [TxId, RemoteUpdates, length(RemoteParts), RemoteParts]),
                     {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=L*TotalReplFactor+PN, pending_to_ack=0,
-                        remote_parts=RemoteParts, stage=remote_cert}}
+                        remote_parts=RemoteParts, stage=remote_cert, rp_start=os:timestamp()}}
                 end;
         _ ->
-             lager:info("~w, needs ~w", [TxId, N-1]),
-             lager:info("Not done for ~w", [TxId]),
             MaxPrepTime = max(OldPrepTime, PrepareTime),
             {noreply, SD0#state{to_ack=N-1, prepare_time=MaxPrepTime}}
     end;
@@ -176,13 +189,19 @@ handle_cast({prepared, _OtherTxId, _},
       %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
     {noreply, SD0};
 
-handle_cast({aborted, TxId, FromNode}, SD0=#state{tx_id=TxId, local_parts=LocalParts, 
-            sender=Sender, stage=local_cert, rep_dict=RepDict}) ->
+handle_cast({aborted, TxId, FromNode}, SD0=#state{tx_id=TxId, local_parts=LocalParts, stat_dict=StatDict, 
+            sender=Sender, stage=local_cert, rep_dict=RepDict, rp_start=RP, lp_start=LP, txn_type=TxnType}) ->
     LocalParts1 = lists:delete(FromNode, LocalParts), 
     clocksi_vnode:abort(LocalParts1, TxId),
     repl_fsm:repl_abort(LocalParts1, TxId, false, RepDict),
     gen_server:reply(Sender, {aborted, local}),
-    {noreply, SD0#state{tx_id={}}};
+    case RP of
+        0 ->  {noreply, SD0#state{tx_id={}}};
+        _ ->  StatDict1 = dict:update({TxnType, abort}, 
+            fun({V1, V2, V3}) -> {V1+timer:now_diff(RP, LP), V2+timer:now_diff(os:timestamp(), RP), V3+1} end, StatDict),
+            {noreply, SD0#state{tx_id={}, stat_dict=StatDict1}}
+    end; 
+
 handle_cast({aborted, _, _}, SD0=#state{stage=local_cert}) ->
     {noreply, SD0};
 
@@ -193,19 +212,19 @@ handle_cast({aborted, _, _}, SD0=#state{stage=local_cert}) ->
 %    {noreply, SD0};
 
 handle_cast({prepared, TxId, PrepareTime}, 
-	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, rep_dict=RepDict, 
-            prepare_time=MaxPrepTime, to_ack=N, local_parts=LocalParts, stage=remote_cert}) ->
-     lager:warning("Received remote prepare ~w, ~w, N is ~w", [TxId, PrepareTime, N]),
+	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, rep_dict=RepDict, txn_type=TxnType, stat_dict=StatDict, 
+            prepare_time=MaxPrepTime, to_ack=N, lp_start=LP, rp_start=RP, local_parts=LocalParts, stage=remote_cert}) ->
     case N of
         1 ->
-             lager:info("Decided to commit a txn ~w, prepare time is ~w", [TxId, PrepareTime]),
             CommitTime = max(MaxPrepTime, PrepareTime),
             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
             clocksi_vnode:commit(RemoteParts, TxId, CommitTime),
             repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
             repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, false, RepDict),
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
+            StatDict1 = dict:update({TxnType, commit},
+            fun({V1, V2, V3}) -> {V1+timer:now_diff(RP, LP), V2+timer:now_diff(os:timestamp(), RP), V3+1} end, StatDict),
+            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, stat_dict=StatDict1}};
         N ->
              lager:info("Need ~w more replies for ~w", [N-1, TxId]),
             {noreply, SD0#state{to_ack=N-1, prepare_time=max(MaxPrepTime, PrepareTime)}}

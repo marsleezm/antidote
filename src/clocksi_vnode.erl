@@ -221,7 +221,6 @@ init([Partition]) ->
     %DepDict2 = dict:store(commit_diff, {0,0}, DepDict1),
     %DepDict3 = dict:store(fucked_by_commit, {0,0}, DepDict2),
     %DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
-    IfCertify = antidote_config:get(do_cert),
     IfReplicate = antidote_config:get(do_repl), 
     IfSpecula = antidote_config:get(do_specula), 
     FastReply = antidote_config:get(fast_reply),
@@ -239,7 +238,6 @@ init([Partition]) ->
 		        %relay_read={0,0},
                 %l_abort_dict=LD,
                 %r_abort_dict=RD,
-                if_certify = IfCertify,
                 if_replicate = IfReplicate,
                 if_specula = IfSpecula,
                 fast_reply = FastReply,
@@ -411,14 +409,13 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                State = #state{partition=Partition,
                               if_replicate=IfReplicate,
                               committed_txs=CommittedTxs,
-                              if_certify=IfCertify,
                               prepared_txs=PreparedTxs,
                               fast_reply=FastReply,
                               dep_dict=DepDict,
                               debug=Debug
                               }) ->
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
-    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, ProposedTs, IfCertify),
+    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, ProposedTs),
     case Result of
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
@@ -488,7 +485,6 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
 handle_command({single_commit, WriteSet}, Sender,
                State = #state{partition=Partition,
                               if_replicate=IfReplicate,
-                             if_certify=IfCertify,
                               committed_txs=CommittedTxs,
                               prepared_txs=PreparedTxs,
                               inmemory_store=InMemoryStore
@@ -497,7 +493,7 @@ handle_command({single_commit, WriteSet}, Sender,
                               }) ->
    %lager:warning("Got single commit for ~p", [WriteSet]),
     TxId = tx_utilities:create_tx_id(0),
-    Result = prepare_and_commit(TxId, WriteSet, CommittedTxs, PreparedTxs, InMemoryStore, IfCertify), 
+    Result = prepare_and_commit(TxId, WriteSet, CommittedTxs, PreparedTxs, InMemoryStore), 
     case Result of
         {ok, {committed, CommitTime}} ->
             case IfReplicate of
@@ -668,7 +664,7 @@ async_send_msg(Delay, Msg, To) ->
     timer:sleep(Delay),
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
-prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTime, _IfCertify)->
+prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTime)->
     KeySet = [K || {K, _} <- TxWriteSet],
     case certification_check(InitPrepTime, TxId, KeySet, CommittedTxs, PreparedTxs, 0) of
         false ->
@@ -702,19 +698,19 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTime, _IfCertify)->
             {wait, N, PrepareTime}
     end.
 
-prepare_and_commit(TxId, [{Key, Value}], CommittedTxs, _, InMemoryStore, false)->
-    SnapshotTime = TxId#tx_id.snapshot_time,
-    CommitTime = increment_ts(SnapshotTime, 0),
-    ets:insert(CommittedTxs, {Key, CommitTime}),
-    case ets:lookup(InMemoryStore, Key) of
-        [] ->
-            true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}]});
-        [{Key, ValueList}] ->
-            {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
-            true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}|RemainList]})
-    end,
-    {ok, {committed, CommitTime}};
-prepare_and_commit(TxId, [{Key, Value}], CommittedTxs, PreparedTxs, InMemoryStore, true)->
+%prepare_and_commit(TxId, [{Key, Value}], CommittedTxs, _, InMemoryStore)->
+%    SnapshotTime = TxId#tx_id.snapshot_time,
+%    CommitTime = increment_ts(SnapshotTime, 0),
+%    ets:insert(CommittedTxs, {Key, CommitTime}),
+%    case ets:lookup(InMemoryStore, Key) of
+%        [] ->
+%            true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}]});
+%        [{Key, ValueList}] ->
+%            {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
+%            true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}|RemainList]})
+%    end,
+%    {ok, {committed, CommitTime}};
+prepare_and_commit(TxId, [{Key, Value}], CommittedTxs, PreparedTxs, InMemoryStore)->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(CommittedTxs, Key) of
           [{Key, CommitTime}] ->

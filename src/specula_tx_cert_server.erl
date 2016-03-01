@@ -85,6 +85,7 @@
         num_specula_read=0 :: non_neg_integer(),
         committed=0 :: non_neg_integer(),
         start_prepare=0 :: non_neg_integer(),
+        txn_type :: term(),
         %cert_stat={0,0} :: {non_neg_integer(), non_neg_integer()},
 
         read_aborted=0 :: non_neg_integer(),
@@ -113,8 +114,12 @@ init([]) ->
     RepDict = hash_fun:build_rep_dict(true),
     SpeculaLength = antidote_config:get(specula_length),
     PendingTxs = tx_utilities:open_private_table(pending_txs), 
-    ets:insert(PendingTxs, {commit, 0, 0}),
-    ets:insert(PendingTxs, {abort, 0, 0}),
+    ets:insert(PendingTxs, {{new_order, commit}, 0, 0}),
+    ets:insert(PendingTxs, {{new_order, abort}, 0, 0}),
+    ets:insert(PendingTxs, {{payment, commit}, 0, 0}),
+    ets:insert(PendingTxs, {{payment, abort}, 0, 0}),
+    ets:insert(PendingTxs, {{vanilla, commit}, 0, 0}),
+    ets:insert(PendingTxs, {{vanilla, abort}, 0, 0}),
     [{_, Replicas}] = ets:lookup(meta_info, node()),
     TotalReplFactor = length(Replicas)+1,
    %lager:warning("TotalReplFactor is ~w", [TotalReplFactor]),
@@ -214,7 +219,9 @@ handle_call({get_int_data, Type, Param}, _Sender, SD0=#state{pending_list=Pendin
             {reply, CascadeAborted, SD0}
     end;
 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{rep_dict=RepDict, read_aborted=ReadAborted, read_invalid=ReadInvalid, total_repl_factor=TotalReplFactor, committed=Committed, pending_txs=PendingTxs, min_commit_ts=LastCommitTs, tx_id=TxId,  invalid_ts=InvalidTs, specula_length=SpeculaLength, pending_list=PendingList, dep_dict=DepDict, num_specula_read=NumSpeculaRead}) ->
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, vanilla},  Sender, SD0);
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=#state{rep_dict=RepDict, read_aborted=ReadAborted, read_invalid=ReadInvalid, total_repl_factor=TotalReplFactor, committed=Committed, pending_txs=PendingTxs, min_commit_ts=LastCommitTs, tx_id=TxId,  invalid_ts=InvalidTs, specula_length=SpeculaLength, pending_list=PendingList, dep_dict=DepDict, num_specula_read=NumSpeculaRead}) ->
     %% If there was a legacy ongoing transaction.
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
@@ -261,7 +268,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
                                     DepDict1 = dict:update(TxId, 
                                          fun({_, B, _}) ->  %lager:warning("Previous readdep is ~w", [B]),
                                             {TotalReplFactor*length(RemotePartitions)-AvoidNum, ReadDepTxs--B, LastCommitTs+1} end, DepDict),
-                                    ets:insert(PendingTxs, {TxId, {[], RemotePartitions, os:timestamp()}}),
+                                    ets:insert(PendingTxs, {TxId, {[], RemotePartitions, os:timestamp(), TxnType}}),
                                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, min_snapshot_ts=ProposeTS,
                                             pending_list=PendingList1, num_specula_read=NumSpeculaRead1}}
                             end
@@ -279,7 +286,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{re
                                       end,
                    %lager:warning("Total repl fact is ~w", [TotalReplFactor]),
                    %lager:warning("Total to ack is ~w", [(TotalReplFactor-1)*NumToAck]),
-                    {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, sender=Sender, local_updates=LocalPartitions,
+                    {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, sender=Sender, local_updates=LocalPartitions, txn_type=TxnType,
                         remote_updates=RemoteUpdates, pending_prepares=(TotalReplFactor-1)*NumToAck, stage=local_cert, num_specula_read=NumSpeculaRead1}}
             end;
         -1 -> 
@@ -319,8 +326,12 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs}) ->
     RepDict = hash_fun:build_rep_dict(true),
     SpeculaLength = antidote_config:get(specula_length),
     PendingTxs = tx_utilities:open_private_table(pending_txs),
-    ets:insert(PendingTxs, {commit, 0, 0}),
-    ets:insert(PendingTxs, {abort, 0, 0}),
+    ets:insert(PendingTxs, {{new_order, commit}, 0, 0}),
+    ets:insert(PendingTxs, {{new_order, abort}, 0, 0}),
+    ets:insert(PendingTxs, {{payment, commit}, 0, 0}),
+    ets:insert(PendingTxs, {{payment, abort}, 0, 0}),
+    ets:insert(PendingTxs, {{vanilla, commit}, 0, 0}),
+    ets:insert(PendingTxs, {{vanilla, abort}, 0, 0}),
     [{_, Replicas}] = ets:lookup(meta_info, node()),
     TotalReplFactor = length(Replicas)+1,
     %SpeculaData = tx_utilities:open_private_table(specula_data),
@@ -332,7 +343,7 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs}) ->
 %%  Current transaction that has not finished local cert phase
 %%  Transaction that has already cert_aborted.
 handle_cast({pending_prepared, TxId, PrepareTime}, 
-	    SD0=#state{tx_id=TxId, local_updates=LocalParts, remote_updates=RemoteUpdates, sender=Sender, 
+	    SD0=#state{tx_id=TxId, local_updates=LocalParts, remote_updates=RemoteUpdates, sender=Sender, txn_type=TxnType, 
                 dep_dict=DepDict, pending_list=PendingList, specula_length=SpeculaLength, total_repl_factor=TotalReplFactor, 
                 pending_prepares=PendingPrepares, pending_txs=PendingTxs, rep_dict=RepDict}) ->  
    %lager:warning("Speculative receive pending_prepared for ~w, current pp is ~w", [TxId, PendingPrepares+1]),
@@ -351,7 +362,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                 false ->
                     %lager:warning("Pending prep: decided to speculate ~w and prepare to ~w pending list is ~w!!", [TxId, RemoteUpdates, PendingList]),
                     %% Add dependent data into the table
-                    ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, os:timestamp()}}),
+                    ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, os:timestamp(), TxnType}}),
                     {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
                    %lager:warning("Proposets for ~w is ~w", [ProposeTS, TxId]),
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, ProposeTS, TxId, {remote, node()}),
@@ -379,7 +390,7 @@ handle_cast({pending_prepared, _OtherTxId, _}, SD0) ->
 
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{tx_id=TxId, local_updates=LocalParts, stage=local_cert, total_repl_factor=TotalReplFactor, 
-            remote_updates=RemoteUpdates, sender=Sender, dep_dict=DepDict, pending_list=PendingList,
+            remote_updates=RemoteUpdates, sender=Sender, dep_dict=DepDict, pending_list=PendingList, txn_type=TxnType,
              min_commit_ts=LastCommitTs, specula_length=SpeculaLength, pending_prepares=PendingPrepares,
             pending_txs=PendingTxs, rep_dict=RepDict, committed=Committed}) ->
     %lager:warning("Got local prepare for ~w", [TxId, PrepareTime]),
@@ -410,7 +421,7 @@ handle_cast({prepared, TxId, PrepareTime},
                         false ->
                              %lager:warning("Speculate current tx with ~w, remote parts are ~w, Num is ~w", [TxId, RemoteParts, length(RemoteParts)]),
                             %% Add dependent data into the table
-                            ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, os:timestamp()}}),
+                            ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, os:timestamp(), TxnType}}),
                             {ProposeTS, NumAvoid} = add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
                    %lager:warning("Proposets for ~w is ~w", [ProposeTS, TxId]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, ProposeTS, TxId, {remote, node()}),
@@ -428,7 +439,7 @@ handle_cast({prepared, TxId, PrepareTime},
     end;
 
 handle_cast({prepared, PendingTxId, PendingPT}, 
-	    SD0=#state{pending_list=PendingList, pending_txs=PendingTxs,
+	    SD0=#state{pending_list=PendingList, pending_txs=PendingTxs, txn_type=TxnType,
             sender=Sender, tx_id=CurrentTxId, rep_dict=RepDict, min_commit_ts=MinCommitTS,
             committed=Committed, read_invalid=ReadInvalid, cascade_aborted=CascadAborted, remote_updates=RemoteUpdates,
             local_updates=LocalParts, dep_dict=DepDict, stage=Stage}) ->
@@ -522,7 +533,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
                             %add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
                             PendingList1 = NewPendingList ++ [CurrentTxId],
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
-                            ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, os:timestamp()}}),
+                            ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, os:timestamp(), TxnType}}),
                             {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict3,
                                     pending_list=PendingList1, min_commit_ts=NewMaxPT, min_snapshot_ts=SpeculaPrepTime,
                                       committed=NewCommitted}}
@@ -547,7 +558,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
 %%       and here we should check if the transaction can be directly committed or not. 
 handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=PendingTxs, rep_dict=RepDict, dep_dict=DepDict, 
             pending_list=PendingList, read_invalid=ReadInvalid, tx_id=CurrentTxId, committed=Committed,
-            min_commit_ts=MinCommitTS, sender=Sender, stage=Stage, cascade_aborted=CascadAborted, 
+            min_commit_ts=MinCommitTS, sender=Sender, stage=Stage, cascade_aborted=CascadAborted, txn_type=TxnType, 
             local_updates=LocalParts, remote_updates=RemoteUpdates}) ->
      %lager:warning("Got read valid for ~w of ~w", [PendingTxId, PendedTxId]),
     case dict:find(PendingTxId, DepDict) of
@@ -643,7 +654,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{pending_txs=Pendin
                             %add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
                             PendingList1 = NewPendingList ++ [CurrentTxId],
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
-                            ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, os:timestamp()}}),
+                            ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, os:timestamp(), TxnType}}),
                             {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict3,
                                     pending_list=PendingList1, min_commit_ts=NewMaxPT, min_snapshot_ts=SpeculaPrepTime, 
                                       committed=NewCommitted}}
@@ -901,11 +912,11 @@ commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
 
 commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs) ->
    %ning("Committing specula tx ~w with ~w", [TxId, CommitTime]),
-    [{TxId, {LocalParts, RemoteParts, SpeculaTime}}] = ets:lookup(PendingTxs, TxId),
+    [{TxId, {LocalParts, RemoteParts, SpeculaTime, TxnType}}] = ets:lookup(PendingTxs, TxId),
     true = ets:delete(PendingTxs, TxId),
     %%%%%%%%% Time stat %%%%%%%%%%%
     TimeDiff = get_time_diff(SpeculaTime, os:timestamp()),
-    ets:update_counter(PendingTxs, commit, [{2, TimeDiff}, {3, 1}]),
+    ets:update_counter(PendingTxs, {TxnType, commit}, [{2, TimeDiff}, {3, 1}]),
     %%%%%%%%% Time stat %%%%%%%%%%%
     DepList = ets:lookup(dependency, TxId),
    %lager:warning("~w: My read dependncy are ~w", [TxId, DepList]),
@@ -923,12 +934,12 @@ commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs) ->
     {DepDict1, ToAbortTxs}.
 
 abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
-          [{TxId, {LocalParts, RemoteParts, SpeculaTime}}] = ets:lookup(PendingTxs, TxId),
+          [{TxId, {LocalParts, RemoteParts, SpeculaTime, TxnType}}] = ets:lookup(PendingTxs, TxId),
       %lager:warning("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
       ets:delete(PendingTxs, TxId),
       %%%%%%%%% Time stat %%%%%%%%%%%
       TimeDiff = get_time_diff(SpeculaTime, os:timestamp()),
-      ets:update_counter(PendingTxs, abort, [{2, TimeDiff}, {3, 1}]),
+      ets:update_counter(PendingTxs, {TxnType, abort}, [{2, TimeDiff}, {3, 1}]),
       %%%%%%%%% Time stat %%%%%%%%%%%
       DepList = ets:lookup(dependency, TxId),
       %lager:warning("~w: My read dependncy are ~w", [TxId, DepList]),
@@ -951,7 +962,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
       dict:erase(TxId, DepDict).
 
 abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
-    [{TxId, {LocalParts, RemoteParts, SpeculaTime}}] = ets:lookup(PendingTxs, TxId), 
+    [{TxId, {LocalParts, RemoteParts, SpeculaTime, TxnType}}] = ets:lookup(PendingTxs, TxId), 
     %lager:warning("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     ets:delete(PendingTxs, TxId),
     DepList = ets:lookup(dependency, TxId),
@@ -970,7 +981,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
                      end, DepList),
     %%%%%%%%% Time stat %%%%%%%%%%%
     TimeDiff = get_time_diff(SpeculaTime, os:timestamp()),
-    ets:update_counter(PendingTxs, abort, [{2, TimeDiff}, {3, 1}]),
+    ets:update_counter(PendingTxs, {TxnType, abort}, [{2, TimeDiff}, {3, 1}]),
     %%%%%%%%% Time stat %%%%%%%%%%%
     %abort_tx(TxId, LocalParts, RemoteParts, DoRepl),
     ?CLOCKSI_VNODE:abort(LocalParts, TxId),

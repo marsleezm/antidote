@@ -223,8 +223,8 @@ handle_call({append_values, KeyValues, CommitTime}, _Sender, SD0=#state{replicat
     {reply, ok, SD0};
 
 handle_call({read, Key, TxId, {_Part, _}}, Sender, 
-	    SD0=#state{replicated_log=ReplicatedLog, num_read=NumRead, pending_log=PendingLog,
-                num_specula_read=NumSpeculaRead, do_specula=DoSpecula}) ->
+	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog,
+                do_specula=DoSpecula}) ->
     case DoSpecula of
         false ->
             case ready_or_block(TxId, Key, PendingLog, Sender) of
@@ -232,19 +232,19 @@ handle_call({read, Key, TxId, {_Part, _}}, Sender,
                     {noreply, SD0};
                 ready ->
                     Result = read_value(Key, TxId, ReplicatedLog),
-                    {reply, Result, SD0#state{num_read=NumRead+1}}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
+                    {reply, Result, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
             case specula_read(TxId, Key, PendingLog, Sender) of
                 not_ready->
                     {noreply, SD0};
                 {specula, Value} ->
-                    {reply, {ok, Value}, SD0#state{num_specula_read=NumSpeculaRead+1}};
+                    {reply, {ok, Value}, SD0};
                 ready ->
                     Result = read_value(Key, TxId, ReplicatedLog),
                     %MyClock = TxId#tx_id.snapshot_time,
                     %TsDict1 = dict:update(Part, fun(OldTs) -> max(MyClock, OldTs) end, TsDict),
-                    {reply, Result, SD0#state{num_read=NumRead+1}}
+                    {reply, Result, SD0}
             end
     end;
 
