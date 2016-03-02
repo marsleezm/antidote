@@ -106,7 +106,7 @@ init([]) ->
     CacheLog = tx_utilities:open_private_table(cache_log),
     DoSpecula = antidote_config:get(do_specula),
     {ok, #state{do_specula = DoSpecula,
-                cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}}.
+                cache_log = CacheLog}}.
 
 handle_call({num_specula_read}, _Sender, 
 	    SD0=#state{num_specula_read=NumSpeculaRead, num_attempt_read=NumAttemptRead}) ->
@@ -123,11 +123,10 @@ handle_call({read, Key, TxId, Node}, Sender,
 handle_call({clean_data}, _Sender, SD0=#state{cache_log=OldCacheLog}) ->
     ets:delete(OldCacheLog),
     CacheLog = tx_utilities:open_private_table(cache_log),
-    {reply, ok, SD0#state{cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}};
+    {reply, ok, SD0#state{cache_log = CacheLog}};
 
 handle_call({read, Key, TxId, Node}, Sender, 
-	    SD0=#state{cache_log=CacheLog, do_specula=true, 
-            num_attempt_read=NumAttemptRead, num_specula_read=NumSpeculaRead}) ->
+	    SD0=#state{cache_log=CacheLog, do_specula=true}) ->
     %lager:warning("Cache read ~w of ~w", [Key, TxId]), 
     case ets:lookup(CacheLog, Key) of
         [] ->
@@ -135,7 +134,7 @@ handle_call({read, Key, TxId, Node}, Sender,
             ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
             %lager:info("Well, from clocksi_vnode"),
             %lager:info("Nothing!"),
-            {noreply, SD0#state{num_attempt_read=NumAttemptRead+1}};
+            {noreply, SD0};
         [{Key, ValueList}] ->
             %lager:info("Value list is ~w", [ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
@@ -143,14 +142,13 @@ handle_call({read, Key, TxId, Node}, Sender,
                 {SpeculaTxId, Value} ->
                     ets:insert(dependency, {SpeculaTxId, TxId}),         
                     ets:insert(anti_dep, {TxId, SpeculaTxId}),        
-                    lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
+                    %lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
-                    {reply, {ok, Value}, SD0#state{num_specula_read=NumSpeculaRead+1,
-                        num_attempt_read=NumAttemptRead+1}};
+                    {reply, {ok, Value}, SD0};
                 [] ->
                     ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
                     %lager:info("Well, from clocksi_vnode"),
-                    {noreply, SD0#state{num_attempt_read=NumAttemptRead+1}}
+                    {noreply, SD0}
             end
     end;
 

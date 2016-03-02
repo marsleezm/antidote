@@ -221,8 +221,8 @@ handle_call({append_values, KeyValues, CommitTime}, _Sender, SD0=#state{replicat
     {reply, ok, SD0};
 
 handle_call({read, Key, TxId, _}, Sender, 
-	    SD0=#state{replicated_log=ReplicatedLog, num_read=NumRead, pending_log=PendingLog,
-                num_specula_read=NumSpeculaRead, ts=Ts, do_specula=DoSpecula}) ->
+	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog,
+                ts=Ts, do_specula=DoSpecula}) ->
     case DoSpecula of
         false ->
             case ready_or_block(TxId, Key, PendingLog, Sender) of
@@ -231,18 +231,18 @@ handle_call({read, Key, TxId, _}, Sender,
                 ready ->
                     Result = read_value(Key, TxId, ReplicatedLog),
                     MyClock = TxId#tx_id.snapshot_time,
-                    {reply, Result, SD0#state{ts=max(Ts, MyClock), num_read=NumRead+1}}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
+                    {reply, Result, SD0#state{ts=max(Ts, MyClock)}}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
             case specula_read(TxId, Key, PendingLog, Sender) of
                 not_ready->
                     {noreply, SD0};
                 {specula, Value} ->
-                    {reply, {ok, Value}, SD0#state{num_specula_read=NumSpeculaRead+1}};
+                    {reply, {ok, Value}, SD0};
                 ready ->
                     Result = read_value(Key, TxId, ReplicatedLog),
                     MyClock = TxId#tx_id.snapshot_time,
-                    {reply, Result, SD0#state{ts=max(Ts, MyClock), num_read=NumRead+1}}
+                    {reply, Result, SD0#state{ts=max(Ts, MyClock)}}
             end
     end;
 
@@ -335,7 +335,7 @@ handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pe
     lager:info("Data repl replying!"),
     Sender ! cleaned,
     {noreply, SD0#state{pending_log = PendingLog, current_dict = dict:new(), backup_dict = dict:new(), 
-                num_specula_read=0, num_read=0, replicated_log = ReplicatedLog}};
+                replicated_log = ReplicatedLog}};
 
 %% Where shall I put the speculative version?
 %% In ets, faster for read.
