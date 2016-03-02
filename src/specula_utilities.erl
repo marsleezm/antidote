@@ -42,10 +42,10 @@ deal_commit_deps(TxId, CommitTime) ->
                             ets:delete_object(dependency, {TId, DependTxId}),
                             case DependTxId#tx_id.snapshot_time >= CommitTime of
                                 true ->
-                                    lager:info("Calling read valid by ts of ~w, from ~w", [DependTxId, TId]),
+                                    %lager:info("Calling read valid by ts of ~w, from ~w", [DependTxId, TId]),
                                     gen_server:cast(DependTxId#tx_id.server_pid, {read_valid, DependTxId, TId});
                                 false ->
-                                    lager:info("Calling read invalid by ts of ~w, from ~w", [DependTxId, TId]),
+                                    %lager:info("Calling read invalid by ts of ~w, from ~w", [DependTxId, TId]),
                                     gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, CommitTime, DependTxId})
                           end end, List)
     end.

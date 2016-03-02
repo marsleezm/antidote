@@ -5,10 +5,17 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--export([delete_1/2, delete_2/2, check_length1/2, check_length2/2,
+-export([delete_1/2, delete_2/2, check_length1/2, check_time/1, check_length2/2,
          lookup_1/2, lookup_2/2, get_my_range/4,
          check_node/1, check_list/1, test_hash/2,
          pass1/1, pass2/1, set1/2, set2/2, set3/2]).
+
+check_time(N) ->
+    S = lists:seq(1, N),
+    Start = now(),
+    lists:foreach(fun(_) -> os:timestamp() end, S), 
+    End = now(),
+    io:format("Diff is ~w ~n", [timer:now_diff(End, Start)]).
 
 check_length1(N, S) ->
     Seq = lists:seq(1, S),
