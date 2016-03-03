@@ -119,7 +119,7 @@ init([]) ->
     PendingTxs = tx_utilities:open_private_table(pending_txs), 
     SpeculaRead = case antidote_config:get(specula_read) of
                         specula -> specula; 
-                        no_specula -> no_specula
+                        nospecula -> no_specula
                   end,
     ets:insert(PendingTxs, {{new_order, commit}, 0, 0, 0}),
     ets:insert(PendingTxs, {{new_order, abort}, 0, 0, 0}),
@@ -349,7 +349,7 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs}) ->
     PendingTxs = tx_utilities:open_private_table(pending_txs),
     SpeculaRead = case antidote_config:get(specula_read) of
                         specula -> specula;
-                        no_specula -> no_specula
+                        nospecula -> no_specula
                   end,
     ets:insert(PendingTxs, {{new_order, commit}, 0, 0, 0}),
     ets:insert(PendingTxs, {{new_order, abort}, 0, 0, 0}),
