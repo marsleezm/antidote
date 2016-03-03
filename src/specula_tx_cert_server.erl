@@ -118,8 +118,8 @@ init([]) ->
     SpeculaLength = antidote_config:get(specula_length),
     PendingTxs = tx_utilities:open_private_table(pending_txs), 
     SpeculaRead = case antidote_config:get(specula_read) of
-                        true -> specula; 
-                        false -> no_specula
+                        specula -> specula; 
+                        no_specula -> no_specula
                   end,
     ets:insert(PendingTxs, {{new_order, commit}, 0, 0, 0}),
     ets:insert(PendingTxs, {{new_order, abort}, 0, 0, 0}),
