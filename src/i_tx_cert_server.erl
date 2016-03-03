@@ -89,11 +89,11 @@ init([]) ->
 
 handle_call({get_stat}, _Sender, SD0=#state{stat_dict=StatDict}) ->
     {CLP1, CRP1, C1} = dict:fetch({new_order, commit}, StatDict),
-    {ALP1, ARP1, A1} = dict:store({new_order, abort}, StatDict),
-    {CLP2, CRP2, C2} = dict:store({payment, commit}, StatDict),
-    {ALP2, ARP2, A2} = dict:store({payment, abort}, StatDict),
-    {CLP3, CRP3, C3} = dict:store({vanilla, commit}, StatDict),
-    {ALP3, ARP3, A3} = dict:store({vanilla, abort}, StatDict),
+    {ALP1, ARP1, A1} = dict:fetch({new_order, abort}, StatDict),
+    {CLP2, CRP2, C2} = dict:fetch({payment, commit}, StatDict),
+    {ALP2, ARP2, A2} = dict:fetch({payment, abort}, StatDict),
+    {CLP3, CRP3, C3} = dict:fetch({vanilla, commit}, StatDict),
+    {ALP3, ARP3, A3} = dict:fetch({vanilla, abort}, StatDict),
     {reply, [0, 0, 0, 0, 0, 0, 0, 0, CLP1 div C1, CRP1 div C1, ALP1 div A1, ARP1 div A1, CLP2 div C2, CRP2 div C2, ALP2 div A2, ARP2 div A2, CLP3 div C3, CRP3 div C3, ALP3 div A3, ARP3 div A3], SD0};
 
 handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->

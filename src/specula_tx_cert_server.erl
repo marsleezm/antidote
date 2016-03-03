@@ -80,6 +80,7 @@
         pending_txs :: cache_id(),
         total_repl_factor :: non_neg_integer(),
 
+        specula_read :: term(),
         min_commit_ts = 0 :: non_neg_integer(),
         min_snapshot_ts = 0 :: non_neg_integer(),
         invalid_ts=0 :: non_neg_integer(),
@@ -116,6 +117,10 @@ init([]) ->
     RepDict = hash_fun:build_rep_dict(true),
     SpeculaLength = antidote_config:get(specula_length),
     PendingTxs = tx_utilities:open_private_table(pending_txs), 
+    SpeculaRead = case antidote_config:get(specula_read) of
+                        true -> specula; 
+                        false -> no_specula
+                  end,
     ets:insert(PendingTxs, {{new_order, commit}, 0, 0, 0}),
     ets:insert(PendingTxs, {{new_order, abort}, 0, 0, 0}),
     ets:insert(PendingTxs, {{payment, commit}, 0, 0, 0}),
@@ -127,7 +132,7 @@ init([]) ->
    %lager:warning("TotalReplFactor is ~w", [TotalReplFactor]),
     %SpeculaData = tx_utilities:open_private_table(specula_data),
     {ok, #state{pending_txs=PendingTxs, dep_dict=dict:new(), total_repl_factor=TotalReplFactor, 
-            specula_length=SpeculaLength, rep_dict=RepDict}}.
+            specula_length=SpeculaLength, specula_read=SpeculaRead, rep_dict=RepDict}}.
 
 handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
     clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
@@ -319,8 +324,8 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=
 %    lager:error("Current tx is cert_aborted, received certify of ~w", [TxId]),
 %    {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict)}};
 
-handle_call({read, Key, TxId, Node}, Sender, SD0) ->
-    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, specula),
+handle_call({read, Key, TxId, Node}, Sender, SD0=#state{specula_read=SpeculaRead}) ->
+    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, SpeculaRead),
     {noreply, SD0};
 
 handle_call({go_down},_Sender,SD0) ->
@@ -342,6 +347,10 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs}) ->
     RepDict = hash_fun:build_rep_dict(true),
     SpeculaLength = antidote_config:get(specula_length),
     PendingTxs = tx_utilities:open_private_table(pending_txs),
+    SpeculaRead = case antidote_config:get(specula_read) of
+                        true -> specula;
+                        false -> no_specula
+                  end,
     ets:insert(PendingTxs, {{new_order, commit}, 0, 0, 0}),
     ets:insert(PendingTxs, {{new_order, abort}, 0, 0, 0}),
     ets:insert(PendingTxs, {{payment, commit}, 0, 0, 0}),
@@ -353,7 +362,7 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs}) ->
     %SpeculaData = tx_utilities:open_private_table(specula_data),
     Sender ! cleaned,
     {noreply, #state{pending_txs=PendingTxs, dep_dict=dict:new(), 
-            specula_length=SpeculaLength, rep_dict=RepDict, total_repl_factor=TotalReplFactor}};
+            specula_length=SpeculaLength, specula_read=SpeculaRead, rep_dict=RepDict, total_repl_factor=TotalReplFactor}};
 
 %% Receiving local prepare. Can only receive local prepare for two kinds of transaction
 %%  Current transaction that has not finished local cert phase
