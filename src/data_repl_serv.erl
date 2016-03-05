@@ -259,18 +259,23 @@ handle_call({update_ts, _Partitions}, _Sender, SD0) ->
     %                        {reply, ok, SD0#state{ts_dict=TsDict1, init_ts_dict=false}}
     %end;
 
-handle_call({get_ts, WriteSet}, _Sender, SD0=#state{pending_log=PendingLog}) ->
-    MaxTs = lists:foldl(fun({Key, _Value}, ToPrepTS) ->
-                case ets:lookup(PendingLog, Key) of
-                    [] ->
-                        ToPrepTS;
-                    [{Key, [{_PrepTxId, _PrepTS, LastReaderTS, _PrepValue, _Reader}|_RemainList]}] ->
-                        max(ToPrepTS, LastReaderTS+1);
-                    [{Key, LastReaderTS}] ->
-                        %lager:info("LastReader ts is ~p", [LastReaderTS]),
-                        max(ToPrepTS, LastReaderTS+1)
-                end end, 0, WriteSet),
-    {reply, MaxTs, SD0};
+handle_call({get_ts, TxId, Partition, WriteSet}, _Sender, SD0=#state{pending_log=PendingLog}) ->
+    case ets:lookup(PendingLog, {TxId, Partition}) of
+        [] ->
+            MaxTs = lists:foldl(fun({Key, _Value}, ToPrepTS) ->
+                        case ets:lookup(PendingLog, Key) of
+                            [] ->
+                                ToPrepTS;
+                            [{Key, [{_PrepTxId, _PrepTS, LastReaderTS, _PrepValue, _Reader}|_RemainList]}] ->
+                                max(ToPrepTS, LastReaderTS+1);
+                            [{Key, LastReaderTS}] ->
+                                %lager:info("LastReader ts is ~p", [LastReaderTS]),
+                                max(ToPrepTS, LastReaderTS+1)
+                        end end, 0, WriteSet),
+            {reply, MaxTs, SD0};
+        _ ->
+            {reply, exist, SD0}
+    end;
 
 handle_call({if_prepared, TxId, Keys}, _Sender, SD0=#state{pending_log=PendingLog}) ->
     Result = lists:all(fun(Key) ->

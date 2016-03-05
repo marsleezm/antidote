@@ -940,14 +940,20 @@ abort_tx(TxId, LocalParts, RemoteParts, RepDict) ->
     ?REPL_FSM:repl_abort(RemoteParts, TxId, false, RepDict).
 
 add_to_table(WriteSet, TxId, PrepareTime, RepDict) ->
-    ProposeTS = lists:foldl(fun({{_, Node}, Updates}, GotTS) ->
+    {Repled, ProposeTS} = lists:foldl(fun({{Part, Node}, Updates}, {ToDelete, GotTS}) ->
                     case dict:find({rep, Node}, RepDict) of
                         {ok, DataReplServ} ->
-                            max(?DATA_REPL_SERV:get_ts(DataReplServ, Updates), GotTS);
+                            case ?DATA_REPL_SERV:get_ts(DataReplServ, TxId, Part, Updates) of
+                                exist ->
+                                    {[{{Part, Node}, Updates}|ToDelete], GotTS};
+                                TS ->
+                                    {ToDelete, max(TS, GotTS)}
+                            end;
                         _ ->
-                            GotTS
-                    end end, PrepareTime, WriteSet),
-    specula_prepare(WriteSet, TxId, ProposeTS, RepDict, 0).
+                            {ToDelete, GotTS}
+                    end end, {[], PrepareTime}, WriteSet),
+    NewWriteSet = WriteSet - Repled, 
+    specula_prepare(NewWriteSet, TxId, ProposeTS, RepDict, 0).
 
 specula_prepare([], _, PrepareTime, _, NumParts) ->
     {PrepareTime, NumParts};
