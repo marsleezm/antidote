@@ -168,7 +168,7 @@ init([Name, _Parts]) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent*SpeculaLength div 3, 50),
+    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent*SpeculaLength div 3, 80),
                 pending_log = PendingLog, current_dict = dict:new(), do_specula=DoSpecula,
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
@@ -472,7 +472,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict}) ->
-    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
+    lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     CurrentDict1 = lists:foldl(fun(Partition, S) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
