@@ -392,12 +392,12 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
     case Type of
         prepared ->
             case dict:find(TxId, CurrentDict) of
-                {ok, aborted} ->
+                {ok, finished} ->
                    lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 error ->
                     case dict:find(TxId, BackupDict) of
-                        {ok, aborted} ->
+                        {ok, finished} ->
                            lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         error ->
@@ -422,8 +422,8 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
     end;
 
 
-handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
-	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, do_specula=DoSpecula}) ->
+handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited}, 
+	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, do_specula=DoSpecula, current_dict=CurrentDict}) ->
     %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
     lists:foreach(fun(Partition) ->
                     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
@@ -434,7 +434,10 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
         true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
         _ -> ok
     end,
-    {noreply, SD0};
+    case IfWaited of
+        waited -> {noreply, SD0#state{current_dict=dict:store(TxId, finished, CurrentDict)}};
+        no_wait -> {noreply, SD0}
+    end;
     %case dict:size(CurrentD1) > SetSize of
     %      true ->
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentD1}};
@@ -442,7 +445,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
     %  end;
 
-handle_cast({repl_abort, TxId, Partitions, IfSpecula}, 
+handle_cast({repl_abort, TxId, Partitions, IfWaited}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict, set_size=SetSize}) ->
     lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     CurrentDict1 = lists:foldl(fun(Partition, S) ->
@@ -454,13 +457,13 @@ handle_cast({repl_abort, TxId, Partitions, IfSpecula},
                         S;
                     [] ->
                        lager:warning("Repl abort arrived early! ~w", [TxId]),
-                        dict:store(TxId, aborted, S)
+                        dict:store(TxId, finished, S)
                 end
         end, CurrentDict, Partitions),
     %%% This needs to be stored because a prepare request may come twice: once from specula_prep and once 
     %%  from tx coord
-    CurrentDict2 = case IfSpecula of true -> dict:store(TxId, aborted, CurrentDict1);
-                                     false -> CurrentDict1 
+    CurrentDict2 = case IfWaited of waited -> dict:store(TxId, finished, CurrentDict1);
+                                    no_wait -> CurrentDict1 
                    end,
     case DoSpecula of
         true -> specula_utilities:deal_abort_deps(TxId);

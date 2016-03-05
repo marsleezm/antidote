@@ -290,7 +290,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=
                                     DepDict1 = dict:update(TxId, 
                                          fun({_, B, _}) ->   lager:warning("Previous readdep is ~w", [B]),
                                             {TotalReplFactor*length(RemotePartitions)-AvoidNum, ReadDepTxs--B, LastCommitTs+1} end, DepDict),
-                                    ets:insert(PendingTxs, {TxId, {[], RemotePartitions, Now, Now, TxnType}}),
+                                    ets:insert(PendingTxs, {TxId, {[], RemotePartitions, Now, Now, TxnType, no_wait}}),
                                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, min_snapshot_ts=ProposeTS,
                                             pending_list=PendingList1, num_specula_read=NumSpeculaRead1}}
                             end
@@ -388,7 +388,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                 false ->
                      lager:warning("Pending prep: decided to speculate ~w and prepare to ~w pending list is ~w!!", [TxId, RemoteUpdates, PendingList]),
                     %% Add dependent data into the table
-                    ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, LT, os:timestamp(), TxnType}}),
+                    ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, LT, os:timestamp(), TxnType, no_wait}}),
                     {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
                     lager:warning("Specula txn ~w, got propose time ~w, avoided ~w, still need ~w", [TxId, ProposeTS, AvoidNum, TotalReplFactor*RemoteToAck+PendingPrepares+1-AvoidNum]),
                     lager:warning("Proposets for ~w is ~w", [ProposeTS, TxId]),
@@ -448,7 +448,7 @@ handle_cast({prepared, TxId, PrepareTime},
                         false ->
                               lager:warning("Speculate current tx with ~w, remote parts are ~w, Num is ~w", [TxId, RemoteParts, length(RemoteParts)]),
                             %% Add dependent data into the table
-                            ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, LT, os:timestamp(), TxnType}}),
+                            ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, LT, os:timestamp(), TxnType, no_wait}}),
                             {ProposeTS, NumAvoid} = add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
                             lager:warning("Specula txn ~w, got propose time ~w, avoided ~w, still need", [TxId, ProposeTS, NumAvoid, TotalReplFactor*RemoteToAck+PendingPrepares-NumAvoid]),
                             lager:warning("Proposets for ~w is ~w", [ProposeTS, TxId]),
@@ -673,7 +673,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime}}),
                     PendingList1 = NewPendingList ++ [CurrentTxId],
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
-                    ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, LT, RT, TxnType}}),
+                    ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, LT, RT, TxnType, waited}}),
                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict3,
                             pending_list=PendingList1, min_commit_ts=NewMaxPT, min_snapshot_ts=SpeculaPrepTime,
                                       committed=NewCommitted}}
@@ -838,7 +838,7 @@ commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
 
 commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs) ->
    %ning("Committing specula tx ~w with ~w", [TxId, CommitTime]),
-    [{TxId, {LocalParts, RemoteParts, LP, RP, TxnType}}] = ets:lookup(PendingTxs, TxId),
+    [{TxId, {LocalParts, RemoteParts, LP, RP, TxnType, IfWaited}}] = ets:lookup(PendingTxs, TxId),
     true = ets:delete(PendingTxs, TxId),
     %%%%%%%%% Time stat %%%%%%%%%%%
     LPDiff = get_time_diff(LP, RP),
@@ -854,14 +854,14 @@ commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs) ->
     %?REPL_FSM:repl_commit(LocalParts, TxId, CommitTime, DoRepl),
     ?CLOCKSI_VNODE:commit(RemoteParts, TxId, CommitTime),
     %?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, DoRepl),
-    ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, true, RepDict),
+    ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, true, RepDict, IfWaited),
      lager:warning("Specula commit ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     %io:format(user, "Calling commit to table with ~w, ~w, ~w ~n", [RemoteParts, TxId, CommitTime]),
     %commit_to_table(RemoteParts, TxId, CommitTime, RepDict),
     {DepDict1, ToAbortTxs}.
 
 abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
-          [{TxId, {LocalParts, RemoteParts, LP, RP, TxnType}}] = ets:lookup(PendingTxs, TxId),
+    [{TxId, {LocalParts, RemoteParts, LP, RP, TxnType, IfWaited}}] = ets:lookup(PendingTxs, TxId),
        lager:warning("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
       ets:delete(PendingTxs, TxId),
       %%%%%%%%% Time stat %%%%%%%%%%%
@@ -886,11 +886,11 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
       ?CLOCKSI_VNODE:abort(LocalParts, TxId),
       ?REPL_FSM:repl_abort(LocalParts, TxId, false, RepDict),
       ?CLOCKSI_VNODE:abort(lists:delete(ExceptNode, RemoteParts), TxId),
-      ?REPL_FSM:repl_abort(RemoteParts, TxId, true, RepDict),
+      ?REPL_FSM:repl_abort(RemoteParts, TxId, true, RepDict, IfWaited),
       dict:erase(TxId, DepDict).
 
 abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
-    [{TxId, {LocalParts, RemoteParts, LP, RP, TxnType}}] = ets:lookup(PendingTxs, TxId), 
+    [{TxId, {LocalParts, RemoteParts, LP, RP, TxnType, IfWaited}}] = ets:lookup(PendingTxs, TxId), 
      lager:warning("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     ets:delete(PendingTxs, TxId),
     DepList = ets:lookup(dependency, TxId),
@@ -916,7 +916,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
     ?CLOCKSI_VNODE:abort(LocalParts, TxId),
     ?REPL_FSM:repl_abort(LocalParts, TxId, false, RepDict),
     ?CLOCKSI_VNODE:abort(RemoteParts, TxId),
-    ?REPL_FSM:repl_abort(RemoteParts, TxId, true, RepDict),
+    ?REPL_FSM:repl_abort(RemoteParts, TxId, true, RepDict, IfWaited),
     %abort_to_table(RemoteParts, TxId, RepDict),
     dict:erase(TxId, DepDict).
 
@@ -1204,9 +1204,9 @@ abort_specula_list_test() ->
     DepDict3 = dict:store(T3, {0, 1, 1}, DepDict2),
     ets:insert(MyTable, {{general, abort}, 0,0,0}),
     ets:insert(MyTable, {{general, commit}, 0,0,0}),
-    ets:insert(MyTable, {T1, {[{p1, n1}], [{p2, n2}], now(), now(), general}}),
-    ets:insert(MyTable, {T2, {[{p1, n1}], [{p2, n2}], now(), now(), general}}),
-    ets:insert(MyTable, {T3, {[{p1, n1}], [{p2, n2}], now(), now(), general}}),
+    ets:insert(MyTable, {T1, {[{p1, n1}], [{p2, n2}], now(), now(), general, no_wait}}),
+    ets:insert(MyTable, {T2, {[{p1, n1}], [{p2, n2}], now(), now(), general, no_wait}}),
+    ets:insert(MyTable, {T3, {[{p1, n1}], [{p2, n2}], now(), now(), general, no_wait}}),
     DepDict4 = abort_specula_list([T1, T2, T3], RepDict, DepDict3, MyTable),
     ?assertEqual(error, dict:find(T1, DepDict4)),
     ?assertEqual(error, dict:find(T2, DepDict4)),
@@ -1268,9 +1268,9 @@ try_to_commit_test() ->
     ?assertEqual(PD1, [T1, T2]),
     ?assertEqual(MPT1, MaxPT1),
 
-    ets:insert(MyTable, {T1, {[{lp1, n1}], [{rp1, n3}], now(), now(), general}}), 
-    ets:insert(MyTable, {T2, {[{lp1, n1}], [{rp1, n3}], now(), now(), general}}), 
-    ets:insert(MyTable, {T3, {[{lp2, n2}], [{rp2, n4}], now(), now(), general}}), 
+    ets:insert(MyTable, {T1, {[{lp1, n1}], [{rp1, n3}], now(), now(), general, no_wait}}), 
+    ets:insert(MyTable, {T2, {[{lp1, n1}], [{rp1, n3}], now(), now(), general, no_wait}}), 
+    ets:insert(MyTable, {T3, {[{lp2, n2}], [{rp2, n4}], now(), now(), general, no_wait}}), 
     DepDict4 = dict:store(T1, {0, [], 2}, DepDict3),
     %% T1 can commit because of read_dep ok. 
     {PD2, MPT2, RD2, Aborted1, Committed1} =  try_to_commit(MaxPT1, [T1, T2], RepDict, DepDict4, 
@@ -1296,9 +1296,9 @@ try_to_commit_test() ->
     %?assertEqual(true, mock_partition_fsm:if_applied({commit_specula, n3rep, T2, rp1}, MPT3)),
 
     %% T3, T4 get committed and T5 gets cert_aborted.
-    ets:insert(MyTable, {T3, {[{lp2, n2}], [{rp2, n4}], now(), now(), general}}), 
-    ets:insert(MyTable, {T4, {[{lp2, n2}], [{rp2, n4}], now(), now(), general}}), 
-    ets:insert(MyTable, {T5, {[{lp2, n2}], [{rp2, n4}], now(), now(), general}}), 
+    ets:insert(MyTable, {T3, {[{lp2, n2}], [{rp2, n4}], now(), now(), general, no_wait}}), 
+    ets:insert(MyTable, {T4, {[{lp2, n2}], [{rp2, n4}], now(), now(), general, no_wait}}), 
+    ets:insert(MyTable, {T5, {[{lp2, n2}], [{rp2, n4}], now(), now(), general, no_wait}}), 
     ets:insert(dependency, {T3, T4}),
     ets:insert(dependency, {T3, T5}),
     ets:insert(dependency, {T4, T5}),

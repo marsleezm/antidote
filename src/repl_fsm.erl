@@ -59,7 +59,9 @@
 -export([repl_prepare/4,
 	    check_table/0,
          repl_abort/4,
+         repl_abort/5,
          repl_commit/5,
+         repl_commit/6,
          %repl_abort/4,
          %repl_commit/5,
          quorum_replicate/7,
@@ -288,9 +290,12 @@ get_name(ReplName, N) ->
     end.
     
 %% No replication
-repl_commit([], _, _, _, _) ->
-    ok;
 repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict) ->
+    repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, no_wait).
+
+repl_commit([], _, _, _, _, _) ->
+    ok;
+repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, IfWaited) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
@@ -302,15 +307,18 @@ repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict) ->
                                       true -> ?CACHE_SERV:commit_specula(TxId, Partitions, CommitTime)
                     end; 
                 {rep, S} ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions});
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, IfWaited});
                 S ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions})
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, no_wait})
             end end,  Replicas) end,
             NodeParts).
 
-repl_abort([], _, _, _) ->
+repl_abort(UpdatedParts, TxId, ToCache, RepDict) -> 
+    repl_abort(UpdatedParts, TxId, ToCache, RepDict, no_wait). 
+
+repl_abort([], _, _, _, _) ->
     ok;
-repl_abort(UpdatedParts, TxId, ToCache, RepDict) ->
+repl_abort(UpdatedParts, TxId, ToCache, RepDict, IfWaited) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
@@ -321,11 +329,8 @@ repl_abort(UpdatedParts, TxId, ToCache, RepDict) ->
                                         true -> ?CACHE_SERV:abort_specula(TxId, Partitions) 
                          end;
                 {rep, S} ->
-                    case ToCache of true -> %%% Means we are doing speculation!
-                        gen_server:cast({global, S}, {repl_abort, TxId, Partitions, specula});
-                        _ -> gen_server:cast({global, S}, {repl_abort, TxId, Partitions, nospecula})
-                    end;
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, IfWaited});
                 S ->
-                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, nospecula})
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, no_wait})
             end end,  Replicas) end,
             NodeParts).
