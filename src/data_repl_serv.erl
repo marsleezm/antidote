@@ -272,6 +272,8 @@ handle_call({get_ts, TxId, Partition, WriteSet}, _Sender, SD0=#state{pending_log
                                 %lager:info("LastReader ts is ~p", [LastReaderTS]),
                                 max(ToPrepTS, LastReaderTS+1)
                         end end, 0, WriteSet),
+            %% Leave a tag here so that a prepare message arrive in-between will not reply more (which causes prepare to go negative)
+            ets:insert(PendingLog, {{TxId, Partition}, ignore}),
             lager:warning("~w ~w got ts", [TxId, Partition]),
             {reply, MaxTs, SD0};
         _ ->
