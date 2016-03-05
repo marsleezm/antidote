@@ -393,12 +393,12 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
         prepared ->
             case dict:find(TxId, CurrentDict) of
                 {ok, aborted} ->
-                   %lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                   lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 error ->
                     case dict:find(TxId, BackupDict) of
                         {ok, aborted} ->
-                           %lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                           lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         error ->
                             lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
@@ -448,12 +448,12 @@ handle_cast({repl_abort, TxId, Partitions},
     CurrentDict1 = lists:foldl(fun(Partition, S) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
-                         %lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
+                         lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
                         ets:delete(PendingLog, {TxId, Partition}),
                         _MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
                         S;
                     [] ->
-                       %lager:warning("Repl abort arrived early! ~w", [TxId]),
+                       lager:warning("Repl abort arrived early! ~w", [TxId]),
                         dict:store(TxId, aborted, S)
                 end
         end, CurrentDict, Partitions),
