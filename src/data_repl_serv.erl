@@ -272,8 +272,10 @@ handle_call({get_ts, TxId, Partition, WriteSet}, _Sender, SD0=#state{pending_log
                                 %lager:info("LastReader ts is ~p", [LastReaderTS]),
                                 max(ToPrepTS, LastReaderTS+1)
                         end end, 0, WriteSet),
+            lager:warning("~w ~w got ts", [TxId, Partition]),
             {reply, MaxTs, SD0};
         _ ->
+            lager:warning("~w ~w prepared already", [TxId, Partition]),
             {reply, exist, SD0}
     end;
 
@@ -387,7 +389,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, current_dict=CurrentDict, backup_dict=BackupDict}) ->
     case Type of
         prepared ->
-              %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
+              lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
             case dict:find(TxId, CurrentDict) of 
                 {ok, aborted} ->
                     %lager:warning("~w, ~w aborted already", [TxId, Partition]),
@@ -420,11 +422,11 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                                                         true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]})
                                     end end,  WriteSet),
 
-                                    %lager:warning("Got repl prepare for ~w and propoes ~p", [TxId, ToPrepTS]),
+                                    lager:warning("Got repl prepare for ~w and propoes ~p", [TxId, ToPrepTS]),
                                     ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
                                     gen_server:cast(Sender, {prepared, TxId, ToPrepTS});
                                 _ ->
-                                    %lager:warning("Not replying for ~w, ~w because already prepard", [TxId, Partition]),
+                                    lager:warning("Not replying for ~w, ~w because already prepard", [TxId, Partition]),
                                     ok
                             end,
                             {noreply, SD0}
