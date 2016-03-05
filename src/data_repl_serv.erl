@@ -393,29 +393,34 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                            %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         error ->
-                            {KeySet, ToPrepTS} =   lists:foldl(fun({Key, _Value}, {KS, Ts}) ->
-                                                        case ets:lookup(PendingLog, Key) of
-                                                            [] -> {[Key|KS], Ts};
-                                                            [{Key, [{_PrepTxId, _, LastReaderTS, _, _}|_Rest]}] ->
-                                                                %lager:warning("For ~p, last read ts is ~w by ~w", [Key, LastReaderTS, PrepTxId]),
-                                                                {[Key|KS], max(Ts, LastReaderTS+1)};
-                                                            [{Key, LastReaderTS}] ->%lager:warning("LastReaderTS is ~w, Ts is ~w", [LastReaderTS, Ts]), 
-                                                                %lager:warning("For ~p, last reader ts is ~w", [Key, LastReaderTS]),
-                                                                {[Key|KS], max(Ts, LastReaderTS+1)}
-                                                        end end, {[], TimeStamp}, WriteSet),
-                            lists:foreach(fun({Key, Value}) ->
-                                        case ets:lookup(PendingLog, Key) of
-                                            [] ->
-                                                true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]});
-                                            [{Key, [{PrepTxId, PrepTS, _LastReaderTS, PrepValue, Reader}|RemainList]}] ->
-                                                true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}|[{PrepTxId, PrepTS, PrepValue, Reader}|RemainList]]});
-                                            [{Key, _}] ->
-                                                true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]})
-                            end end,  WriteSet),
+                            case ets:lookup(PendingLog, {TxId, Partition}) of
+                                [] ->
+                                    {KeySet, ToPrepTS} =   lists:foldl(fun({Key, _Value}, {KS, Ts}) ->
+                                                                case ets:lookup(PendingLog, Key) of
+                                                                    [] -> {[Key|KS], Ts};
+                                                                    [{Key, [{_PrepTxId, _, LastReaderTS, _, _}|_Rest]}] ->
+                                                                        %lager:warning("For ~p, last read ts is ~w by ~w", [Key, LastReaderTS, PrepTxId]),
+                                                                        {[Key|KS], max(Ts, LastReaderTS+1)};
+                                                                    [{Key, LastReaderTS}] ->%lager:warning("LastReaderTS is ~w, Ts is ~w", [LastReaderTS, Ts]), 
+                                                                        %lager:warning("For ~p, last reader ts is ~w", [Key, LastReaderTS]),
+                                                                        {[Key|KS], max(Ts, LastReaderTS+1)}
+                                                                end end, {[], TimeStamp}, WriteSet),
+                                    lists:foreach(fun({Key, Value}) ->
+                                                case ets:lookup(PendingLog, Key) of
+                                                    [] ->
+                                                        true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]});
+                                                    [{Key, [{PrepTxId, PrepTS, _LastReaderTS, PrepValue, Reader}|RemainList]}] ->
+                                                        true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}|[{PrepTxId, PrepTS, PrepValue, Reader}|RemainList]]});
+                                                    [{Key, _}] ->
+                                                        true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]})
+                                    end end,  WriteSet),
 
-                            lager:warning("Got repl prepare for ~w and propoes ~p", [TxId, ToPrepTS]),
-                            ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
-                            gen_server:cast(Sender, {prepared, TxId, ToPrepTS}), 
+                                    lager:warning("Got repl prepare for ~w and propoes ~p", [TxId, ToPrepTS]),
+                                    ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
+                                    gen_server:cast(Sender, {prepared, TxId, ToPrepTS});
+                                _ ->
+                                    ok
+                            end,
                             {noreply, SD0}
                     end
             end;
