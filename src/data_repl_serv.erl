@@ -57,7 +57,7 @@
         append_values/3,
         get_table/1,
 	    check_key/2,
-        get_ts/2,
+        get_ts/4,
         clean_data/2,
 	    check_table/1,
         verify_table/2,
@@ -104,8 +104,8 @@ read(Name, Key, TxId, Part) ->
 get_table(Name) ->
     gen_server:call({global, Name}, {get_table}, ?READ_TIMEOUT).
 
-get_ts(Name, WriteSet) ->
-    gen_server:call({global, Name}, {get_ts, WriteSet}, ?READ_TIMEOUT).
+get_ts(Name, TxId, Partition, WriteSet) ->
+    gen_server:call({global, Name}, {get_ts, TxId, Partition, WriteSet}, ?READ_TIMEOUT).
 
 single_read(Name, Key) ->
     TxId = tx_utilities:create_tx_id(0),
