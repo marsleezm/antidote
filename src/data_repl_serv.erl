@@ -442,7 +442,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
     %  end;
 
-handle_cast({repl_abort, TxId, Partitions}, 
+handle_cast({repl_abort, TxId, Partitions, IfSpecula}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict, set_size=SetSize}) ->
     lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     CurrentDict1 = lists:foldl(fun(Partition, S) ->
@@ -457,16 +457,21 @@ handle_cast({repl_abort, TxId, Partitions},
                         dict:store(TxId, aborted, S)
                 end
         end, CurrentDict, Partitions),
+    %%% This needs to be stored because a prepare request may come twice: once from specula_prep and once 
+    %%  from tx coord
+    CurrentDict2 = case IfSpecula of true -> dict:store(TxId, aborted, CurrentDict1);
+                                     false -> CurrentDict1 
+                   end,
     case DoSpecula of
         true -> specula_utilities:deal_abort_deps(TxId);
         _ -> ok
     end,
-    case dict:size(CurrentDict1) > SetSize of
+    case dict:size(CurrentDict2) > SetSize of
         true ->
            %lager:warning("Current set is too large!"),
-            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict1}};
+            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict2}};
         false ->
-            {noreply, SD0#state{current_dict=CurrentDict1}}
+            {noreply, SD0#state{current_dict=CurrentDict2}}
     end;
 
 handle_cast(_Info, StateData) ->

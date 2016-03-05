@@ -321,8 +321,11 @@ repl_abort(UpdatedParts, TxId, ToCache, RepDict) ->
                                         true -> ?CACHE_SERV:abort_specula(TxId, Partitions) 
                          end;
                 {rep, S} ->
-                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions});
+                    case ToCache of true -> %%% Means we are doing speculation!
+                        gen_server:cast({global, S}, {repl_abort, TxId, Partitions, specula});
+                        _ -> gen_server:cast({global, S}, {repl_abort, TxId, Partitions, nospecula})
+                    end;
                 S ->
-                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions})
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, nospecula})
             end end,  Replicas) end,
             NodeParts).
