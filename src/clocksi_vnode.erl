@@ -419,7 +419,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
     case Result of
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
-            lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
+           %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
             case IfReplicate of
                 true ->
                     case Debug of
@@ -682,7 +682,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTime)->
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
 		    {ok, PrepareTime};
         {N, PrepareTime} ->
-           lager:warning("~w passed but has ~w deps, prepare with ~w", [TxId, N, PrepareTime]),
+          %lager:warning("~w passed but has ~w deps, prepare with ~w", [TxId, N, PrepareTime]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             lists:foreach(fun({K, V}) ->
                           case ets:lookup(PreparedTxs, K) of
@@ -864,7 +864,7 @@ certification_check(PrepareTime, TxId, [Key|T], CommittedTxs, PreparedTxs, NumBl
         [{Key, CommitTime}] ->
             case CommitTime > SnapshotTime of
                 true ->
-                    lager:warning("False for committed key ~p, Snapshot is ~w, diff with commit ~w", [Key, TxId#tx_id.snapshot_time, CommitTime-TxId#tx_id.snapshot_time]),
+                   %lager:warning("False for committed key ~p, Snapshot is ~w, diff with commit ~w", [Key, TxId#tx_id.snapshot_time, CommitTime-TxId#tx_id.snapshot_time]),
                     false;
                 false ->
                     case check_prepared(whatever, TxId, PreparedTxs, Key, whatever) of
@@ -883,7 +883,7 @@ certification_check(PrepareTime, TxId, [Key|T], CommittedTxs, PreparedTxs, NumBl
                 {wait, NewPrepTime} ->
                     certification_check(max(NewPrepTime, PrepareTime), TxId, T, CommittedTxs, PreparedTxs, NumBlocked+1);
                 false -> 
-                    lager:warning("~w: False of prepared for ~p", [TxId, Key]),
+                   %lager:warning("~w: False of prepared for ~p", [TxId, Key]),
                     false
             end
     end.
@@ -894,14 +894,14 @@ check_prepared(_, TxId, PreparedTxs, Key, _Value) ->
         [] ->
             %ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, PPTime, Value, []}]}),
             {true, 1};
-        [{Key, [{PrepTxId, PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|PWaiter]}] ->
+        [{Key, [{_PrepTxId, _PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|_PWaiter]}] ->
             case LastPPTime > SnapshotTime of
                 true ->
-                    lager:warning("~w fail LastPPTime is ~w, last reader time is ~w", [TxId, LastPPTime, LastReaderTime]),
+                   %lager:warning("~w fail LastPPTime is ~w, last reader time is ~w", [TxId, LastPPTime, LastReaderTime]),
                     false;
                 false ->
                     %ToPrepTime = max(LastReaderTime+1, PPTime),
-                     lager:warning("~p: ~w waits for ~w with ~w, which is ~p", [Key, TxId, PrepTxId, PrepareTime, PWaiter]),
+                    %lager:warning("~p: ~w waits for ~w with ~w, which is ~p", [Key, TxId, PrepTxId, PrepareTime, PWaiter]),
                     %ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, ToPrepTime, PPTime, PrepValue, RWaiter}|
                     %         (PWaiter++[{TxId, ToPrepTime, Value}])]}),
                     {wait, LastReaderTime+1}
