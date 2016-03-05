@@ -393,18 +393,20 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, abort_ts=TsDict}) ->
     case Type of
         prepared ->
-              lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
             case dict:find(TxId#tx_id.server_pid, TsDict) of 
                 {ok, Time} ->
                     case Time >= TxId#tx_id.snapshot_time of
                         true -> %% Aborted already
+                            lager:warning("Repl prepare for ~w, ~w aborted already!!!", [TxId, Partition]),
                             {noreply, SD0};
                         false ->
+                            lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
                             insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender),
                             {noreply, SD0}
                     end;
                     %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                 error ->
+                    lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
                     insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender),
                     {noreply, SD0}
             end;
@@ -447,17 +449,18 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, do_specula=DoSpecula, abort_ts=TsDict}) ->
     lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
-    TsDict1 = lists:foldl(fun(Partition, S) ->
+    lists:foreach(fun(Partition) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
                         %lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
                         ets:delete(PendingLog, {TxId, Partition}),
-                        _MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
-                        S;
+                        _MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0);
                     [] -> 
-                        dict:store(TxId#tx_id.server_pid, TxId#tx_id.snapshot_time, S)
+                        lager:warning("repl abort not there!"),
+                        ok
                 end
-        end, TsDict, Partitions),
+    end, Partitions),
+    TsDict1 = dict:store(TxId#tx_id.server_pid, TxId#tx_id.snapshot_time, TsDict),
     case DoSpecula of
         true -> specula_utilities:deal_abort_deps(TxId);
         _ -> ok
