@@ -952,7 +952,7 @@ add_to_table(WriteSet, TxId, PrepareTime, RepDict) ->
                         _ ->
                             {ToDelete, GotTS}
                     end end, {[], PrepareTime}, WriteSet),
-    NewWriteSet = WriteSet - Repled, 
+    NewWriteSet = WriteSet -- Repled, 
     specula_prepare(NewWriteSet, TxId, ProposeTS, RepDict, 0).
 
 specula_prepare([], _, PrepareTime, _, NumParts) ->
