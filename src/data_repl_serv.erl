@@ -419,6 +419,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                                     ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
                                     gen_server:cast(Sender, {prepared, TxId, ToPrepTS});
                                 _ ->
+                                    lager:warning("Not replying for ~w, ~w because already prepard", [TxId, Partition]),
                                     ok
                             end,
                             {noreply, SD0}
