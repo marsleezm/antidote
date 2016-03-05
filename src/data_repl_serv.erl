@@ -338,7 +338,7 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, ToPrepTS},
                               [Key|KS]
                       end end, [], WriteSet),
     ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
-   %lager:warning("Specula prepare for [~w, ~w, KeySet is ~p]", [TxId, Partition, KeySet]),
+    lager:warning("Specula prepare for [~w, ~w]", [TxId, Partition]),
     {noreply, SD0};
 
 handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pending_log=OldPendingLog}) ->
@@ -442,6 +442,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 
 handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, do_specula=DoSpecula}) ->
+    lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
     lists:foreach(fun(Partition) ->
                     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
                     ets:delete(PendingLog, {TxId, Partition}),
@@ -461,7 +462,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict}) ->
-   %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
+    lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     CurrentDict1 = lists:foldl(fun(Partition, S) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
