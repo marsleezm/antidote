@@ -87,7 +87,6 @@
         backup_dict :: dict(),
         %ts_dict :: dict(),
         do_specula :: boolean(),
-        abort_ts :: dict(),
         name :: atom(),
 		self :: atom()}).
 
@@ -165,14 +164,13 @@ init([Name, _Parts]) ->
     DoSpecula = antidote_config:get(do_specula),
     Concurrent = antidote_config:get(concurrent),
     SpeculaLength = antidote_config:get(specula_length),
-    AbortTs = dict:new(),
     %TsDict = lists:foldl(fun(Part, Acc) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent*SpeculaLength div 3, 80),
+    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent*SpeculaLength div 2, 100),
                 pending_log = PendingLog, current_dict = dict:new(), do_specula=DoSpecula,
-                abort_ts=AbortTs, backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
+                backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
 handle_call({get_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
     {reply, ReplicatedLog, SD0};
@@ -390,25 +388,23 @@ handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pe
 %    {noreply, SD0#state{ts_dict=TsDict1}};
 
 handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender}, 
-	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, abort_ts=TsDict}) ->
+	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, current_dict=CurrentDict, backup_dict=BackupDict}) ->
     case Type of
         prepared ->
-            case dict:find(TxId#tx_id.server_pid, TsDict) of 
-                {ok, Time} ->
-                    case Time >= TxId#tx_id.snapshot_time of
-                        true -> %% Aborted already
-                            lager:warning("Repl prepare for ~w, ~w aborted already!!!", [TxId, Partition]),
+            case dict:find(TxId, CurrentDict) of
+                {ok, aborted} ->
+                   %lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                    {noreply, SD0};
+                error ->
+                    case dict:find(TxId, BackupDict) of
+                        {ok, aborted} ->
+                           %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
-                        false ->
+                        error ->
                             lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
                             insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender),
                             {noreply, SD0}
-                    end;
-                    %lager:warning("~w, ~w aborted already", [TxId, Partition]),
-                error ->
-                    lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
-                    insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender),
-                    {noreply, SD0}
+                    end
             end;
         single_commit ->
             AppendFun = fun({Key, Value}) ->
@@ -447,32 +443,31 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
     %  end;
 
 handle_cast({repl_abort, TxId, Partitions}, 
-	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, do_specula=DoSpecula, abort_ts=TsDict}) ->
+	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict, set_size=SetSize}) ->
     lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
-    lists:foreach(fun(Partition) ->
+    CurrentDict1 = lists:foldl(fun(Partition, S) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
-                        %lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
+                         %lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
                         ets:delete(PendingLog, {TxId, Partition}),
-                        _MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0);
-                    [] -> 
-                        lager:warning("repl abort not there!"),
-                        ok
+                        _MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
+                        S;
+                    [] ->
+                       %lager:warning("Repl abort arrived early! ~w", [TxId]),
+                        dict:store(TxId, aborted, S)
                 end
-    end, Partitions),
-    TsDict1 = dict:store(TxId#tx_id.server_pid, TxId#tx_id.snapshot_time, TsDict),
+        end, CurrentDict, Partitions),
     case DoSpecula of
         true -> specula_utilities:deal_abort_deps(TxId);
         _ -> ok
     end,
-    {noreply, SD0#state{abort_ts=TsDict1}};
-    %case dict:size(CurrentDict1) > SetSize of
-    %    true ->
-    %        %lager:warning("Current set is too large!"),
-    %        {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict1}};
-    %    false ->
-    %        {noreply, SD0#state{current_dict=CurrentDict1}}
-    %end;
+    case dict:size(CurrentDict1) > SetSize of
+        true ->
+           %lager:warning("Current set is too large!"),
+            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict1}};
+        false ->
+            {noreply, SD0#state{current_dict=CurrentDict1}}
+    end;
 
 handle_cast(_Info, StateData) ->
     {noreply,StateData}.
