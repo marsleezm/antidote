@@ -688,7 +688,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
         dep_dict=DepDict, pending_list=PendingList, cascade_aborted=CascadAborted, stage=Stage,
         rep_dict=RepDict, local_updates=LocalParts, remote_updates=RemoteUpdates, pending_txs=PendingTxs,
         invalid_ts=InvalidTS, read_invalid=ReadInvalid}) ->
-    lager:warning("Got read invalid for ~w", [TxId]),
+    %lager:warning("Got read invalid for ~w", [TxId]),
     {RAD1, RID1} = case Type of read_aborted -> {ReadAborted+1, ReadInvalid};
                                 read_invalid -> {ReadAborted, ReadInvalid+1}
                    end,
@@ -783,7 +783,7 @@ decide_after_cascade(PendingList, DepDict, NumAborted, TxId, Stage) ->
                         end;
                 false ->
                     case dict:find(TxId, DepDict) of %% TODO: should give a invalid_ts 
-                        error -> lager:warning("Abort due to read dep"),
+                        error -> %lager:warning("Abort due to read dep"),
                                  case Stage of read -> invalid;
                                              local_cert -> {abort_local, 0, 1};
                                              remote_cert -> {abort_remote, 0, 1}
@@ -862,7 +862,7 @@ commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs) ->
 
 abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
     [{TxId, {LocalParts, RemoteParts, LP, RP, TxnType, IfWaited}}] = ets:lookup(PendingTxs, TxId),
-      lager:warning("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
+      %lager:warning("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
       ets:delete(PendingTxs, TxId),
       %%%%%%%%% Time stat %%%%%%%%%%%
       LPDiff = get_time_diff(LP, RP),
@@ -879,7 +879,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
                                     Self ->
                                         ok;
                                     _ ->
-                                        lager:warning("~w is not my own, read invalid", [DepTxId]),
+                                        %lager:warning("~w is not my own, read invalid", [DepTxId]),
                                         ?READ_ABORTED(TxServer, -1, DepTxId)
                                 end
                        end, DepList),
@@ -891,7 +891,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
 
 abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
     [{TxId, {LocalParts, RemoteParts, LP, RP, TxnType, IfWaited}}] = ets:lookup(PendingTxs, TxId), 
-    lager:warning("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
+    %lager:warning("Trying to abort specula ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     ets:delete(PendingTxs, TxId),
     DepList = ets:lookup(dependency, TxId),
     %lager:warning("~w: My read dependncy are ~w", [TxId, DepList]),
@@ -903,7 +903,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
                                   Self ->
                                       ok;
                                   _ ->
-                                        lager:warning("~w is not my own, read invalid", [DepTxId]),
+                                        %lager:warning("~w is not my own, read invalid", [DepTxId]),
                                       ?READ_ABORTED(TxServer, -1, DepTxId)
                               end
                      end, DepList),
