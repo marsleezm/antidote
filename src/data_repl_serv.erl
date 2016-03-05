@@ -413,7 +413,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                                                 true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]})
                             end end,  WriteSet),
 
-                           %lager:warning("Got repl prepare for ~w and propoes ~p", [TxId, ToPrepTS]),
+                            lager:warning("Got repl prepare for ~w and propoes ~p", [TxId, ToPrepTS]),
                             ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
                             gen_server:cast(Sender, {prepared, TxId, ToPrepTS}), 
                             {noreply, SD0}
@@ -691,6 +691,7 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
     end.
 
 specula_read(TxId, Key, PreparedTxs, Sender) ->
+    lager:warning("~w reading ~w", [TxId, Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
