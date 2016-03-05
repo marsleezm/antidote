@@ -682,7 +682,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTime)->
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
 		    {ok, PrepareTime};
         {N, PrepareTime} ->
-           %lager:warning("~w passed but has ~w deps, prepare with ~w", [TxId, N, PrepareTime]),
+           lager:warning("~w passed but has ~w deps, prepare with ~w", [TxId, N, PrepareTime]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             lists:foreach(fun({K, V}) ->
                           case ets:lookup(PreparedTxs, K) of
@@ -894,14 +894,14 @@ check_prepared(_, TxId, PreparedTxs, Key, _Value) ->
         [] ->
             %ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, PPTime, Value, []}]}),
             {true, 1};
-        [{Key, [{_PrepTxId, _PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|_PWaiter]}] ->
+        [{Key, [{PrepTxId, PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|PWaiter]}] ->
             case LastPPTime > SnapshotTime of
                 true ->
                   %lager:warning("~w fail LastPPTime is ~w, last reader time is ~w", [TxId, LastPPTime, LastReaderTime]),
                     false;
                 false ->
                     %ToPrepTime = max(LastReaderTime+1, PPTime),
-                     %lager:warning("~p: ~w waits for ~w with ~w, which is ~p", [Key, TxId, PrepTxId, PrepareTime, PWaiter]),
+                     lager:warning("~p: ~w waits for ~w with ~w, which is ~p", [Key, TxId, PrepTxId, PrepareTime, PWaiter]),
                     %ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, ToPrepTime, PPTime, PrepValue, RWaiter}|
                     %         (PWaiter++[{TxId, ToPrepTime, Value}])]}),
                     {wait, LastReaderTime+1}

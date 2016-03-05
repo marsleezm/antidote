@@ -771,7 +771,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
     end.
 
 decide_after_cascade(PendingList, DepDict, NumAborted, TxId, Stage) ->
-   lager:warning("PendingList ~w, DepDict ~w, NumAborted ~w, TxId ~w, Stage ~w", [PendingList, DepDict, NumAborted, TxId, Stage]),
+   %lager:warning("PendingList ~w, DepDict ~w, NumAborted ~w, TxId ~w, Stage ~w", [PendingList, DepDict, NumAborted, TxId, Stage]),
     case TxId of
         ?NO_TXN -> wait;
         _ -> 
