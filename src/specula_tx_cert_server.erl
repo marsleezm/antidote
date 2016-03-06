@@ -277,7 +277,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=
                                     DepDict1 = dict:update(TxId, 
                                          fun({_, B, _}) ->   lager:warning("Previous readdep is ~w", [B]),
                                             {TotalReplFactor*length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1} end, DepDict),
-                                    {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, local_updates=[], lp_start=Now, rp_start=Now, num_specula_read=NumSpeculaRead1, remote_updates=RemoteUpdates, sender=Sender, stage=remote_cert}};
+                                    {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, local_updates=[], lp_start=Now, rp_start=Now, num_specula_read=NumSpeculaRead1, remote_updates=RemoteUpdates, sender=Sender, stage=remote_cert, txn_type=TxnType}};
                                 false -> %% Can speculate. After replying, removing TxId
                                       lager:warning("Speculating directly for ~w", [TxId]),
                                     %% Update specula data structure, and clean the txid so we know current txn is already replied
@@ -292,7 +292,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=
                                             {TotalReplFactor*length(RemotePartitions)-AvoidNum, ReadDepTxs--B, LastCommitTs+1} end, DepDict),
                                     ets:insert(PendingTxs, {TxId, {[], RemotePartitions, Now, Now, TxnType, no_wait}}),
                                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, min_snapshot_ts=ProposeTS,
-                                            pending_list=PendingList1, num_specula_read=NumSpeculaRead1}}
+                                            pending_list=PendingList1, num_specula_read=NumSpeculaRead1, txn_type=TxnType}}
                             end
                         end;
                 _ ->
