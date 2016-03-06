@@ -274,16 +274,16 @@ handle_call({get_ts, TxId, Partition, WriteSet}, _Sender, SD0=#state{pending_log
                         end end, 0, WriteSet),
             %% Leave a tag here so that a prepare message arrive in-between will not reply more (which causes prepare to go negative)
             ets:insert(PendingLog, {{TxId, Partition}, ignore}),
-            lager:warning("~w ~w got ts", [TxId, Partition]),
+           %lager:warning("~w ~w got ts", [TxId, Partition]),
             {reply, MaxTs, SD0};
         _ ->
-            lager:warning("~w ~w prepared already", [TxId, Partition]),
+           %lager:warning("~w ~w prepared already", [TxId, Partition]),
             {reply, exist, SD0}
     end;
 
 handle_call({if_prepared, TxId, Keys}, _Sender, SD0=#state{pending_log=PendingLog}) ->
     Result = lists:all(fun(Key) ->
-                      lager:warning("Check ~w for ~w", [Key, TxId]),
+                     %lager:warning("Check ~w for ~w", [Key, TxId]),
                     case ets:lookup(PendingLog, Key) of
                         [{Key, [{TxId, _, _,  _, _}|_Rest]}] -> lager:info("Check ok"),
                                 true;
@@ -318,16 +318,16 @@ handle_call({go_down},_Sender,SD0) ->
 
 handle_cast({relay_read, Key, TxId, Reader}, 
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
-      lager:warning("~w, ~p data repl read", [TxId, Key]),
+     %lager:warning("~w, ~p data repl read", [TxId, Key]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
-              lager:warning("Nothing for ~p!", [Key]),
+             %lager:warning("Nothing for ~p!", [Key]),
             gen_server:reply(Reader, {ok, []}),
             {noreply, SD0};
         [{Key, ValueList}] ->
             MyClock = TxId#tx_id.snapshot_time,
             Value = find_version(ValueList, MyClock),
-              lager:warning("Got value for ~p", [ValueList, Key]),
+             %lager:warning("Got value for ~p", [ValueList, Key]),
             gen_server:reply(Reader, Value),
             {noreply, SD0}
     end;
@@ -347,7 +347,7 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, ToPrepTS},
                               [Key|KS]
                       end end, [], WriteSet),
     ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
-     lager:warning("Specula prepare for [~w, ~w]", [TxId, Partition]),
+    %lager:warning("Specula prepare for [~w, ~w]", [TxId, Partition]),
     {noreply, SD0};
 
 handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pending_log=OldPendingLog}) ->
@@ -377,7 +377,7 @@ handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pe
     
 %handle_cast({commit_specula, TxId, Partition, CommitTime}, 
 %	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, ts_dict=TsDict}) ->
-%     lager:warning("Committing specula for ~w ~w", [TxId, Partition]),
+%    %lager:warning("Committing specula for ~w ~w", [TxId, Partition]),
     %TsDict1 = lists:foldl(fun(Partition, D) ->
 %              [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}),
 %              ets:delete(PendingLog, {TxId, Partition}),
@@ -393,15 +393,15 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
         prepared ->
             case dict:find(TxId, CurrentDict) of
                 {ok, finished} ->
-                   lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                  %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 error ->
                     case dict:find(TxId, BackupDict) of
                         {ok, finished} ->
-                           lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                          %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         error ->
-                            lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
+                           %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
                             insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender),
                             {noreply, SD0}
                     end
@@ -410,7 +410,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
             AppendFun = fun({Key, Value}) ->
                 case ets:lookup(ReplicatedLog, Key) of
                     [] ->
-                          lager:warning("Data repl inserting ~p, ~p of ~w to table", [Key, Value, TimeStamp]),
+                         %lager:warning("Data repl inserting ~p, ~p of ~w to table", [Key, Value, TimeStamp]),
                         true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value}]});
                     [{Key, ValueList}] ->
                         {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
@@ -424,7 +424,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 
 handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, do_specula=DoSpecula, current_dict=CurrentDict}) ->
-     lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
+    %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
     lists:foreach(fun(Partition) ->
                     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
                     ets:delete(PendingLog, {TxId, Partition}),
@@ -447,16 +447,16 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
 
 handle_cast({repl_abort, TxId, Partitions, IfWaited}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict, set_size=SetSize}) ->
-    lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
+   %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     CurrentDict1 = lists:foldl(fun(Partition, S) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
-                         lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
+                        %lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
                         ets:delete(PendingLog, {TxId, Partition}),
                         _MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
                         S;
                     [] ->
-                       lager:warning("Repl abort arrived early! ~w", [TxId]),
+                      %lager:warning("Repl abort arrived early! ~w", [TxId]),
                         dict:store(TxId, finished, S)
                 end
         end, CurrentDict, Partitions),
@@ -471,7 +471,7 @@ handle_cast({repl_abort, TxId, Partitions, IfWaited},
     end,
     case dict:size(CurrentDict2) > SetSize of
         true ->
-            lager:warning("Current set is too large!"),
+           %lager:warning("Current set is too large!"),
             {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict2}};
         false ->
             {noreply, SD0#state{current_dict=CurrentDict2}}
@@ -607,9 +607,9 @@ clean_abort_prepared(PendingLog, [Key | Rest], TxId, ReplicatedLog, TS) ->
 %append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, [Part|Rest]) ->
 %    case ets:lookup(PendingLog, {TxId, Part}) of
 %        [{{TxId, Part}, {WriteSet, _}}] ->
-%              lager:warning("For ~w ~w found writeset", [TxId, Part, WriteSet]),
+%             %lager:warning("For ~w ~w found writeset", [TxId, Part, WriteSet]),
 %            AppendFun = fun({Key, Value}) ->
-%                              lager:warning("Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
+%                             %lager:warning("Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
 %                            case ets:lookup(ReplicatedLog, Key) of
 %                                [] ->
 %                                    true = ets:insert(ReplicatedLog, {Key, [{CommitTime, Value}]});
@@ -620,7 +620,7 @@ clean_abort_prepared(PendingLog, [Key | Rest], TxId, ReplicatedLog, TS) ->
 %            lists:foreach(AppendFun, WriteSet),
 %            ets:delete(PendingLog, {TxId, Part});
 %        [] ->
-%	     %  lager:warning("Commit ~w ~w arrived early! Committing with ~w", [TxId, Part, CommitTime]),
+%	     % %lager:warning("Commit ~w ~w arrived early! Committing with ~w", [TxId, Part, CommitTime]),
 %	        ets:insert(PendingLog, {{TxId, Part}, CommitTime})
 %    end,
 %    append_by_parts(PendingLog, ReplicatedLog, TxId, CommitTime, Rest). 
@@ -688,7 +688,7 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
     end.
 
 specula_read(TxId, Key, PreparedTxs, Sender) ->
-     lager:warning("~w reading ~w", [TxId, Key]),
+    %lager:warning("~w reading ~w", [TxId, Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
@@ -714,7 +714,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                 false ->
                     case read_or_block(PendingPrepare, [], SnapshotTime, Sender) of
                         ready -> ready;
-                        {specula, PTxId, SpeculaValue} ->  lager:warning("Specula reading ~p, from ~w to ~w", [Key, TxId, PTxId]), 
+                        {specula, PTxId, SpeculaValue} -> %lager:warning("Specula reading ~p, from ~w to ~w", [Key, TxId, PTxId]), 
                             case SnapshotTime > LastReaderTime of
                                 true -> ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, SnapshotTime, Value, [{SnapshotTime, Sender}|PendingReaders]}| PendingPrepare]});
                                 false -> ok
@@ -735,7 +735,7 @@ read_or_block([], _, _SnapshotTime, _) ->
 read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sender) when SnapshotTime >= PrepTime ->
     case prepared_by_local(PTxId) of
         true ->
-              lager:warning("Prepare by local"),
+             %lager:warning("Prepare by local"),
             {specula, PTxId, Value};
         false ->
             case Prev of [] -> {not_ready, [{PTxId, PrepTime, Value, [{SnapshotTime, Sender}|Reader]}|Rest], PTxId};
@@ -746,7 +746,7 @@ read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sende
     read_or_block(Rest, [{PTxId, PrepTime, Value, Reader}|Prev], SnapshotTime, Sender).
 
 add_read_dep(ReaderTx, WriterTx, _Key) ->
-     lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
+    %lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
@@ -778,11 +778,11 @@ insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender) ->
               {KeySet, ToPrepTS} =   lists:foldl(fun({Key, _Value}, {KS, Ts}) ->
                                           case ets:lookup(PendingLog, Key) of
                                               [] -> {[Key|KS], Ts};
-                                              [{Key, [{PrepTxId, _, LastReaderTS, _, _}|_Rest]}] ->
-                                                    lager:warning("For ~p, last read ts is ~w by ~w", [Key, LastReaderTS, PrepTxId]),
+                                              [{Key, [{_PrepTxId, _, LastReaderTS, _, _}|_Rest]}] ->
+                                                   %lager:warning("For ~p, last read ts is ~w by ~w", [Key, LastReaderTS, PrepTxId]),
                                                   {[Key|KS], max(Ts, LastReaderTS+1)};
-                                              [{Key, LastReaderTS}] ->  lager:warning("LastReaderTS is ~w, Ts is ~w", [  LastReaderTS, Ts]), 
-                                                    lager:warning("For ~p, last reader ts is ~w", [Key, LastReaderTS]),
+                                              [{Key, LastReaderTS}] -> %lager:warning("LastReaderTS is ~w, Ts is ~w", [  LastReaderTS, Ts]), 
+                                                   %lager:warning("For ~p, last reader ts is ~w", [Key, LastReaderTS]),
                                                   {[Key|KS], max(Ts, LastReaderTS+1)}
                                           end end, {[], TimeStamp}, WriteSet),
               lists:foreach(fun({Key, Value}) ->
@@ -795,10 +795,10 @@ insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender) ->
                                   true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]})
               end end,  WriteSet),
 
-              lager:warning("Got repl prepare for ~w and propoes ~p", [TxId, ToPrepTS]),
+             %lager:warning("Got repl prepare for ~w and propoes ~p", [TxId, ToPrepTS]),
               ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
               gen_server:cast(Sender, {prepared, TxId, ToPrepTS});
           _ ->
-              lager:warning("Not replying for ~w, ~w because already prepard", [TxId, Partition]),
+             %lager:warning("Not replying for ~w, ~w because already prepard", [TxId, Partition]),
               ok
       end.
