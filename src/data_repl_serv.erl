@@ -86,7 +86,6 @@
         current_dict :: dict(),
         backup_dict :: dict(),
         %ts_dict :: dict(),
-        do_specula :: boolean(),
         specula_read :: boolean(),
         name :: atom(),
 		self :: atom()}).
@@ -427,14 +426,14 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 
 
 handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited}, 
-	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, do_specula=DoSpecula, current_dict=CurrentDict}) ->
+	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, specula_read=SpeculaRead, current_dict=CurrentDict}) ->
     %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
     lists:foreach(fun(Partition) ->
                     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
                     ets:delete(PendingLog, {TxId, Partition}),
                     update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog)
         end, Partitions),
-    case DoSpecula of
+    case SpeculaRead of
         true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
         _ -> ok
     end,
@@ -450,7 +449,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
     %  end;
 
 handle_cast({repl_abort, TxId, Partitions, IfWaited}, 
-	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict, set_size=SetSize}) ->
+	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, specula_read=SpeculaRead, current_dict=CurrentDict, set_size=SetSize}) ->
    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     CurrentDict1 = lists:foldl(fun(Partition, S) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
@@ -469,7 +468,7 @@ handle_cast({repl_abort, TxId, Partitions, IfWaited},
     CurrentDict2 = case IfWaited of waited -> dict:store(TxId, finished, CurrentDict1);
                                     no_wait -> CurrentDict1 
                    end,
-    case DoSpecula of
+    case SpeculaRead of
         true -> specula_utilities:deal_abort_deps(TxId);
         _ -> ok
     end,
