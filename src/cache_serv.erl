@@ -60,7 +60,7 @@
 -record(state, {
         cache_log :: cache_id(),
         delay :: non_neg_integer(),
-        do_specula :: boolean(),
+        specula_read :: boolean(),
         num_specula_read :: non_neg_integer(),
         num_attempt_read :: non_neg_integer(),
 		self :: atom()}).
@@ -104,8 +104,11 @@ commit_specula(TxId, Partition, CommitTime) ->
 init([]) ->
     lager:info("Cache server inited"),
     CacheLog = tx_utilities:open_private_table(cache_log),
-    DoSpecula = antidote_config:get(do_specula),
-    {ok, #state{do_specula = DoSpecula,
+    SpeculaRead = case antidote_config:get(specula_read) of
+                    specula -> true;
+                    nospecula -> false
+                end,
+    {ok, #state{specula_read = SpeculaRead,
                 cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}}.
 
 handle_call({num_specula_read}, _Sender, 
@@ -116,7 +119,7 @@ handle_call({get_pid}, _Sender, SD0) ->
         {reply, self(), SD0};
 
 handle_call({read, Key, TxId, Node}, Sender, 
-	    SD0=#state{do_specula=false}) ->
+	    SD0=#state{specula_read=false}) ->
     ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
     {noreply, SD0};
 
@@ -126,7 +129,7 @@ handle_call({clean_data}, _Sender, SD0=#state{cache_log=OldCacheLog}) ->
     {reply, ok, SD0#state{cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}};
 
 handle_call({read, Key, TxId, Node}, Sender, 
-	    SD0=#state{cache_log=CacheLog, do_specula=true
+	    SD0=#state{cache_log=CacheLog, specula_read=true
             }) ->
     %lager:warning("Cache read ~w of ~w", [Key, TxId]), 
     case ets:lookup(CacheLog, Key) of
@@ -143,7 +146,7 @@ handle_call({read, Key, TxId, Node}, Sender,
                 {SpeculaTxId, Value} ->
                     ets:insert(dependency, {SpeculaTxId, TxId}),         
                     ets:insert(anti_dep, {TxId, SpeculaTxId}),        
-                    lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
+                    %lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
                     {reply, {ok, Value}, SD0};
                 [] ->

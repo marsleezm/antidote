@@ -87,6 +87,7 @@
         backup_dict :: dict(),
         %ts_dict :: dict(),
         do_specula :: boolean(),
+        specula_read :: boolean(),
         name :: atom(),
 		self :: atom()}).
 
@@ -161,15 +162,18 @@ init([Name, _Parts]) ->
     ReplicatedLog = tx_utilities:open_public_table(repl_log),
     PendingLog = tx_utilities:open_private_table(pending_log),
     NumPartitions = length(hash_fun:get_partitions()),
-    DoSpecula = antidote_config:get(do_specula),
+    SpeculaRead = case antidote_config:get(specula_read) of
+                        specula -> true; 
+                        nospecula -> false
+                  end,
     Concurrent = antidote_config:get(concurrent),
     SpeculaLength = antidote_config:get(specula_length),
     %TsDict = lists:foldl(fun(Part, Acc) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent*SpeculaLength, 150),
-                pending_log = PendingLog, current_dict = dict:new(), do_specula=DoSpecula,
+    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent*SpeculaLength, 150), specula_read=SpeculaRead,
+                pending_log = PendingLog, current_dict = dict:new(), 
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
 handle_call({get_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
@@ -224,8 +228,8 @@ handle_call({append_values, KeyValues, CommitTime}, _Sender, SD0=#state{replicat
 
 handle_call({read, Key, TxId, {_Part, _}}, Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog,
-                do_specula=DoSpecula}) ->
-    case DoSpecula of
+                specula_read=SpeculaRead}) ->
+    case SpeculaRead of
         false ->
             case ready_or_block(TxId, Key, PendingLog, Sender) of
                 not_ready->
