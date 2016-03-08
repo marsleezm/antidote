@@ -238,6 +238,7 @@ handle_call({read, Key, TxId, {_Part, _}}, Sender,
                     {reply, Result, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
+            %lager:warning("Doing specula read!!!"),
             case specula_read(TxId, Key, PendingLog, Sender) of
                 not_ready->
                     {noreply, SD0};

@@ -387,6 +387,7 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{
                     {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         specula ->
+            %lager:warning("Specula read!!"),
             case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
                 not_ready->
                     {noreply, SD0};

@@ -131,7 +131,7 @@ handle_call({clean_data}, _Sender, SD0=#state{cache_log=OldCacheLog}) ->
 handle_call({read, Key, TxId, Node}, Sender, 
 	    SD0=#state{cache_log=CacheLog, specula_read=true
             }) ->
-    %lager:warning("Cache read ~w of ~w", [Key, TxId]), 
+    %lager:warning("Cache specula read ~w of ~w", [Key, TxId]), 
     case ets:lookup(CacheLog, Key) of
         [] ->
             %lager:info("Relaying read to ~w", [Node]),
