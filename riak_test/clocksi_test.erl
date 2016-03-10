@@ -149,6 +149,7 @@ clocksi_test3(Nodes, PartList) ->
     rpc:call(Node1, clocksi_vnode, commit, [[Part1, Part2], TxId2, SnapshotTime3+1]),
     receive
         Msg5 ->
+            lager:warning("Received aborted for ~w, Msg is ~w", [TxId3, Msg5]),
             ?assertMatch({aborted, TxId3, _}, parse_msg(Msg5))
     end,
 

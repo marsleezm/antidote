@@ -174,7 +174,7 @@ handle_cast({prepared, TxId, PrepareTime},
                         0 ->
                             CommitTime = max(PrepareTime, OldPrepTime),
                             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
-                            repl_fsm:repl_commit(LocalParts, TxId, CommitTime, true, false, RepDict),
+                            repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
                             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
                             {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
                         _ ->
@@ -195,13 +195,18 @@ handle_cast({prepared, _OtherTxId, _},
       %lager:info("Received prepare of previous prepared txn! ~w", [OtherTxId]),
     {noreply, SD0};
 
-handle_cast({aborted, TxId, FromNode}, SD0=#state{tx_id=TxId, local_parts=LocalParts, 
-            sender=Sender, stage=local_cert, rep_dict=RepDict}) ->
+handle_cast({aborted, TxId, FromNode}, SD0=#state{tx_id=TxId, local_parts=LocalParts, stat_dict=StatDict, 
+            sender=Sender, stage=local_cert, rep_dict=RepDict, rp_start=RP, lp_start=LP, txn_type=TxnType}) ->
     LocalParts1 = lists:delete(FromNode, LocalParts), 
     clocksi_vnode:abort(LocalParts1, TxId),
-    repl_fsm:repl_abort(LocalParts1, TxId, true, false, RepDict),
+    repl_fsm:repl_abort(LocalParts1, TxId, false, RepDict),
     gen_server:reply(Sender, {aborted, local}),
-    {noreply, SD0#state{tx_id={}}};
+    case RP of
+        0 ->  {noreply, SD0#state{tx_id={}}};
+        _ ->  StatDict1 = dict:update({TxnType, abort}, 
+            fun({V1, V2, V3}) -> {V1+timer:now_diff(RP, LP), V2+timer:now_diff(os:timestamp(), RP), V3+1} end, StatDict),
+            {noreply, SD0#state{tx_id={}, stat_dict=StatDict1}}
+    end; 
 
 handle_cast({aborted, _, _}, SD0=#state{stage=local_cert}) ->
     {noreply, SD0};
@@ -220,8 +225,8 @@ handle_cast({prepared, TxId, PrepareTime},
             CommitTime = max(MaxPrepTime, PrepareTime),
             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
             clocksi_vnode:commit(RemoteParts, TxId, CommitTime),
-            repl_fsm:repl_commit(LocalParts, TxId, CommitTime, true, false, RepDict),
-            repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, true, false, RepDict),
+            repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
+            repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, false, RepDict),
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
             StatDict1 = dict:update({TxnType, commit},
             fun({V1, V2, V3}) -> {V1+timer:now_diff(RP, LP), V2+timer:now_diff(os:timestamp(), RP), V3+1} end, StatDict),
@@ -234,13 +239,13 @@ handle_cast({prepared, _, _},
     {noreply, SD0};
 
 handle_cast({aborted, TxId, FromNode}, 
-	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, txn_type=TxnType, stat_dict=StatDict, 
-        local_parts=LocalParts, stage=remote_cert, rep_dict=RepDict, rp_start=RP, lp_start=LP}) ->
+	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, rp_start=RP, lp_start=LP, 
+        txn_type=TxnType, local_parts=LocalParts, stage=remote_cert, rep_dict=RepDict, stat_dict=StatDict}) ->
     RemoteParts1 = lists:delete(FromNode, RemoteParts),
     clocksi_vnode:abort(LocalParts, TxId),
     clocksi_vnode:abort(RemoteParts1, TxId),
-    repl_fsm:repl_abort(LocalParts, TxId, true, false, RepDict),
-    repl_fsm:repl_abort(RemoteParts1, TxId, true, false, RepDict),
+    repl_fsm:repl_abort(LocalParts, TxId, false, RepDict),
+    repl_fsm:repl_abort(RemoteParts1, TxId, false, RepDict),
     gen_server:reply(Sender, {aborted, remote}),
     case RP of
         0 ->  {noreply, SD0#state{tx_id={}}};

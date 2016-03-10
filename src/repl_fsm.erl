@@ -58,7 +58,9 @@
 %% States
 -export([repl_prepare/4,
 	    check_table/0,
+         repl_abort/4,
          repl_abort/5,
+         repl_commit/5,
          repl_commit/6,
          %repl_abort/4,
          %repl_commit/5,
@@ -197,8 +199,7 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                             %    local_fast ->%lager:warning("Replicating local_fast txn! ~w", [TxId]);
                             %    _ -> ok
                             %end,
-                            %ets:insert(PendingLog, {{TxId, Partition}, Sender, 
-                            %        PrepareTime, RepMode, ReplFactor}),
+                            %lager:warning("Repl request for ~w ~w", [TxId, Partition]),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, Sender)
                     end;
                 chain ->
@@ -210,9 +211,11 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
 %handle_cast({ack_pending_prep, TxId, Partition}, SD0=#state{pending_log=PendingLog}) ->
 %    case ets:lookup(PendingLog, {TxId, Partition}) of
 %        [{{TxId, Partition}, Sender, Timestamp, pending_prepared, N}] ->
+%            %lager:warning("Pending prep of ~w still waiting.. With time ~w", [TxId, Timestamp]),
 %            ets:insert(PendingLog, {{TxId, Partition}, Sender, Timestamp, remote, N});
 %        [{{TxId, Partition}, Sender, Timestamp}] ->
 %            ets:delete(PendingLog, {TxId, Partition}),
+%            %lager:warning("~w ack pending with time ~w", [TxId, Timestamp]),
 %            gen_server:cast(Sender, {prepared, TxId, Timestamp})
 %    end,
 %    {noreply, SD0};
@@ -226,23 +229,20 @@ handle_cast({abort_pending_prep, TxId, Partition}, SD0=#state{pending_log=Pendin
     {noreply, SD0};
 
 %handle_cast({ack, Partition, TxId, ProposedTs}, SD0=#state{pending_log=PendingLog}) ->
+%    %lager:info("Got proposed ts ~w fo ~w", [ProposedTs, TxId]),
 %    case ets:lookup(PendingLog, {TxId, Partition}) of
 %        [{{TxId, Partition}, Sender, Timestamp, RepMode, 1}] ->
 %           %lager:warning("Got all replis, replying for ~w, ~w", [TxId, Partition]),
 %            case RepMode of
 %                false -> true = ets:delete(PendingLog, {TxId, Partition}), ok;
+%                %local_fast -> true = ets:delete(PendingLog, {TxId, Partition}),
+%                %              gen_server:cast(Sender, {real_prepared, TxId, max(Timestamp, ProposedTs)});
 %                pending_prepared -> ets:insert(PendingLog, {{TxId, Partition}, Sender, max(Timestamp,ProposedTs)});
 %                _ -> true = ets:delete(PendingLog, {TxId, Partition}),
+%                     %lager:warning("Replying for ~w", [TxId]),
 %                     gen_server:cast(Sender, {prepared, TxId, max(Timestamp, ProposedTs)})
 %            end;
 %        [{{TxId, Partition}, Sender, Timestamp, RepMode, N}] ->
-           %lager:warning("Got req from ~w for ~w, ~w more to get", [Partition, TxId, N-1]),
-%            ets:insert(PendingLog, {{TxId, Partition}, Sender, max(Timestamp,ProposedTs), RepMode, N-1});
-%        [] -> %%The record is appended already, do nothing
-            %lager:warning("~w, ~w: prepare repl disappeared!!", [Partition, TxId]),
-%            ok
-%    end,
-%    {noreply, SD0};
 
 handle_cast(_Info, StateData) ->
     {noreply,StateData}.
@@ -290,11 +290,12 @@ get_name(ReplName, N) ->
     end.
     
 %% No replication
-repl_commit(_, _, _, false, _, _) ->
+repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict) ->
+    repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, no_wait).
+
+repl_commit([], _, _, _, _, _) ->
     ok;
-repl_commit([], _, _, true, _, _) ->
-    ok;
-repl_commit(UpdatedParts, TxId, CommitTime, true, ToCache, RepDict) ->
+repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, IfWaited) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
@@ -306,17 +307,18 @@ repl_commit(UpdatedParts, TxId, CommitTime, true, ToCache, RepDict) ->
                                       true -> ?CACHE_SERV:commit_specula(TxId, Partitions, CommitTime)
                     end; 
                 {rep, S} ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions});
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, IfWaited});
                 S ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions})
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, no_wait})
             end end,  Replicas) end,
             NodeParts).
 
-repl_abort(_, _, false, _, _) ->
+repl_abort(UpdatedParts, TxId, ToCache, RepDict) -> 
+    repl_abort(UpdatedParts, TxId, ToCache, RepDict, no_wait). 
+
+repl_abort([], _, _, _, _) ->
     ok;
-repl_abort([], _, true, _, _) ->
-    ok;
-repl_abort(UpdatedParts, TxId, true, ToCache, RepDict) ->
+repl_abort(UpdatedParts, TxId, ToCache, RepDict, IfWaited) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
@@ -327,8 +329,8 @@ repl_abort(UpdatedParts, TxId, true, ToCache, RepDict) ->
                                         true -> ?CACHE_SERV:abort_specula(TxId, Partitions) 
                          end;
                 {rep, S} ->
-                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions});
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, IfWaited});
                 S ->
-                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions})
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, no_wait})
             end end,  Replicas) end,
             NodeParts).

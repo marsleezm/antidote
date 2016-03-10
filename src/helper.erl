@@ -56,9 +56,8 @@ gather_abort_stat(Len) ->
             {Diff, Count} = check_top_aborted(Partition, Len),
             {TDiff+Diff, Count+TCount}  end,  {0,0},
                 PartitionList),
-    TotalDiff / TotalCount.
-
-
+    TotalDiff / max(TotalCount, 1).
+  
 check_top_aborted(Partition, Len) ->
       riak_core_vnode_master:sync_command(Partition,
                    {check_top_aborted, Len},
@@ -157,7 +156,7 @@ handle_check_key_record(Key, Type, PreparedTxs, CommittedTxs) ->
 handle_if_prepared(TxId, Keys, PreparedTxs) ->
     Result = lists:all(fun(Key) ->
             case ets:lookup(PreparedTxs, Key) of
-                [{Key, [{TxId, _, _, _, _}|_]}] -> lager:info("Found sth for key ~w", [Key]), true;
+                [{Key, [{TxId, _, _, _, _, _}|_]}] -> lager:info("Found sth for key ~w", [Key]), true;
                 _ -> lager:info("Nothing for key ~w", [Key]), false
             end end, Keys),
     Result.

@@ -57,7 +57,7 @@
         append_values/3,
         get_table/1,
 	    check_key/2,
-        add_to_commit_tab/3,
+        get_ts/4,
         clean_data/2,
 	    check_table/1,
         verify_table/2,
@@ -79,14 +79,14 @@
         pending_log :: cache_id(),
         delay :: non_neg_integer(),
         %init_ts_dict=false :: boolean(),
-        ts :: non_neg_integer(),
+        ts=0 :: non_neg_integer(),
         num_specula_read=0 :: non_neg_integer(),
         num_read=0 :: non_neg_integer(),
         set_size :: non_neg_integer(),
         current_dict :: dict(),
         backup_dict :: dict(),
         %ts_dict :: dict(),
-        do_specula :: boolean(),
+        specula_read :: boolean(),
         name :: atom(),
 		self :: atom()}).
 
@@ -104,6 +104,8 @@ read(Name, Key, TxId, Part) ->
 get_table(Name) ->
     gen_server:call({global, Name}, {get_table}, ?READ_TIMEOUT).
 
+get_ts(Name, TxId, Partition, WriteSet) ->
+    gen_server:call({global, Name}, {get_ts, TxId, Partition, WriteSet}, ?READ_TIMEOUT).
 
 single_read(Name, Key) ->
     TxId = tx_utilities:create_tx_id(0),
@@ -134,7 +136,7 @@ if_bulk_prepared(Name, TxId, Partition) ->
     gen_server:call({global, Name}, {if_bulk_prepared, TxId, Partition}).
 
 prepare_specula(Name, TxId, Partition, WriteSet, PrepareTime) ->
-    gen_server:call({global, Name}, {prepare_specula, TxId, Partition, WriteSet, PrepareTime}).
+    gen_server:cast({global, Name}, {prepare_specula, TxId, Partition, WriteSet, PrepareTime}).
 
 relay_read(Name, Key, TxId, Reader) ->
     gen_server:cast({global, Name}, {relay_read, Key, TxId, Reader}).
@@ -159,15 +161,18 @@ init([Name, _Parts]) ->
     ReplicatedLog = tx_utilities:open_public_table(repl_log),
     PendingLog = tx_utilities:open_private_table(pending_log),
     NumPartitions = length(hash_fun:get_partitions()),
-    DoSpecula = antidote_config:get(do_specula),
+    SpeculaRead = case antidote_config:get(specula_read) of
+                        specula -> true; 
+                        nospecula -> false
+                  end,
     Concurrent = antidote_config:get(concurrent),
     SpeculaLength = antidote_config:get(specula_length),
     %TsDict = lists:foldl(fun(Part, Acc) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent*max(SpeculaLength,1) div 3, 50),
-                pending_log = PendingLog, current_dict = dict:new(), ts=0, do_specula=DoSpecula,
+    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent*SpeculaLength, 150), specula_read=SpeculaRead,
+                pending_log = PendingLog, current_dict = dict:new(), 
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
 handle_call({get_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
@@ -175,6 +180,16 @@ handle_call({get_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
 
 handle_call({get_pid}, _Sender, SD0) ->
         {reply, self(), SD0};
+
+handle_call({get_ts, TxId, Partition, _WriteSet}, _Sender, SD0=#state{pending_log=PendingLog, ts=Ts}) ->
+    case ets:lookup(PendingLog, {TxId, Partition}) of
+        [] ->
+            ets:insert(PendingLog, {{TxId, Partition}, ignore}),
+            {reply, Ts, SD0};
+        _ ->
+           %lager:warning("~w ~w prepared already", [TxId, Partition]),
+            {reply, exist, SD0}
+    end;
 
 handle_call({retrieve_log, LogName},  _Sender,
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
@@ -220,10 +235,10 @@ handle_call({append_values, KeyValues, CommitTime}, _Sender, SD0=#state{replicat
                 end, KeyValues),
     {reply, ok, SD0};
 
-handle_call({read, Key, TxId, _}, Sender, 
+handle_call({read, Key, TxId, {_Part, _}}, Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog,
-                ts=Ts, do_specula=DoSpecula}) ->
-    case DoSpecula of
+                specula_read=SpeculaRead, ts=Ts}) ->
+    case SpeculaRead of
         false ->
             case ready_or_block(TxId, Key, PendingLog, Sender) of
                 not_ready->
@@ -234,6 +249,7 @@ handle_call({read, Key, TxId, _}, Sender,
                     {reply, Result, SD0#state{ts=max(Ts, MyClock)}}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
+            %lager:warning("Doing specula read!!!"),
             case specula_read(TxId, Key, PendingLog, Sender) of
                 not_ready->
                     {noreply, SD0};
@@ -257,22 +273,6 @@ handle_call({update_ts, _Partitions}, _Sender, SD0) ->
     %                        {reply, ok, SD0#state{ts_dict=TsDict1, init_ts_dict=false}}
     %end;
 
-handle_call({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, Sender, 
-	    SD0=#state{pending_log=PendingLog, ts=Ts}) ->
-    gen_server:reply(Sender, Ts),
-    KeySet = lists:foldl(fun({Key, Value}, KS) ->
-                      case ets:lookup(PendingLog, Key) of
-                          [] ->
-                              true = ets:insert(PendingLog, {Key, [{TxId, TimeStamp, Value, []}]}),
-                              [Key|KS];
-                          [{Key, RemainList}] ->
-                              NewList = insert_version(RemainList, TxId, TimeStamp, Value),
-                              true = ets:insert(PendingLog, {Key, NewList}),
-                              [Key|KS]
-                      end end, [], WriteSet),
-    ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
-   %lager:warning("Specula prepare for [~w, ~w, KeySet is ~p]", [TxId, Partition, KeySet]),
-    {noreply, SD0};
 
 handle_call({if_prepared, TxId, Keys}, _Sender, SD0=#state{pending_log=PendingLog}) ->
    %lager:warning("Check if prepared ~w for ~w", [Keys, TxId]),
@@ -321,10 +321,26 @@ handle_cast({relay_read, Key, TxId, Reader},
         [{Key, ValueList}] ->
             MyClock = TxId#tx_id.snapshot_time,
             Value = find_version(ValueList, MyClock),
-            %lager:warning("Got value for ~p", [ValueList, Key]),
+             %lager:warning("Got value for ~p", [ValueList, Key]),
             gen_server:reply(Reader, Value),
             {noreply, SD0}
     end;
+
+handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp},
+        SD0=#state{pending_log=PendingLog, ts=Ts}) ->
+    KeySet = lists:foldl(fun({Key, Value}, KS) ->
+                      case ets:lookup(PendingLog, Key) of
+                          [] ->
+                              true = ets:insert(PendingLog, {Key, [{TxId, TimeStamp, Value, []}]}),
+                              [Key|KS];
+                          [{Key, RemainList}] ->
+                              NewList = insert_version(RemainList, TxId, TimeStamp, Value),
+                              true = ets:insert(PendingLog, {Key, NewList}),
+                              [Key|KS]
+                      end end, [], WriteSet),
+    ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
+   %lager:warning("Specula prepare for [~w, ~w, KeySet is ~p]", [TxId, Partition, KeySet]),
+    {noreply, SD0#state{ts=max(Ts, TimeStamp)}};
 
 handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pending_log=OldPendingLog}) ->
     %lager:info("Got request!"),
@@ -364,35 +380,40 @@ handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pe
 %    {noreply, SD0#state{ts_dict=TsDict1}};
 
 handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender}, 
-	    SD0=#state{pending_log=PendingLog, ts=Ts, replicated_log=ReplicatedLog, current_dict=CurrentDict, backup_dict=BackupDict}) ->
+	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, ts=Ts, current_dict=CurrentDict, backup_dict=BackupDict}) ->
     case Type of
         prepared ->
              %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
             case dict:find(TxId, CurrentDict) of 
-                {ok, aborted} ->
+                {ok, finished} ->
                    %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 error ->
                     case dict:find(TxId, BackupDict) of 
-                        {ok, aborted} ->
+                        {ok, finished} ->
                            %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         error ->
-                            KeySet = lists:foldl(fun({Key, Value}, KS) ->
-                            case ets:lookup(PendingLog, Key) of
+                            case ets:lookup(PendingLog, {TxId, Partition}) of
                                 [] ->
-                                    true = ets:insert(PendingLog, {Key, [{TxId, TimeStamp, Value, []}]}),
-                                    [Key|KS];
-                                [{Key, RemainList}] ->
-                                    NewList = insert_version(RemainList, TxId, TimeStamp, Value),
-                                    true = ets:insert(PendingLog, {Key, NewList}),
-                                    [Key|KS]
-                            end end, [], WriteSet),
-                           %lager:warning("Got repl prepare for ~w, ~p", [TxId, KeySet]),
-                            ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
-                            NewTs = max(Ts, tx_utilities:now_microsec()),
-                            gen_server:cast(Sender, {prepared, TxId, NewTs}), 
-                            {noreply, SD0#state{ts=NewTs}}
+                                    KeySet = lists:foldl(fun({Key, Value}, KS) ->
+                                    case ets:lookup(PendingLog, Key) of
+                                        [] ->
+                                            true = ets:insert(PendingLog, {Key, [{TxId, TimeStamp, Value, []}]}),
+                                            [Key|KS];
+                                        [{Key, RemainList}] ->
+                                            NewList = insert_version(RemainList, TxId, TimeStamp, Value),
+                                            true = ets:insert(PendingLog, {Key, NewList}),
+                                            [Key|KS]
+                                    end end, [], WriteSet),
+                                   %lager:warning("Got repl prepare for ~w, ~p", [TxId, KeySet]),
+                                    ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
+                                    NewTs = max(Ts, tx_utilities:now_microsec()),
+                                    gen_server:cast(Sender, {prepared, TxId, NewTs}), 
+                                    {noreply, SD0#state{ts=NewTs}};
+                                _ ->
+                                    ok
+                            end
                     end
             end;
         single_commit ->
@@ -411,21 +432,22 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
     end;
 
 
-handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
-	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, do_specula=DoSpecula}) ->
+handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited}, 
+	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, current_dict=CurrentDict, specula_read=SpeculaRead}) ->
    %lager:warning("repl commit for ~w ~w", [TxId, Partitions]),
     lists:foreach(fun(Partition) ->
-            case ets:lookup(PendingLog, {TxId, Partition}) of
-                [{{TxId, Partition}, KeySet}] ->
+                    [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
                     ets:delete(PendingLog, {TxId, Partition}),
-                    _MaxTs = update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0)
-            end
+                    _MaxTS = update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0)
         end, Partitions),
-    case DoSpecula of
+    case SpeculaRead of
         true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
         _ -> ok
     end,
-    {noreply, SD0};
+    case IfWaited of
+        waited -> {noreply, SD0#state{current_dict=dict:store(TxId, finished, CurrentDict)}};
+        no_wait -> {noreply, SD0}
+    end;
     %case dict:size(CurrentD1) > SetSize of
     %      true ->
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentD1}};
@@ -433,31 +455,36 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
     %  end;
 
-handle_cast({repl_abort, TxId, Partitions}, 
-	    SD0=#state{pending_log=PendingLog, set_size=SetSize, replicated_log=ReplicatedLog, do_specula=DoSpecula, current_dict=CurrentDict}) ->
+handle_cast({repl_abort, TxId, Partitions, IfWaited}, 
+	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, specula_read=SpeculaRead, current_dict=CurrentDict, set_size=SetSize}) ->
    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     CurrentDict1 = lists:foldl(fun(Partition, S) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
-                         %lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
+                        %lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
                         ets:delete(PendingLog, {TxId, Partition}),
                         _MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
                         S;
-                    [] -> 
-                       %lager:warning("Repl abort arrived early! ~w", [TxId]),
-                        dict:store(TxId, aborted, S)
+                    [] ->
+                      %lager:warning("Repl abort arrived early! ~w", [TxId]),
+                        dict:store(TxId, finished, S)
                 end
         end, CurrentDict, Partitions),
-    case DoSpecula of
+    %%% This needs to be stored because a prepare request may come twice: once from specula_prep and once 
+    %%  from tx coord
+    CurrentDict2 = case IfWaited of waited -> dict:store(TxId, finished, CurrentDict1);
+                                    no_wait -> CurrentDict1 
+                   end,
+    case SpeculaRead of
         true -> specula_utilities:deal_abort_deps(TxId);
         _ -> ok
     end,
-    case dict:size(CurrentDict1) > SetSize of
+    case dict:size(CurrentDict2) > SetSize of
         true ->
            %lager:warning("Current set is too large!"),
-            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict1}};
+            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict2}};
         false ->
-            {noreply, SD0#state{current_dict=CurrentDict1}}
+            {noreply, SD0#state{current_dict=CurrentDict2}}
     end;
 
 handle_cast(_Info, StateData) ->
@@ -516,10 +543,10 @@ find_version([{TS, Value, TxId}|Rest], SnapshotTime) ->
             find_version(Rest, SnapshotTime)
     end.
 
-update_store([], _TxId, _TxCommitTime, _InMemoryStore, _PreparedTxs, TS) ->
+update_store([], _TxId, _TxCommitTime, _InMemoryStore, _PendingTxs, TS) ->
     TS;
-update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, PreparedTxs, TS) ->
-    [{Key, List}] = ets:lookup(PreparedTxs, Key),
+update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, PendingTxs, TS) ->
+    [{Key, List}] = ets:lookup(PendingTxs, Key),
     {{TxId, _, Value, PendingReaders}, PrepareRemainList} = delete_item(List, TxId, []),
     Values = case ets:lookup(InMemoryStore, Key) of
                 [] ->
@@ -539,15 +566,15 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, PreparedTxs, TS) ->
                     gen_server:reply(Sender, {ok, hd(Values)})
             end, max(SnapshotTime, ReaderTS)  end,
                     0, PendingReaders),
-    true = ets:insert(PreparedTxs, {Key, PrepareRemainList}),
-    update_store(Rest, TxId, TxCommitTime, InMemoryStore, PreparedTxs, max(TS, MaxRTS)).
+    true = ets:insert(PendingTxs, {Key, PrepareRemainList}),
+    update_store(Rest, TxId, TxCommitTime, InMemoryStore, PendingTxs, max(TS, MaxRTS)).
 
-clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore, TS) ->
+clean_abort_prepared(_PendingTxs, [], _TxId, _InMemoryStore, TS) ->
     TS;
 clean_abort_prepared(PendingLog, [Key | Rest], TxId, ReplicatedLog, TS) ->
     [{Key, List}] = ets:lookup(PendingLog, Key),
     {{TxId, _, _, Readers}, RemainList} = delete_item(List, TxId, []),
-   %lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, Readers, RemainList]),
+   %lager:warning("Clean abort: for key ~p, List is ~w, readers are ~p, prep deps are ~w", [Key, List, Readers, RemainList]),
     case Readers of
         [] ->
             true = ets:insert(PendingLog, {Key, RemainList}),
@@ -633,17 +660,16 @@ insert_version([{_TxId, Timestamp, _Value, _Reader}|_Rest]=VList, MyTxId, MyPrep
 insert_version([{TxId, Timemstamp, Value, Reader}|Rest], MyTxId, MyPrepTime, MyValue) -> 
     [{TxId, Timemstamp, Value, Reader}|insert_version(Rest, MyTxId, MyPrepTime, MyValue)].
 
-ready_or_block(TxId, Key, PreparedTxs, Sender) ->
+ready_or_block(TxId, Key, PendingTxs, Sender) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
-    case ets:lookup(PreparedTxs, Key) of
+    case ets:lookup(PendingTxs, Key) of
         [] ->
-            ready;
-        [{Key, []}] ->
+            ets:insert(PendingTxs, {Key, SnapshotTime}),
             ready;
         [{Key, [{PreparedTxId, PrepareTime, Value, PendingReader}|Others]}] ->
             case PrepareTime =< SnapshotTime of
                 true ->
-                    ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, Value,
+                    ets:insert(PendingTxs, {Key, [{PreparedTxId, PrepareTime, Value,
                         [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}|Others]}),
                     not_ready;
                 false ->
@@ -651,18 +677,20 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
             end
     end.
 
-specula_read(TxId, Key, PreparedTxs, Sender) ->
+specula_read(TxId, Key, PendingTxs, Sender) ->
+    %lager:warning("~w reading ~w", [TxId, Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
-    case ets:lookup(PreparedTxs, Key) of
+    case ets:lookup(PendingTxs, Key) of
         [] ->
             ready;
         [{Key, VersionList}] ->
+           %lager:warning("Version list is ~w", [VersionList]),
             case read_or_block(VersionList, [], SnapshotTime, Sender) of
                 ready -> ready;
                 {specula, PTxId, Value} ->%lager:warning("Specula reading ~p, from ~w to ~w", [Key, TxId, PTxId]), 
                     add_read_dep(TxId, PTxId, Key), {specula, Value};
                 {not_ready, NewList, _PTxId} ->
-                    ets:insert(PreparedTxs, {Key, NewList}), not_ready
+                    ets:insert(PendingTxs, {Key, NewList}), not_ready
             end
     end.
 
@@ -689,16 +717,16 @@ add_read_dep(ReaderTx, WriterTx, _Key) ->
 prepared_by_local(TxId) ->
     node(TxId#tx_id.server_pid) == node().
 
-add_to_commit_tab(WriteSet, TxCommitTime, Tab) ->
-    lists:foreach(fun({Key, Value}) ->
-            case ets:lookup(Tab, Key) of
-                [] ->
-                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}]});
-                [{Key, ValueList}] ->
-                    {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}|RemainList]})
-            end
-    end, WriteSet).
+%add_to_commit_tab(WriteSet, TxCommitTime, Tab) ->
+%    lists:foreach(fun({Key, Value}) ->
+%            case ets:lookup(Tab, Key) of
+%                [] ->
+%                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}]});
+%                [{Key, ValueList}] ->
+%                    {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
+%                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}|RemainList]})
+%            end
+%    end, WriteSet).
 
 %find_parts_for_name(Partitions) ->
 %    Repls = antidote_config:get(to_repl),
@@ -707,8 +735,4 @@ add_to_commit_tab(WriteSet, TxCommitTime, Tab) ->
 %                PartList = [P || {P, N} <- Partitions, N == Node],
 %                PartList++List
 %                end, [], ReplNodes).
-
-
-
-
 

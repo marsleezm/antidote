@@ -85,6 +85,7 @@ basic_test3(Nodes) ->
     [Part1] = rpc:call(Node1, hash_fun, get_preflist_from_key, [1]),
     LUps = [{Part1, [{t3_k1, 1}, {t3_k2, 2}, {t3_k3, 3}]}],
     ok = rpc:call(Node1, clocksi_vnode, set_debug, [Part1, true]),
+    lager:info("TxId1 is ~w", [TxId1]),
     spawn(specula_test, spawn_receive, [self(), Node1, tx_cert_sup, certify, [1, TxId1, LUps, []]]),
 
     timer:sleep(1000),
@@ -93,6 +94,7 @@ basic_test3(Nodes) ->
     lager:info("After first read"),
 
     TxId2 = rpc:call(Node1, tx_utilities, create_tx_id, [1]),
+    lager:info("TxId2 is ~w", [TxId2]),
     lager:info("Before spawnning!"),
     spawn(specula_test, spawn_receive, [self(), Node1, clocksi_vnode, read_data_item, [Part1, t3_k1, TxId2]]),
     lager:info("Before do reply! TxId is ~w", [TxId1]),
