@@ -39,7 +39,7 @@
         handle_command_print_stat/8,
         handle_command_check_tables_ready/1,
         handle_command_check_prepared_empty/1,
-        handle_check_top_aborted/4
+        handle_check_top_aborted/1
         ]).
 
 
@@ -52,11 +52,11 @@ relay_read_stat(Node) ->
 gather_abort_stat(Len) ->
     {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
     PartitionList = chashbin:to_list(CHBin),
-    lists:map(fun(Partition) ->
-            R = check_top_aborted(Partition, Len),
-            lager:info("~w: ~p", [Partition, R]),
-            {Partition, R}
-            end, PartitionList).
+    {TotalDiff, TotalCount} = lists:foldl(fun(Partition, {TDiff, TCount}) ->
+            {Diff, Count} = check_top_aborted(Partition, Len),
+            {TDiff+Diff, Count+TCount}  end,  {0,0},
+                PartitionList),
+    TotalDiff / TotalCount.
   
 check_top_aborted(Partition, Len) ->
       riak_core_vnode_master:sync_command(Partition,
@@ -182,19 +182,8 @@ handle_command_check_prepared_empty(PreparedTxs) ->
 		 _ ->  false
     end.
 
-handle_check_top_aborted(Len, LocalAbort, RemoteAbort, DepDict) ->
-    LA1 = dict:erase(pa, LocalAbort),
-    LA2 = dict:erase(ca, LA1),
-    RA1 = dict:erase(pa, RemoteAbort),
-    RA2 = dict:erase(ca, RA1),
-    L = dict:to_list(LA2),
-    R = dict:to_list(RA2),
-    LS = lists:keysort(2, L),
-    RS = lists:keysort(2, R),
-    RLS = lists:reverse(LS),
-    RRS = lists:reverse(RS),
-    NumSuccessWait = dict:fetch(success_wait, DepDict),
-    {FailByCommit, FCC} = dict:fetch(fucked_by_commit, DepDict),
-    {FailByPrep, FPC} = dict:fetch(fucked_by_badprep, DepDict),
-    {CommitDiff, DC} = dict:fetch(commit_diff, DepDict),
-    lists:flatten(io_lib:format("LA Top:~p, RATop:~p, NumSuccWait: ~p, TimeCFailDiff: ~p, NumCFail: ~p, TimePFailDiff: ~p, NumPFail: ~p, CommitDiff: ~p, CommitNum: ~p ~n", [lists:sublist(RLS, Len), lists:sublist(RRS, Len), NumSuccessWait, FailByCommit div max(1,FCC), FCC, FailByPrep div max(1,FPC), FPC, CommitDiff div max(1,DC), DC])).
+handle_check_top_aborted(DepDict) ->
+    %NumSuccessWait = dict:fetch(success_wait, DepDict),
+    %{FailByCommit, FCC} = dict:fetch(fucked_by_commit, DepDict),
+    %{FailByPrep, FPC} = dict:fetch(fucked_by_badprep, DepDict),
+    dict:fetch(commit_diff, DepDict).

@@ -218,7 +218,7 @@ init([Partition]) ->
     InMemoryStore = tx_utilities:open_table(Partition, inmemory_store),
     DepDict = dict:new(),
     %DepDict1 = dict:store(success_wait, 0, DepDict),
-    %DepDict2 = dict:store(commit_diff, {0,0}, DepDict1),
+    DepDict1 = dict:store(commit_diff, {0,0}, DepDict),
     %DepDict3 = dict:store(fucked_by_commit, {0,0}, DepDict2),
     %DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
     IfReplicate = antidote_config:get(do_repl), 
@@ -242,7 +242,7 @@ init([Partition]) ->
                 if_specula = IfSpecula,
                 fast_reply = FastReply,
                 inmemory_store=InMemoryStore,
-                dep_dict = DepDict
+                dep_dict = DepDict1
                 %total_time = 0, 
                 %prepare_count = 0, 
                 %num_aborted = 0,
@@ -274,7 +274,7 @@ handle_command({clean_data, Sender}, _Sender, SD0=#state{inmemory_store=OldInMem
     InMemoryStore = tx_utilities:open_table(Partition, inmemory_store),
     DepDict = dict:new(),
     %DepDict1 = dict:store(success_wait, 0, DepDict),
-    %DepDict2 = dict:store(commit_diff, {0,0}, DepDict1),
+    DepDict1 = dict:store(commit_diff, {0,0}, DepDict),
     %DepDict3 = dict:store(fucked_by_commit, {0,0}, DepDict2),
     %DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
     %LD = dict:new(),
@@ -286,7 +286,7 @@ handle_command({clean_data, Sender}, _Sender, SD0=#state{inmemory_store=OldInMem
                 %l_abort_dict=LD,
                 %r_abort_dict=RD,
                 inmemory_store=InMemoryStore,
-                dep_dict = DepDict}};
+                dep_dict = DepDict1}};
                 %max_ts=0, total_time = 0, prepare_count = 0, num_aborted = 0, num_blocked = 0,
                 %blocked_time = 0,
                 %num_specula_read = 0,
@@ -304,9 +304,9 @@ handle_command({check_key_record, Key, Type},_Sender,SD0=#state{prepared_txs=Pre
     R = helper:handle_check_key_record(Key, Type, PreparedTxs, CommittedTxs),
     {reply, R, SD0};
 
-handle_command({check_top_aborted, _Len},_Sender,SD0) -> %=#state{l_abort_dict=LAbortDict, r_abort_dict=RAbortDict, dep_dict=DepDict}) ->
-    %R = helper:handle_check_top_aborted(Len, LAbortDict, RAbortDict, DepDict),
-    {reply, ok, SD0};
+handle_command({check_top_aborted, _},_Sender,SD0=#state{dep_dict=DepDict}) -> %=#state{l_abort_dict=LAbortDict, r_abort_dict=RAbortDict, dep_dict=DepDict}) ->
+    R = helper:handle_check_top_aborted(DepDict),
+    {reply, R, SD0};
 
 handle_command({do_reply, TxId}, _Sender, SD0=#state{prepared_txs=PreparedTxs, if_replicate=IfReplicate}) ->
     [{{pending, TxId}, Result}] = ets:lookup(PreparedTxs, {pending, TxId}),
@@ -918,9 +918,9 @@ check_prepared(_, TxId, PreparedTxs, Key, _Value) ->
                                 InMemoryStore :: cache_id(), CommittedTxs :: cache_id(),
                                 PreparedTxs :: cache_id(), DepDict :: dict(), 
                         Partition :: integer(), PrepareTime :: integer() ) -> ok.
-update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs, DepDict, _Partition, _PrepareTime) ->
-    DepDict;
-    %dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
+update_store([], _TxId, TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs, DepDict, _Partition, PrepareTime) ->
+    %DepDict;
+    dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PTime) ->
      %lager:warning("Trying to insert key ~p with for ~w, commit time is ~w", [Key, TxId, TxCommitTime]),
     MyNode = {Partition, node()},
