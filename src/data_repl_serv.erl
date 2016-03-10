@@ -412,7 +412,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                                     gen_server:cast(Sender, {prepared, TxId, NewTs}), 
                                     {noreply, SD0#state{ts=NewTs}};
                                 _ ->
-                                    ok
+                                    {noreply, SD0}
                             end
                     end
             end;
