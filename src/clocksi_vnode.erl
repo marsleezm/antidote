@@ -317,9 +317,9 @@ handle_command({check_key_record, Key, Type},_Sender,SD0=#state{prepared_txs=Pre
     R = helper:handle_check_key_record(Key, Type, PreparedTxs, CommittedTxs),
     {reply, R, SD0};
 
-handle_command({check_top_aborted, _Len},_Sender,SD0) -> %=#state{l_abort_dict=LAbortDict, r_abort_dict=RAbortDict, dep_dict=DepDict}) ->
-    %R = helper:handle_check_top_aborted(Len, LAbortDict, RAbortDict, DepDict),
-    {reply, ok, SD0};
+handle_command({check_top_aborted, _Len},_Sender, SD0=#state{dep_dict=DepDict}) ->
+    R = helper:handle_check_top_aborted(DepDict),
+    {reply, R, SD0};
 
 handle_command({do_reply, TxId}, _Sender, SD0=#state{prepared_txs=PreparedTxs, if_replicate=IfReplicate}) ->
     [{{pending, TxId}, Result}] = ets:lookup(PreparedTxs, {pending, TxId}),
