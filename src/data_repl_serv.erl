@@ -664,8 +664,8 @@ ready_or_block(TxId, Key, PendingTxs, Sender) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PendingTxs, Key) of
         [] ->
-            ets:insert(PendingTxs, {Key, SnapshotTime}),
             ready;
+        [{Key, []}] ->  ready;
         [{Key, [{PreparedTxId, PrepareTime, Value, PendingReader}|Others]}] ->
             case PrepareTime =< SnapshotTime of
                 true ->
