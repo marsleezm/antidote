@@ -7,8 +7,8 @@
   {applications, [
                   kernel,
                   stdlib,
-                  riak_pb,
-                  riak_api,
+                  %riak_pb,
+                  %riak_api,
                   riak_core
                  ]},
   {mod, { antidote_app, []}},
