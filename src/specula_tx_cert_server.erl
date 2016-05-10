@@ -335,7 +335,8 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({load, Sup, Type, Param}, SD0) ->
     lager:info("Got load req!"),
     case Type of tpcc -> tpcc_load:load(Param);
-                 micro -> micro_load:load(Param)
+                 micro -> micro_load:load(Param);
+                 rubis -> rubis_load:load(Param)
     end,
     lager:info("Finished loading!"),
     Sup ! done,
