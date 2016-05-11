@@ -1000,6 +1000,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                                     PReaders
                             end end,
                         [], PendingReaders),
+                    lager:warning("Inserting back remaining!!! ~p", [Remaining]),
                     true = ets:insert(PreparedTxs, {Key, [{PPTxId, PPTime, LLReaderTime, LastPPTime, PPValue, NewPendingReaders}|Remaining]}),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
                         DepDict2, Partition, PrepareTime)
@@ -1164,7 +1165,7 @@ abort_others(PPTime, [{TxId, _PTime, _Value}|Rest]=NonAborted, DepDict, MyNode) 
 %% Update its entry in DepDict.. If the transaction can be prepared already, prepare it
 %% (or just replicate it).. Otherwise just update and do nothing. 
 unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
-  lager:warning("Unblocking transaction ~w", [TxId]),
+  lager:warning("Trying to unblocking transaction ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         {ok, {1, PrepareTime, Sender, RepMode}} ->
             gen_server:cast(Sender, {prepared, TxId, PrepareTime}), 
