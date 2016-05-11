@@ -488,11 +488,11 @@ handle_cast({prepared, PendingTxId, PendingPT},
 %% TODO: if we don't direclty speculate after getting all local prepared, maybe we can wait a littler more
 %%       and here we should check if the transaction can be directly committed or not. 
 handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{dep_dict=DepDict, 
-            committed=Committed, sender=Sender}) ->
+            committed=Committed, sender=_Sender}) ->
        lager:warning("Got read valid for ~w of ~w", [PendingTxId, PendedTxId]),
     case dict:find(PendingTxId, DepDict) of
-        {ok, {read_only, [PendedTxId], ReadOnlyTs}} ->
-            gen_server:reply(Sender, {ok, {committed, ReadOnlyTs}}),
+        {ok, {read_only, [PendedTxId], _ReadOnlyTs}} ->
+            %gen_server:reply(Sender, {ok, {committed, ReadOnlyTs}}),
             {noreply, SD0#state{dep_dict=dict:erase(PendingTxId, DepDict), committed=Committed+1}};
         {ok, {read_only, MoreDeps, ReadOnlyTs}} ->
             {noreply, SD0#state{dep_dict=dict:store(PendingTxId, {read_only, lists:delete(PendedTxId, MoreDeps), ReadOnlyTs}, DepDict)}};
