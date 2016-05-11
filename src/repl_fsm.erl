@@ -166,7 +166,7 @@ handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
 handle_cast({repl_prepare, Partition, prepared, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, except_replicas=ExceptReplicas, 
             mode=Mode, fast_reply=_FastReply}) ->
-    lager:info("Send preparing of Tx ~w", [TxId]),
+    %lager:info("Send preparing of Tx ~w", [TxId]),
             {Sender, RepMode, WriteSet, PrepareTime} = LogContent,
             case Mode of
                 quorum ->
