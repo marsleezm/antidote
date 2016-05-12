@@ -10,7 +10,7 @@
 get_next_state(PreviousStates, Dict, CurrentState) ->
     {_, T} = dict:fetch(CurrentState, Dict),
     Num = random:uniform(),
-    lager:info("T is ~p", [T]),
+    %lager:info("T is ~p", [T]),
     S = find_next_state(T, Num, 0.0, 0, CurrentState),
     End = length(T),
     Previous = End -1,
@@ -89,7 +89,6 @@ non_uniform_random(Type, X, Min, Max) ->
 random_num(Start, End) ->
     random:uniform(End-Start+1) + Start - 1.
 
-
 create_item(Name, Description, InitialPrice, Quantity, ReservePrice, BuyNow, StartDate, EndDate, UserId, CategoryId) ->
     #item{i_name=Name, i_description = Description, i_quantity = Quantity, i_init_price=InitialPrice, 
             i_reserve_price = ReservePrice, i_buy_now = BuyNow, i_nb_of_bids = 0, i_max_bid = 0, i_start_date = StartDate, 
@@ -102,7 +101,7 @@ create_buy_now(BuyerId, ItemId, Qty, Now) ->
     #buy_now{bn_buyer_id=BuyerId, bn_item_id=ItemId, bn_qty=Qty, bn_date=Now}.
 
 create_user(FirstName, LastName, NickName, Password, Email, Now, Rating, Balance, RegionId) ->
-    #user{u_firstname=FirstName, u_lastname=LastName, u_nickname=NickName, u_password=Password,
+    #user{u_firstname=FirstName, u_lastname=LastName, u_nickname=NickName, u_password=Password, u_comment_nodes=[],
             u_email=Email, u_rating=Rating, u_creation_date=Now, u_balance=Balance, u_region=RegionId, u_num_comments=0, 
             u_bids= [], u_sellings = [], u_bought=[]}.
 
@@ -110,11 +109,27 @@ create_comment(FromId, ToId, ItemId, Rating, Now, Comment) ->
     #comment{c_item_id=ItemId, c_from_id=FromId, c_to_id=ToId, c_rating=Rating, c_date=Now, c_comment=Comment}.
 
 get_key({{P0, P1}, P2}, Type) ->
-    integer_to_list(P0)++"_"++integer_to_list(P1)++"_"++integer_to_list(P2)++"_"++atom_to_list(Type);
+    integer_to_list(P0)++"_"++integer_to_list(P1)++"_"++integer_to_list(P2)++type_to_str(Type);
 get_key({P1, P2}, Type) ->
-    integer_to_list(P1)++"_"++integer_to_list(P2)++"_"++atom_to_list(Type);
+    integer_to_list(P1)++"_"++integer_to_list(P2)++type_to_str(Type);
 get_key(P, Type) ->
-    integer_to_list(P)++"_"++atom_to_list(Type).
+    integer_to_list(P)++type_to_str(Type).
+
+type_to_str(Type) ->
+    case Type of
+        item -> "_item";
+        region -> "_region";
+        category -> "_category";
+        comment -> "_comment";
+        user -> "_user";
+        bid -> "_bid";
+        buy_now -> "_buynow";
+        regionnewitems -> "_regionnewitems";
+        categorynewitems -> "_categorynewitems";
+        lastbuynow -> "_lastbuynow";
+        lastbid -> "_lastbid";
+        lastitem -> "_lastitem"
+    end.
 
 %%%%%% private funs %%%%%%%%%%%
 
