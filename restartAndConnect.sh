@@ -7,8 +7,9 @@ then
     SpeculaLength=$3
 else
     DoSpecula=true
-    FastReply=false
+    FastReply=true
     SpeculaLength=5
+    SpeculaRead=specula
 fi
 
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev1/antidote.config
@@ -27,6 +28,10 @@ sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/
 sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/dev2/antidote.config
 sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/dev3/antidote.config
 sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/dev4/antidote.config
+sudo sed -i '' "s/{specula_read,.*/{specula_read, $SpeculaRead}./g" ./dev/dev1/antidote.config
+sudo sed -i '' "s/{specula_read,.*/{specula_read, $SpeculaRead}./g" ./dev/dev2/antidote.config
+sudo sed -i '' "s/{specula_read,.*/{specula_read, $SpeculaRead}./g" ./dev/dev3/antidote.config
+sudo sed -i '' "s/{specula_read,.*/{specula_read, $SpeculaRead}./g" ./dev/dev4/antidote.config
 
 ./dev/dev1/bin/antidote stop
 ./dev/dev2/bin/antidote stop
