@@ -121,6 +121,8 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0); 
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, _}},  Sender, SD0) ->
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0); 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=#state{last_commit_ts=LastCommitTs, 
             total_repl_factor=TotalReplFactor}) ->
     case length(LocalUpdates) of
