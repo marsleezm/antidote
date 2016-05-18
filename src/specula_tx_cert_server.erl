@@ -371,7 +371,9 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     {noreply, SD0};
 
 handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, cdf=OldCdf}) ->
-    ets:delete(OldCdf), 
+    case OldCdf of false -> ok;
+                    _ -> ets:delete(OldCdf)
+    end,
     ets:delete(OldPendingTxs), 
     %DoRepl = antidote_config:get(do_repl),
     RepDict = hash_fun:build_rep_dict(true),
