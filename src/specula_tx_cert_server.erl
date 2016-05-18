@@ -117,12 +117,8 @@ init([Name]) ->
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
     %DoRepl = antidote_config:get(do_repl),
     RepDict = hash_fun:build_rep_dict(true),
-    SpeculaLength = antidote_config:get(specula_length),
     PendingTxs = tx_utilities:open_private_table(pending_txs), 
-    SpeculaRead = case antidote_config:get(specula_read) of
-                        specula -> specula; 
-                        nospecula -> no_specula
-                  end,
+    {SpeculaLength, SpeculaRead} = load_config(), 
     ets:insert(PendingTxs, {{new_order, commit}, 0, 0, 0}),
     ets:insert(PendingTxs, {{new_order, abort}, 0, 0, 0}),
     ets:insert(PendingTxs, {{payment, commit}, 0, 0, 0}),
@@ -375,14 +371,10 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, c
                     _ -> ets:delete(OldCdf)
     end,
     ets:delete(OldPendingTxs), 
+    {SpeculaLength, SpeculaRead} = load_config(), 
     %DoRepl = antidote_config:get(do_repl),
     RepDict = hash_fun:build_rep_dict(true),
-    SpeculaLength = antidote_config:get(specula_length),
     PendingTxs = tx_utilities:open_private_table(pending_txs),
-    SpeculaRead = case antidote_config:get(specula_read) of
-                        specula -> specula;
-                        nospecula -> no_specula
-                  end,
     Cdf = case antidote_config:get(cdf, false) of
                 true -> ets:new(Name, [private, set]);
                 _ -> false
@@ -1172,6 +1164,9 @@ find_min_index(FirstList, FullList) ->
 
 get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->
     ((A2-A1)*1000000+ (B2-B1))*1000000+ C2-C1.
+
+load_config() ->
+    {antidote_config:get(specula_length), antidote_config:get(specula_read)}.
 
 -ifdef(TEST).
 
