@@ -365,6 +365,7 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     {noreply, SD0};
 
 handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, cdf=OldCdf}) ->
+    antidote_config:load("antidote.config"),
     case OldCdf of false -> ok;
                     _ -> ets:delete(OldCdf)
     end,
