@@ -202,7 +202,7 @@ handle_call({set_int_data, Type, Param}, _Sender, SD0)->
             {noreply, SD0#state{min_commit_ts=Param}}
     end;
 
-handle_call({get_int_data, Type, Param}, _Sender, SD0=#state{pending_list=PendingList, 
+handle_call({get_int_data, Type, Param}, _Sender, SD0=#state{pending_list=PendingList,  specula_length=SpeculaLength,
         pending_txs=PendingTxs, dep_dict=DepDict, min_commit_ts=LastCommitTs, read_invalid=ReadInvalid, cascade_aborted=CascadeAborted,
         committed=Committed, cert_aborted=CertAborted, read_aborted=ReadAborted})->
     case Type of
@@ -212,6 +212,8 @@ handle_call({get_int_data, Type, Param}, _Sender, SD0=#state{pending_list=Pendin
             {reply, ets:tab2list(PendingTxs), SD0};
         dep_dict ->
             {reply, dict:to_list(DepDict), SD0};
+        length ->
+            {reply, SpeculaLength, SD0};
         specula_time ->
             [{{general, abort}, T1, C1}] = ets:lookup(PendingTxs, {general, abort}),
             [{{general, commit}, T2, C2}] = ets:lookup(PendingTxs, {general, commit}),
@@ -367,6 +369,7 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     {noreply, SD0};
 
 handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, cdf=OldCdf}) ->
+    antidote_config:load("antidote.config"),
     case OldCdf of false -> ok;
                     _ -> ets:delete(OldCdf)
     end,
