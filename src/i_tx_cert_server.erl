@@ -87,6 +87,9 @@ init([]) ->
     D6 = dict:store({general, abort}, {0, 0, 0}, D5),
     {ok, #state{do_repl=antidote_config:get(do_repl), stat_dict=D6, total_repl_factor=TotalReplFactor, last_commit_ts=0, rep_dict=RepDict}}.
 
+handle_call({get_cdf}, _Sender, SD0) ->
+    {reply, ok, SD0};
+
 handle_call({get_stat}, _Sender, SD0=#state{stat_dict=StatDict}) ->
     {CLP1, CRP1, C1} = dict:fetch({new_order, commit}, StatDict),
     {ALP1, ARP1, A1} = dict:fetch({new_order, abort}, StatDict),
