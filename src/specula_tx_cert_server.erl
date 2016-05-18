@@ -158,8 +158,7 @@ handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnaps
     D1 = dict:store(TxId, {0, [], 0}, D),
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS, pending_prepares=0}};
 
-handle_call({get_stat}, _Sender, SD0=#state{cert_aborted=CertAborted, committed=Committed, read_aborted=ReadAborted, cascade_aborted=CascadeAborted, num_specula_read=NumSpeculaRead, pending_txs=PendingTxs, read_invalid=ReadInvalid, cdf=Cdf, name=Name}) ->
-    %lager:warning("Num of read cert_aborted ~w, Num of cert_aborted is ~w, Num of committed is ~w, NumSpeculaRead is ~w", [ReadAborted, CascadeAborted, Committed, NumSpeculaRead]),
+handle_call({get_cdf}, _Sender, SD0=#state{name=Name, cdf=Cdf}) ->
     case Cdf of false -> ok;
                 _ ->
                     List = ets:tab2list(Cdf),
@@ -174,6 +173,11 @@ handle_call({get_stat}, _Sender, SD0=#state{cert_aborted=CertAborted, committed=
                                     file:close(File)
                     end
     end,
+    {reply, ok, SD0};
+
+
+handle_call({get_stat}, _Sender, SD0=#state{cert_aborted=CertAborted, committed=Committed, read_aborted=ReadAborted, cascade_aborted=CascadeAborted, num_specula_read=NumSpeculaRead, pending_txs=PendingTxs, read_invalid=ReadInvalid}) ->
+    %lager:warning("Num of read cert_aborted ~w, Num of cert_aborted is ~w, Num of committed is ~w, NumSpeculaRead is ~w", [ReadAborted, CascadeAborted, Committed, NumSpeculaRead]),
     [{{new_order, commit}, T11, T12, C1}] = ets:lookup(PendingTxs, {new_order, commit}),
     [{{new_order, abort}, T21, T22, C2}] = ets:lookup(PendingTxs, {new_order, abort}),
     [{{payment, commit}, T31, T32, C3}] = ets:lookup(PendingTxs, {payment, commit}),

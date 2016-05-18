@@ -26,7 +26,7 @@
 
 -export([start_link/0]).
 
--export([init/1, certify/4, get_stat/0, get_int_data/3, start_tx/1, single_read/3, clean_all_data/0, clean_data/1, 
+-export([init/1, certify/4, get_stat/0, get_cdf/0, get_int_data/3, start_tx/1, single_read/3, clean_all_data/0, clean_data/1, 
             load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, 
             get_pid/1, get_global_pid/1]).
 
@@ -190,6 +190,12 @@ get_stat() ->
     %L1 = ListA ++ [PRead, DSpeculaRead, DTotalRead, CacheSpeculaRead, CacheAttemptRead],
     Avg = lists:map(fun(E) -> E div RealCnt end, ListB),
     ListA ++ Avg.    
+
+get_cdf() ->
+    SPL = lists:seq(1, ?NUM_SUP),
+    lists:foreach(fun(N) ->
+                    gen_server:call(generate_module_name(N), {get_cdf})
+                    end, SPL).
 
 generate_module_name(N) ->
     list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list(N)).
