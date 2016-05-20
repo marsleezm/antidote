@@ -308,6 +308,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
                                                                 _ -> NumSpeculaRead+1
                                               end, 
                             %%% !!!!!!! Add to ets if is not read only
+                            lager:warning("~w add ~w to ets", [TxId, StartTime]),
                             add_to_ets(StartTime, Cdf),
                             case length(PendingList) >= SpeculaLength of
                                 true -> %% Wait instead of speculate.
@@ -334,6 +335,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
                         end;
                 _ ->
                     LocalPartitions = [P || {P, _} <- LocalUpdates],
+                    lager:warning("~w add ~w to ets", [TxId, StartTime]),
                     add_to_ets(StartTime, Cdf),
                     NumToAck = length(LocalUpdates),
                     DepDict1 = dict:update(TxId, 
@@ -353,9 +355,13 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
             %% Some read is invalid even before the txn starts.. If invalid_ts is larger than 0, it can possibly be saved.
             %lager:warning("Aborting txn due to invalidTS ~w!", [TxId]),
               %lager:warning("~w Read aborted! ReadAborted is now ~w", [TxId, ReadAborted+1]),
+            lager:warning("~w aborted!", [TxId]),
+            add_to_ets(StartTime, Cdf),
             {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict), cascade_aborted=CascadeAborted+1}};
         _ ->
              %lager:warning("~w Read invalid! ReadInvalid is now ~w", [TxId, ReadInvalid+1]),
+            lager:warning("~w aborted!", [TxId]),
+            add_to_ets(StartTime, Cdf),
             {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict), read_invalid=ReadInvalid+1}}
     end;
 
@@ -570,6 +576,7 @@ handle_cast({aborted, TxId, FromNode}, SD0=#state{tx_id=TxId, local_updates=Loca
     abort_tx(TxId, lists:delete(FromNode, LocalParts), [], RepDict),
     DepDict1 = dict:erase(TxId, DepDict),
      %lager:warning("~w local abort! Cert aborted is now ~w", [TxId, CertAborted+1]),
+    lager:warning("~w aborted!", [TxId]),
     gen_server:reply(Sender, {aborted, local}),
     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_aborted=CertAborted+1}};
 %% Aborting the current transaction
@@ -581,6 +588,7 @@ handle_cast({aborted, TxId, FromNode},
     abort_tx(TxId, LocalParts, lists:delete(FromNode, RemoteParts), RepDict),
     DepDict1 = dict:erase(PendingTxs, DepDict),
      %lager:warning("~w remote abort! Cert aborted is now ~w", [TxId, CertAborted+1]),
+    lager:warning("~w aborted!", [TxId]),
     gen_server:reply(Sender, {aborted, remote}),
     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_aborted=CertAborted+1}};
 %% Not aborting current transaction
@@ -616,6 +624,7 @@ handle_cast({aborted, PendingTxId, FromNode},
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, RepDict),
                             DepDict2 = dict:erase(CurrentTxId, DepDict1),
                              %lager:warning("~w remote abort current! Cert aborted is now ~w", [CurrentTxId, CertAborted+1]),
+                            lager:warning("~w aborted!", [CurrentTxId]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             %% The current transaction is cert_aborted! So replying to client.
                             %% But don't count it!
@@ -646,6 +655,7 @@ terminate(Reason, _SD) ->
 
 add_to_ets(V, Tab)->
     [{time_list, List}] = ets:lookup(Tab, time_list),
+    lager:warning("Add ~w to ets ~w", [V, List]),
     ets:insert(Tab, {time_list, List++[V]}).
 
 find_and_delete(_, false) ->
@@ -654,6 +664,7 @@ find_and_delete(V, Tab) ->
     [{time_list, List}] = ets:lookup(Tab, time_list),
     First = hd(List),
     Rest = find(List, V),
+    lager:warning("List is ~w, new list is ~w", [List, Rest]),
     ets:insert(Tab, {time_list, Rest}),
     First.
 
@@ -722,6 +733,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     abort_tx(CurrentTxId, LocalParts, [], RepDict),
                     DepDict3 = dict:erase(CurrentTxId, DepDict2),
                     gen_server:reply(Sender, {aborted, CurrentTxId}),
+                    lager:warning("~w aborted!", [CurrentTxId]),
                     {noreply, SD0#state{
                       pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
                         min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
@@ -731,6 +743,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
                     abort_tx(CurrentTxId, LocalParts, RemoteParts, RepDict),
                     DepDict3 = dict:erase(CurrentTxId, DepDict2),
+                    lager:warning("~w aborted!", [CurrentTxId]),
                     gen_server:reply(Sender, {aborted, CurrentTxId}),
                     {noreply, SD0#state{
                       pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
@@ -800,12 +813,14 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
                         local_cert ->
                             abort_tx(TxId, LocalParts, [], RepDict),
                             RD1 = dict:erase(TxId, DepDict),
+                            lager:warning("~w aborted!", [TxId]),
                             gen_server:reply(Sender, {aborted, TxId}),
                             {noreply, SD0#state{dep_dict=RD1, tx_id=?NO_TXN, read_aborted=RAD1, read_invalid=RID1}};
                         remote_cert ->
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             abort_tx(TxId, LocalParts, RemoteParts, RepDict),
                             RD1 = dict:erase(TxId, DepDict),
+                            lager:warning("~w aborted!", [TxId]),
                             gen_server:reply(Sender, {aborted, TxId}),
                             {noreply, SD0#state{dep_dict=RD1, tx_id=?NO_TXN, read_aborted=RAD1, read_invalid=RID1}};
                         read ->
@@ -834,6 +849,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
                     case Stage of
                         local_cert -> 
                             abort_tx(CurrentTxId, LocalParts, [], RepDict),
+                            lager:warning("~w aborted!", [CurrentTxId]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             RD1 = dict:erase(CurrentTxId, RD),
                             {noreply, SD0#state{dep_dict=RD1, tx_id=?NO_TXN, 
@@ -843,6 +859,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
                              %lager:warning("Has current txn remote, Pendinglist is ~w, NumAborted is ~w", [PendingList, Length]),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, RepDict),
+                            lager:warning("~w aborted!", [CurrentTxId]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             RD1 = dict:erase(CurrentTxId, RD),
                             {noreply, SD0#state{dep_dict=RD1, tx_id=?NO_TXN, 
