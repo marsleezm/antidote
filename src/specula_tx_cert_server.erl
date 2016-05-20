@@ -653,6 +653,8 @@ terminate(Reason, _SD) ->
     lager:error("Cert server terminated with ~w", [Reason]),
     ok.
 
+add_to_ets(_, false)->
+    ok;
 add_to_ets(V, Tab)->
     [{time_list, List}] = ets:lookup(Tab, time_list),
     %lager:warning("Add ~w to ets ~w", [V, List]),
