@@ -307,7 +307,8 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
                             NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
                                                                 _ -> NumSpeculaRead+1
                                               end, 
-                              %lager:warning("Trying to prepare ~w", [TxId]),
+                            %%% !!!!!!! Add to ets if is not read only
+                            add_to_ets(StartTime, Cdf),
                             case length(PendingList) >= SpeculaLength of
                                 true -> %% Wait instead of speculate.
                                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
@@ -327,13 +328,13 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
                                          fun({_, B, _}) ->   %lager:warning("Previous readdep is ~w", [B]),
                                             {TotalReplFactor*length(RemotePartitions)-AvoidNum, ReadDepTxs--B, LastCommitTs+1} end, DepDict),
                                     ets:insert(PendingTxs, {TxId, {[], RemotePartitions, StartTime, StartTime, TxnType, no_wait}}),
-                                    add_to_ets(StartTime, Cdf),
                                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, min_snapshot_ts=ProposeTS, 
                                 pending_list=PendingList1, num_specula_read=NumSpeculaRead1, txn_type=TxnType}}
                             end
                         end;
                 _ ->
                     LocalPartitions = [P || {P, _} <- LocalUpdates],
+                    add_to_ets(StartTime, Cdf),
                     NumToAck = length(LocalUpdates),
                     DepDict1 = dict:update(TxId, 
                             fun({_, B, _}) ->
@@ -413,7 +414,7 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, c
 %%  Transaction that has already cert_aborted.
 handle_cast({pending_prepared, TxId, PrepareTime}, 
 	    SD0=#state{tx_id=TxId, local_updates=LocalParts, remote_updates=RemoteUpdates, sender=Sender, txn_type=TxnType, 
-                cdf=Cdf, dep_dict=DepDict, pending_list=PendingList, specula_length=SpeculaLength, total_repl_factor=TotalReplFactor, pending_prepares=PendingPrepares, pending_txs=PendingTxs, rep_dict=RepDict, lp_start=LT}) ->  
+               dep_dict=DepDict, pending_list=PendingList, specula_length=SpeculaLength, total_repl_factor=TotalReplFactor, pending_prepares=PendingPrepares, pending_txs=PendingTxs, rep_dict=RepDict, lp_start=LT}) ->  
     %lager:warning("Speculative receive pending_prepared for ~w, current pp is ~w", [TxId, PendingPrepares+1]),
     case dict:find(TxId, DepDict) of
           %% Maybe can commit already.
@@ -437,7 +438,6 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, ProposeTS, TxId, {remote, node()}),
                     gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
                     DepDict1 = dict:store(TxId, {TotalReplFactor*RemoteToAck+PendingPrepares+1-AvoidNum, ReadDepTxs, NewMaxPrep}, DepDict),
-                    add_to_ets(LT, Cdf),
                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, pending_list=PendingList++[TxId]}}
             end;
         {ok, {N, ReadDeps, OldPrepTime}} ->
@@ -477,7 +477,7 @@ handle_cast({prepared, TxId, PrepareTime},
                     {DepDict1, _} = commit_tx(TxId, NewMaxPrep, LocalParts, [], 
                                     dict:erase(TxId, DepDict), RepDict),
                     case Cdf of false -> ok;
-                                _ -> LastTime = first(Cdf, LT),
+                                _ -> LastTime = find_and_delete(LT, Cdf),
                                      %lager:warning("Last time is ~w, Now is ~w", [LastTime, os:timestamp()]),
                                      ets:insert(Cdf, {TxId, get_time_diff(LastTime, os:timestamp())})
                     end,
@@ -502,7 +502,6 @@ handle_cast({prepared, TxId, PrepareTime},
                             %lager:warning("Proposets for ~w is ~w", [ProposeTS, TxId]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, ProposeTS, TxId, {remote, node()}),
                             gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
-                            add_to_ets(LT, Cdf),
                             DepDict1 = dict:store(TxId, {TotalReplFactor*RemoteToAck+PendingPrepares-NumAvoid, ReadDepTxs, NewMaxPrep}, DepDict),
                             {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, pending_list=PendingList++[TxId], min_snapshot_ts=NewMaxPrep}}
                     end
@@ -665,12 +664,12 @@ find([V|L], V) ->
 find([_|L], V) ->
     find(L, V).
 
-first(Cdf, Default) ->
-    [{time_list, L}] = ets:lookup(Cdf, time_list),
-    case L of [] -> Default;
-              _ -> ets:insert(Cdf, {time_list, []}),
-                   hd(L)
-    end.
+%first(Cdf, Default) ->
+%    [{time_list, L}] = ets:lookup(Cdf, time_list),
+%    case L of [] -> Default;
+%              _ -> ets:insert(Cdf, {time_list, []}),
+%                   hd(L)
+%    end.
 
 %%%%%%%%%%%%%%%%%%%%%
 try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, rep_dict=RepDict, dep_dict=DepDict, 
@@ -686,7 +685,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                 DepDict2, RepDict),
             gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
             case Cdf of false -> ok;
-                        _ -> LastTime = first(Cdf, LT),
+                        _ -> LastTime = find_and_delete(LT, Cdf),
                              %lager:warning("Last time is ~w, Now is ~w", [LastTime, os:timestamp()]),
                              ets:insert(Cdf, {PendingTxId, get_time_diff(LastTime, os:timestamp())})
             end,
@@ -745,7 +744,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
                     dict:erase(CurrentTxId, DepDict2), RepDict),
                     case Cdf of false -> ok;
-                                _ -> LastTime = first(Cdf, LT),
+                                _ -> LastTime = find_and_delete(LT, Cdf),
                                     %lager:warning("Last time is ~w, Now is ~w", [LastTime, os:timestamp()]),
                                     ets:insert(Cdf, {CurrentTxId, get_time_diff(LastTime, os:timestamp())})
                     end,
@@ -761,7 +760,6 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime}}),
                     PendingList1 = NewPendingList ++ [CurrentTxId],
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
-                    add_to_ets(LT, Cdf),
                     ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, LT, RT, TxnType, waited}}),
                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict3, 
                             pending_list=PendingList1, min_commit_ts=NewMaxPT, min_snapshot_ts=SpeculaPrepTime,
