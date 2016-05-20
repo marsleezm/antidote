@@ -430,9 +430,12 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, specula_read=SpeculaRead, current_dict=CurrentDict}) ->
     %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
     lists:foreach(fun(Partition) ->
-                    [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
-                    ets:delete(PendingLog, {TxId, Partition}),
-                    update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog)
+                    %[{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
+                    case ets:lookup(PendingLog, {TxId, Partition}) of [] -> ok; 
+                                            [{{TxId, Partition}, KeySet}] ->
+                                            ets:delete(PendingLog, {TxId, Partition}),
+                                            update_store(KeySet, TxId, CommitTime, ReplicatedLog, PendingLog)
+                    end
         end, Partitions),
     case SpeculaRead of
         true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
