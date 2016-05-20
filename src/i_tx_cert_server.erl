@@ -44,8 +44,11 @@
 
 -record(state, {partition :: non_neg_integer(),
         tx_id :: txid(),
+        name :: atom(),
         rep_dict :: dict(),
+        cdf :: cache_id()|false,
         prepare_time = 0 :: non_neg_integer(),
+        pend_txn_start=nil :: non_neg_integer()|nil,
         stage :: read | local_cert | remote_cert,
         lp_start :: term(),
         rp_start :: term(),
@@ -67,13 +70,13 @@
 start_link(Name) ->
     lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
     gen_server:start_link({local, Name},
-             ?MODULE, [], []).
+             ?MODULE, [Name], []).
 
 %%%===================================================================
 %%% Internal
 %%%===================================================================
 
-init([]) ->
+init([Name]) ->
     RepDict = hash_fun:build_rep_dict(true),
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
     [{_, Replicas}] = ets:lookup(meta_info, node()),
@@ -85,9 +88,26 @@ init([]) ->
     D4 = dict:store({payment, abort}, {0, 0, 0}, D3),
     D5 = dict:store({general, commit}, {0, 0, 0}, D4),
     D6 = dict:store({general, abort}, {0, 0, 0}, D5),
-    {ok, #state{do_repl=antidote_config:get(do_repl), stat_dict=D6, total_repl_factor=TotalReplFactor, last_commit_ts=0, rep_dict=RepDict}}.
+    Cdf = case antidote_config:get(cdf, false) of
+                true -> ets:new(Name, [private, set]);
+                _ -> false
+            end,
+    {ok, #state{do_repl=antidote_config:get(do_repl), stat_dict=D6, name=Name, total_repl_factor=TotalReplFactor, last_commit_ts=0, rep_dict=RepDict, cdf=Cdf}}.
 
-handle_call({get_cdf}, _Sender, SD0) ->
+handle_call({get_cdf}, _Sender, SD0=#state{name=Name, cdf=Cdf}) ->
+    case Cdf of false -> ok;
+                _ ->
+                    List = ets:tab2list(Cdf),
+                    case List of [] -> ok;
+                                _ ->
+                                    FinalFileName = atom_to_list(Name) ++ "final-latency",
+                                    {ok, FinalFile} = file:open(FinalFileName, [raw, binary, write]),
+                                    lists:foreach(fun({_, Lat}) ->
+                                                        file:write(FinalFile,  io_lib:format("~w\n", [Lat]))
+                                                  end, List),
+                                    file:close(FinalFile)
+                    end
+    end,
     {reply, ok, SD0};
 
 handle_call({get_stat}, _Sender, SD0=#state{stat_dict=StatDict}) ->
@@ -124,8 +144,10 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0); 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, _}},  Sender, SD0) ->
-    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0); 
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, Time}},  Sender, SD0=#state{pend_txn_start=nil}) ->
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0#state{pend_txn_start=Time});
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, _Time}},  Sender, SD0) ->
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0);
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=#state{last_commit_ts=LastCommitTs, 
             total_repl_factor=TotalReplFactor}) ->
     case length(LocalUpdates) of
@@ -157,7 +179,14 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     Sup ! done,
     {noreply, SD0};
 
-handle_cast({clean_data, Sender}, SD0) ->
+handle_cast({clean_data, Sender}, SD0=#state{cdf=OldCdf, name=Name}) ->
+    case OldCdf of false -> ok;
+                    _ -> ets:delete(OldCdf)
+                end,
+    Cdf = case antidote_config:get(cdf, false) of
+                true -> ets:new(Name, [private, set]);
+                _ -> false
+            end,
     Sender ! cleaned,
     StatDict = dict:new(),
     D1 = dict:store({new_order, commit}, {0, 0, 0}, StatDict),
@@ -166,10 +195,10 @@ handle_cast({clean_data, Sender}, SD0) ->
     D4 = dict:store({payment, abort}, {0, 0, 0}, D3),
     D5 = dict:store({general, commit}, {0, 0, 0}, D4),
     D6 = dict:store({general, abort}, {0, 0, 0}, D5),
-    {noreply, SD0#state{stat_dict=D6}};
+    {noreply, SD0#state{stat_dict=D6,cdf=Cdf, pend_txn_start=nil}};
 
 handle_cast({prepared, TxId, PrepareTime}, 
-	    SD0=#state{to_ack=N, tx_id=TxId, pending_to_ack=PN, local_parts=LocalParts, stage=local_cert,
+	    SD0=#state{to_ack=N, tx_id=TxId, pending_to_ack=PN, local_parts=LocalParts, stage=local_cert, cdf=Cdf, pend_txn_start=PendStart,
             remote_parts=RemoteUpdates, sender=Sender, prepare_time=OldPrepTime, total_repl_factor=TotalReplFactor, rep_dict=RepDict}) ->
     case N of
         1 -> 
@@ -182,7 +211,8 @@ handle_cast({prepared, TxId, PrepareTime},
                             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
                             repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
                             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-                            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime}};
+                            ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
+                            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, pend_txn_start=nil}};
                         _ ->
                             {noreply, SD0#state{to_ack=PN, pending_to_ack=0, rp_start=os:timestamp(), prepare_time=max(PrepareTime, OldPrepTime), stage=remote_cert}}
                     end;
@@ -224,8 +254,7 @@ handle_cast({aborted, _, _}, SD0=#state{stage=local_cert}) ->
 %    {noreply, SD0};
 
 handle_cast({prepared, TxId, PrepareTime}, 
-	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, rep_dict=RepDict, txn_type=TxnType, stat_dict=StatDict, 
-            prepare_time=MaxPrepTime, to_ack=N, lp_start=LP, rp_start=RP, local_parts=LocalParts, stage=remote_cert}) ->
+	    SD0=#state{remote_parts=RemoteParts, sender=Sender, tx_id=TxId, rep_dict=RepDict, txn_type=TxnType, stat_dict=StatDict, pend_txn_start=PendStart, prepare_time=MaxPrepTime, to_ack=N, lp_start=LP, rp_start=RP, cdf=Cdf, local_parts=LocalParts, stage=remote_cert}) ->
     case N of
         1 ->
             CommitTime = max(MaxPrepTime, PrepareTime),
@@ -234,9 +263,10 @@ handle_cast({prepared, TxId, PrepareTime},
             repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
             repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, false, RepDict),
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
+            ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
             StatDict1 = dict:update({TxnType, commit},
             fun({V1, V2, V3}) -> {V1+timer:now_diff(RP, LP), V2+timer:now_diff(os:timestamp(), RP), V3+1} end, StatDict),
-            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, stat_dict=StatDict1}};
+            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, stat_dict=StatDict1, pend_txn_start=nil}};
         N ->
             {noreply, SD0#state{to_ack=N-1, prepare_time=max(MaxPrepTime, PrepareTime)}}
     end;
@@ -282,3 +312,5 @@ terminate(Reason, _SD) ->
    lager:info("Cert server terminated with ~w", [Reason]),
     ok.
 
+get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->
+    ((A2-A1)*1000000+ (B2-B1))*1000000+ C2-C1.
