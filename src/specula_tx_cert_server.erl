@@ -309,7 +309,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
                                               end, 
                             %%% !!!!!!! Add to ets if is not read only
                             %lager:warning("~w add ~w to ets", [TxId, StartTime]),
-                            add_to_ets(StartTime, Cdf),
+                            add_to_ets(StartTime, Cdf, PendingList),
                             case length(PendingList) >= SpeculaLength of
                                 true -> %% Wait instead of speculate.
                                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
@@ -336,7 +336,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
                 _ ->
                     LocalPartitions = [P || {P, _} <- LocalUpdates],
                     %lager:warning("~w add ~w to ets", [TxId, StartTime]),
-                    add_to_ets(StartTime, Cdf),
+                    add_to_ets(StartTime, Cdf, PendingList),
                     NumToAck = length(LocalUpdates),
                     DepDict1 = dict:update(TxId, 
                             fun({_, B, _}) ->
@@ -356,12 +356,12 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
             %lager:warning("Aborting txn due to invalidTS ~w!", [TxId]),
               %lager:warning("~w Read aborted! ReadAborted is now ~w", [TxId, ReadAborted+1]),
             %lager:warning("~w aborted!", [TxId]),
-            add_to_ets(StartTime, Cdf),
+            add_to_ets(StartTime, Cdf, PendingList),
             {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict), cascade_aborted=CascadeAborted+1}};
         _ ->
              %lager:warning("~w Read invalid! ReadInvalid is now ~w", [TxId, ReadInvalid+1]),
             %lager:warning("~w aborted!", [TxId]),
-            add_to_ets(StartTime, Cdf),
+            add_to_ets(StartTime, Cdf, PendingList),
             {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict), read_invalid=ReadInvalid+1}}
     end;
 
@@ -483,7 +483,7 @@ handle_cast({prepared, TxId, PrepareTime},
                     {DepDict1, _} = commit_tx(TxId, NewMaxPrep, LocalParts, [], 
                                     dict:erase(TxId, DepDict), RepDict),
                     case Cdf of false -> ok;
-                                _ -> LastTime = find_and_delete(LT, Cdf),
+                                _ -> LastTime = delete_first(Cdf),
                                     %case LastTime of LT -> ok; %lager:warning("First is ~w same as LP", [LastTime]);
                                     %              _ ->  lager:warning("First is ~w, different from LP ~w", [LastTime, LT])
                                     %end,
@@ -653,38 +653,40 @@ terminate(Reason, _SD) ->
     lager:error("Cert server terminated with ~w", [Reason]),
     ok.
 
-add_to_ets(_, false)->
+add_to_ets(_, false, _)->
     ok;
-add_to_ets(V, Tab)->
+add_to_ets(V, Tab, PendingList)->
     [{time_list, List}] = ets:lookup(Tab, time_list),
-    %lager:warning("Add ~w to ets ~w", [V, List]),
-    ets:insert(Tab, {time_list, List++[V]}).
+    Diff = length(List) - length(PendingList),
+    case Diff of 0 ->
+                    ets:insert(Tab, {time_list, List++[V]});
+                _ ->
+                    ok
+    end.      
 
-find_and_delete(_, false) ->
-    0;
-find_and_delete(V, Tab) ->
-    [{time_list, List}] = ets:lookup(Tab, time_list),
-    First = hd(List),
-    Rest = find(List, V),
-    %lager:warning("List is ~w, new list is ~w", [List, Rest]),
-    ets:insert(Tab, {time_list, Rest}),
+%find_and_delete(_, false) ->
+%    0;
+%find_and_delete(V, Tab) ->
+%    [{time_list, List}] = ets:lookup(Tab, time_list),
+%    First = hd(List),
+%    Rest = find(List, V),
+%    ets:insert(Tab, {time_list, Rest}),
+%    First.
+
+%find([], V) ->
+%    V = [],
+%    [];
+%find([V|L], V) ->
+%    L;
+%find([_|L], V) ->
+%    find(L, V).
+delete_first(false) ->
+    ok;
+delete_first(Cdf) ->
+    [{time_list, List}] = ets:lookup(Cdf, time_list),
+    [First|Rest] = List,
+    ets:insert(Cdf, {time_list, Rest}),
     First.
-
-find([], V) ->
-    lager:error("WTF!!!"),
-    V = [],
-    [];
-find([V|L], V) ->
-    L;
-find([_|L], V) ->
-    find(L, V).
-
-%first(Cdf, Default) ->
-%    [{time_list, L}] = ets:lookup(Cdf, time_list),
-%    case L of [] -> Default;
-%              _ -> ets:insert(Cdf, {time_list, []}),
-%                   hd(L)
-%    end.
 
 %%%%%%%%%%%%%%%%%%%%%
 try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, rep_dict=RepDict, dep_dict=DepDict, 
@@ -700,7 +702,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                 DepDict2, RepDict),
             gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
             case Cdf of false -> ok;
-                        _ -> LastTime = find_and_delete(LT, Cdf),
+                        _ -> LastTime = delete_first(Cdf),
                             %case LastTime of LT -> ok; % lager:warning("First is ~w same as LP", [LastTime]);
                             %              _ ->  lager:warning("First is ~w, different from LP ~w", [LastTime, LT])
                             %end,
@@ -764,7 +766,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
                     dict:erase(CurrentTxId, DepDict2), RepDict),
                     case Cdf of false -> ok;
-                                _ -> LastTime = find_and_delete(LT, Cdf),
+                                _ -> LastTime = delete_first(Cdf),
                                     %case LastTime of LT -> ok; %lager:warning("First is ~w same as LP", [LastTime]);
                                     %              _ ->  lager:warning("First is ~w, different from LP ~w", [LastTime, LT])
                                     %end,
@@ -952,13 +954,13 @@ commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
 
 commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs, Cdf) ->
    %ning("Committing specula tx ~w with ~w", [TxId, CommitTime]),
-    [{TxId, {LocalParts, RemoteParts, LP, RP, _TxnType, IfWaited}}] = ets:lookup(PendingTxs, TxId),
+    [{TxId, {LocalParts, RemoteParts, _LP, RP, _TxnType, IfWaited}}] = ets:lookup(PendingTxs, TxId),
     true = ets:delete(PendingTxs, TxId),
     %%%%%%%%% Time stat %%%%%%%%%%%
     %LPDiff = get_time_diff(LP, RP),
     %RPDiff = get_time_diff(RP, os:timestamp()),
     %ets:update_counter(PendingTxs, {TxnType, commit}, [{2, 0}, {3, 0}, {4, 1}]),
-    First = find_and_delete(LP, Cdf),
+    First = delete_first(Cdf),
     %case First of LP -> ok; %lager:warning("First is ~w same as LP", [First]);
     %              _ ->  lager:warning("First is ~w, different from LP ~w, RP is ~w", [First, LP, RP])
     %end,
