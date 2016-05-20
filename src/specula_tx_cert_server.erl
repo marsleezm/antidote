@@ -478,7 +478,9 @@ handle_cast({prepared, TxId, PrepareTime},
                                     dict:erase(TxId, DepDict), RepDict),
                     case Cdf of false -> ok;
                                 _ -> LastTime = find_and_delete(LT, Cdf),
-                                     %lager:warning("Last time is ~w, Now is ~w", [LastTime, os:timestamp()]),
+                                    case LastTime of LT -> lager:warning("First is ~w same as LP", [LastTime]);
+                                                  _ ->  lager:warning("First is ~w, different from LP ~w", [LastTime, LT])
+                                    end,
                                      ets:insert(Cdf, {TxId, get_time_diff(LastTime, os:timestamp())})
                     end,
                     gen_server:reply(Sender, {ok, {committed, NewMaxPrep}}),
@@ -686,6 +688,9 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
             gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
             case Cdf of false -> ok;
                         _ -> LastTime = find_and_delete(LT, Cdf),
+                            case LastTime of LT -> lager:warning("First is ~w same as LP", [LastTime]);
+                                          _ ->  lager:warning("First is ~w, different from LP ~w", [LastTime, LT])
+                            end,
                              %lager:warning("Last time is ~w, Now is ~w", [LastTime, os:timestamp()]),
                              ets:insert(Cdf, {PendingTxId, get_time_diff(LastTime, os:timestamp())})
             end,
@@ -745,6 +750,9 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     dict:erase(CurrentTxId, DepDict2), RepDict),
                     case Cdf of false -> ok;
                                 _ -> LastTime = find_and_delete(LT, Cdf),
+                                    case LastTime of LT -> lager:warning("First is ~w same as LP", [LastTime]);
+                                                  _ ->  lager:warning("First is ~w, different from LP ~w", [LastTime, LT])
+                                    end,
                                     %lager:warning("Last time is ~w, Now is ~w", [LastTime, os:timestamp()]),
                                     ets:insert(Cdf, {CurrentTxId, get_time_diff(LastTime, os:timestamp())})
                     end,
@@ -932,7 +940,9 @@ commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs, Cdf) ->
     %RPDiff = get_time_diff(RP, os:timestamp()),
     %ets:update_counter(PendingTxs, {TxnType, commit}, [{2, 0}, {3, 0}, {4, 1}]),
     First = find_and_delete(LP, Cdf),
-    %lager:warning("First is ~w", [First]),
+    case First of LP -> lager:warning("First is ~w same as LP", [First]);
+                  _ ->  lager:warning("First is ~w, different from LP ~w", [First, LP])
+    end,
     case Cdf of false -> ok;
                 _ -> ets:insert(Cdf, {{percv, TxId}, get_time_diff(First, RP)}),
                      %lager:warning("First is ~w, Now is ~w", [First, os:timestamp()]),
