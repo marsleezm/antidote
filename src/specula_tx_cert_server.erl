@@ -316,7 +316,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
                                     DepDict1 = dict:update(TxId, 
                                          fun({_, B, _}) ->   %lager:warning("Previous readdep is ~w", [B]),
                                             {TotalReplFactor*length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1} end, DepDict),
-                                    {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, local_updates=[], lp_start=StartTime, rp_start=StartTime, num_specula_read=NumSpeculaRead1, remote_updates=RemoteUpdates, sender=Sender, stage=remote_cert, txn_type=TxnType}};
+                                    {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, local_updates=[], lp_start=StartTime, num_specula_read=NumSpeculaRead1, remote_updates=RemoteUpdates, sender=Sender, stage=remote_cert, txn_type=TxnType}};
                                 false -> %% Can speculate. After replying, removing TxId
                                       %lager:warning("Speculating directly for ~w", [TxId]),
                                     %% Update specula data structure, and clean the txid so we know current txn is already replied
@@ -328,7 +328,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
                                     DepDict1 = dict:update(TxId, 
                                          fun({_, B, _}) ->   %lager:warning("Previous readdep is ~w", [B]),
                                             {TotalReplFactor*length(RemotePartitions)-AvoidNum, ReadDepTxs--B, LastCommitTs+1} end, DepDict),
-                                    ets:insert(PendingTxs, {TxId, {[], RemotePartitions, StartTime, StartTime, TxnType, no_wait}}),
+                                    ets:insert(PendingTxs, {TxId, {[], RemotePartitions, StartTime, os:timestamp(), TxnType, no_wait}}),
                                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, min_snapshot_ts=ProposeTS, 
                                 pending_list=PendingList1, num_specula_read=NumSpeculaRead1, txn_type=TxnType}}
                             end
@@ -433,7 +433,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                       %lager:warning("Pedning prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                     DepDict1 = dict:store(TxId, {RemoteToAck*TotalReplFactor+PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
-                    {noreply, SD0#state{dep_dict=DepDict1, rp_start=os:timestamp(), stage=remote_cert}};
+                    {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert}};
                 false ->
                      %lager:warning("Pending prep: decided to speculate ~w and prepare to ~w pending list is ~w!!", [TxId, RemoteUpdates, PendingList]),
                     %% Add dependent data into the table
@@ -500,7 +500,7 @@ handle_cast({prepared, TxId, PrepareTime},
                               %lager:warning("Decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                             DepDict1 = dict:store(TxId, {TotalReplFactor*RemoteToAck+PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
-                            {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert, rp_start=os:timestamp()}};
+                            {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert}};
                         false ->
                               %lager:warning("Speculate current tx with ~w, remote parts are ~w, Num is ~w", [TxId, RemoteParts, length(RemoteParts)]),
                             %% Add dependent data into the table
@@ -689,7 +689,7 @@ find([_|L], V) ->
 %%%%%%%%%%%%%%%%%%%%%
 try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, rep_dict=RepDict, dep_dict=DepDict, 
             pending_list=PendingList, read_invalid=ReadInvalid, tx_id=CurrentTxId, committed=Committed,
-            lp_start=LT, rp_start=RT, min_commit_ts=MinCommitTS, sender=Sender, stage=Stage, cdf=Cdf, 
+            lp_start=LT, min_commit_ts=MinCommitTS, sender=Sender, stage=Stage, cdf=Cdf, 
             cascade_aborted=CascadAborted, txn_type=TxnType, local_updates=LocalParts, remote_updates=RemoteUpdates}) ->
     case PendingList of
         [] -> %% This is the just report_committed txn.. But new txn has not come yet.
@@ -783,7 +783,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime}}),
                     PendingList1 = NewPendingList ++ [CurrentTxId],
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
-                    ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, LT, RT, TxnType, waited}}),
+                    ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, LT, os:timestamp(), TxnType, waited}}),
                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict3, 
                             pending_list=PendingList1, min_commit_ts=NewMaxPT, min_snapshot_ts=SpeculaPrepTime,
                                       committed=NewCommitted}}
