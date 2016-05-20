@@ -335,7 +335,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType, StartTime},  S
                         end;
                 _ ->
                     LocalPartitions = [P || {P, _} <- LocalUpdates],
-                    lager:warning("~w add ~w to ets", [TxId, StartTime]),
+                    %lager:warning("~w add ~w to ets", [TxId, StartTime]),
                     add_to_ets(StartTime, Cdf),
                     NumToAck = length(LocalUpdates),
                     DepDict1 = dict:update(TxId, 
