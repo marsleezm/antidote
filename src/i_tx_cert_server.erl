@@ -48,7 +48,7 @@
         rep_dict :: dict(),
         cdf :: cache_id()|false,
         prepare_time = 0 :: non_neg_integer(),
-        pend_txn_start=nil :: non_neg_integer()|nil,
+        pend_txn_start=[],
         stage :: read | local_cert | remote_cert,
         lp_start :: term(),
         rp_start :: term(),
@@ -97,13 +97,17 @@ init([Name]) ->
 handle_call({get_cdf}, _Sender, SD0=#state{name=Name, cdf=Cdf}) ->
     case Cdf of false -> ok;
                 _ ->
-                    List = ets:tab2list(Cdf),
+                    OrgList = ets:tab2list(Cdf),
+                    List = lists:ukeysort(1, OrgList),
                     case List of [] -> ok;
                                 _ ->
                                     FinalFileName = atom_to_list(Name) ++ "final-latency",
                                     {ok, FinalFile} = file:open(FinalFileName, [raw, binary, write]),
-                                    lists:foreach(fun({_, Lat}) ->
-                                                        file:write(FinalFile,  io_lib:format("~w\n", [Lat]))
+                                    lists:foreach(fun({_, Lat}) -> RLat = lists:reverse(Lat), [H|T]=RLat,
+                                                        {_,Res} = lists:foldl(fun(V, {First, Acc}) ->
+                                                                    {First, [get_time_diff(First, V)|Acc]}
+                                                                    end, {H, []}, T),
+                                                        file:write(FinalFile,  io_lib:format("~w\n", [lists:reverse(Res)]))
                                                   end, List),
                                     file:close(FinalFile)
                     end
@@ -144,10 +148,10 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0); 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, Time}},  Sender, SD0=#state{pend_txn_start=nil}) ->
-    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0#state{pend_txn_start=Time});
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, _Time}},  Sender, SD0) ->
-    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0);
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, Time}},  Sender, SD0=#state{pend_txn_start=L}) ->
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0#state{pend_txn_start=[Time|L]});
+%handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, _Time}},  Sender, SD0) ->
+%    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0);
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=#state{last_commit_ts=LastCommitTs, 
             total_repl_factor=TotalReplFactor}) ->
     case length(LocalUpdates) of
@@ -211,8 +215,9 @@ handle_cast({prepared, TxId, PrepareTime},
                             clocksi_vnode:commit(LocalParts, TxId, CommitTime),
                             repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
                             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-                            ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
-                            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, pend_txn_start=nil}};
+                            %ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
+                            ets:insert(Cdf, {TxId#tx_id.snapshot_time, [os:timestamp()|PendStart]}),
+                            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, pend_txn_start=[]}};
                         _ ->
                             {noreply, SD0#state{to_ack=PN, pending_to_ack=0, rp_start=os:timestamp(), prepare_time=max(PrepareTime, OldPrepTime), stage=remote_cert}}
                     end;
@@ -263,10 +268,12 @@ handle_cast({prepared, TxId, PrepareTime},
             repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
             repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, false, RepDict),
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
-            ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
+            %ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
+            ets:insert(Cdf, {TxId#tx_id.snapshot_time, [os:timestamp()|PendStart]}),
+            %ets:insert(Cdf, {TxId, [os:timestamp()|PendStart]}),
             StatDict1 = dict:update({TxnType, commit},
             fun({V1, V2, V3}) -> {V1+timer:now_diff(RP, LP), V2+timer:now_diff(os:timestamp(), RP), V3+1} end, StatDict),
-            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, stat_dict=StatDict1, pend_txn_start=nil}};
+            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, stat_dict=StatDict1, pend_txn_start=[]}};
         N ->
             {noreply, SD0#state{to_ack=N-1, prepare_time=max(MaxPrepTime, PrepareTime)}}
     end;
