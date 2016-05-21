@@ -199,7 +199,7 @@ handle_cast({clean_data, Sender}, SD0=#state{cdf=OldCdf, name=Name}) ->
     D4 = dict:store({payment, abort}, {0, 0, 0}, D3),
     D5 = dict:store({general, commit}, {0, 0, 0}, D4),
     D6 = dict:store({general, abort}, {0, 0, 0}, D5),
-    {noreply, SD0#state{stat_dict=D6,cdf=Cdf, pend_txn_start=nil}};
+    {noreply, SD0#state{stat_dict=D6,cdf=Cdf, pend_txn_start=[]}};
 
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, pending_to_ack=PN, local_parts=LocalParts, stage=local_cert, cdf=Cdf, pend_txn_start=PendStart,
