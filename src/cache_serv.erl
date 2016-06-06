@@ -104,10 +104,7 @@ commit_specula(TxId, Partition, CommitTime) ->
 init([]) ->
     lager:info("Cache server inited"),
     CacheLog = tx_utilities:open_private_table(cache_log),
-    SpeculaRead = case antidote_config:get(specula_read) of
-                    specula -> true;
-                    nospecula -> false
-                end,
+    SpeculaRead = antidote_config:get(specula_read),
     {ok, #state{specula_read = SpeculaRead,
                 cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}}.
 
@@ -120,7 +117,7 @@ handle_call({get_pid}, _Sender, SD0) ->
 
 handle_call({read, Key, TxId, Node}, Sender, 
 	    SD0=#state{specula_read=false}) ->
-    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
+    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
     {noreply, SD0};
 
 handle_call({clean_data}, _Sender, SD0=#state{cache_log=OldCacheLog}) ->

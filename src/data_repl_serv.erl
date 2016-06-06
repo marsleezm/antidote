@@ -161,10 +161,7 @@ init([Name, _Parts]) ->
     ReplicatedLog = tx_utilities:open_public_table(repl_log),
     PendingLog = tx_utilities:open_private_table(pending_log),
     NumPartitions = length(hash_fun:get_partitions()),
-    SpeculaRead = case antidote_config:get(specula_read) of
-                        specula -> true; 
-                        nospecula -> false
-                  end,
+    SpeculaRead = antidote_config:get(specula_read),
     Concurrent = antidote_config:get(concurrent),
     SpeculaLength = antidote_config:get(specula_length),
     %TsDict = lists:foldl(fun(Part, Acc) ->
