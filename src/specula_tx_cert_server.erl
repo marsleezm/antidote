@@ -462,7 +462,7 @@ handle_cast({prepared, TxId, PrepareTime},
                     {DepDict1, _} = commit_tx(TxId, NewMaxPrep, LocalParts, [], 
                                     dict:erase(TxId, DepDict), RepDict),
                     case Cdf of false -> ok;
-                                _ -> ets:insert(Cdf, {TxId, get_time_diff(os:timestamp(), LT)})
+                                _ -> ets:insert(Cdf, {TxId, get_time_diff(LT, os:timestamp())})
                     end,
                     gen_server:reply(Sender, {ok, {committed, NewMaxPrep}}),
                     {noreply, SD0#state{min_commit_ts=CommitTime, tx_id=?NO_TXN, pending_list=[], 
@@ -638,7 +638,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                 DepDict2, RepDict),
             gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
             case Cdf of false -> ok;
-                        _ -> ets:insert(Cdf, {PendingTxId, get_time_diff(os:timestamp(), LT)})
+                        _ -> ets:insert(Cdf, {PendingTxId, get_time_diff(LT, os:timestamp())})
             end,
             {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN,
                  pending_list=[], dep_dict=DepDict3, committed=Committed+1}};
@@ -695,7 +695,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
                         dict:erase(CurrentTxId, DepDict2), RepDict),
                     case Cdf of false -> ok;
-                                _ -> ets:insert(Cdf, {CurrentTxId, get_time_diff(os:timestamp(), LT)})
+                                _ -> ets:insert(Cdf, {CurrentTxId, get_time_diff(LT, os:timestamp())})
                     end,
                     gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
                     {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN, 
