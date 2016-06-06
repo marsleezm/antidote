@@ -163,16 +163,12 @@ clean_data(Sender) ->
 
 get_stat() ->
     SPL = lists:seq(1, ?NUM_SUP),
-    Result = lists:foldl(fun(N, Acc) ->
-                            Res = gen_server:call(generate_module_name(N), {get_stat}),
-                            lager:info("Get stat from ~w is ~p", [N, Res]),
-                            AllZeros = lists:duplicate(20, 0),
-                            case Res of AllZeros -> add_two(Res++[0], Acc, []);
-                                                _ -> add_two(Res++[1], Acc, [])
-                            end
-                            end, lists:duplicate(21,0), SPL),
-    Cnt = lists:nth(21, Result),
-    OtherResult = lists:sublist(Result, 20),
+    lists:foldl(fun(N, Acc) ->
+            Res = gen_server:call(generate_module_name(N), {get_stat}),
+            lager:info("Get stat from ~w is ~p", [N, Res]),
+            %AllZeros = lists:duplicate(7, 0),
+            add_two(Res, Acc, [])
+            end, lists:duplicate(7,0), SPL).
     %LocalServ = hash_fun:get_local_servers(),
     %PRead = lists:foldl(fun(S, Acc) ->
     %                    Num = helper:num_specula_read(S), Num+Acc
@@ -185,11 +181,11 @@ get_stat() ->
     %                    end, {0, 0}, LocalRepNames), 
     %lager:info("Data replica specula read is ~w, Data replica read is ~w", [DSpeculaRead, DTotalRead]),
     %{CacheSpeculaRead, CacheAttemptRead} = cache_serv:num_specula_read(),
-    RealCnt = max(1, Cnt),
-    {ListA, ListB} = lists:split(7, OtherResult),
+    %RealCnt = max(1, Cnt),
+    %{ListA, ListB} = lists:split(7, OtherResult),
     %L1 = ListA ++ [PRead, DSpeculaRead, DTotalRead, CacheSpeculaRead, CacheAttemptRead],
-    Avg = lists:map(fun(E) -> E div RealCnt end, ListB),
-    ListA ++ Avg.    
+    %Avg = lists:map(fun(E) -> E div RealCnt end, ListB),
+    %ListA ++ Avg.    
 
 get_cdf() ->
     SPL = lists:seq(1, ?NUM_SUP),
