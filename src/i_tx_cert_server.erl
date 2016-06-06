@@ -129,7 +129,7 @@ handle_call({start_read_tx}, _Sender, SD0) ->
     {reply, TxId, SD0};
 
 handle_call({read, Key, TxId, Node}, Sender, SD0) ->
-    clocksi_vnode:relay_read(Node, Key, TxId, Sender, no_specula),
+    clocksi_vnode:relay_read(Node, Key, TxId, Sender, false),
     {noreply, SD0};
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
