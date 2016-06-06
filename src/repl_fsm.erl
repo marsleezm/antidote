@@ -181,7 +181,7 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                         {remote, SenderName} ->
                             case dict:find(SenderName, ExceptReplicas) of
                                 {ok, []} ->
-                                    gen_server:cast(Sender, {prepared, TxId, PrepareTime});
+                                    ok;
                                 {ok, R} -> 
                                    %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
                                     %ets:insert(PendingLog, {{TxId, Partition}, Sender, 
