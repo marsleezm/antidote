@@ -350,7 +350,6 @@ handle_command({check_servers_ready},_Sender,SD0) ->
 handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{
             inmemory_store=InMemoryStore, partition=_Partition}) ->
     %MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
-    %clock_service:update_ts(TxId#tx_id.snapshot_time),
     Result = read_value(Key, TxId, InMemoryStore),
    %lager:warning("~w, Reading ~w value is ~w", [TxId, Key, Result]),
     {reply, Result, SD0};
@@ -358,7 +357,6 @@ handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{
 handle_command({read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBlocked, 
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=_Partition}) ->
    %lager:info("Got read for ~w", [Key]),
-    %clock_service:update_ts(TxId#tx_id.snapshot_time),
     case ready_or_block(TxId, Key, PreparedTxs, Sender) of
         not_ready->
             %lager:info("Not ready for ~w", [Key]),
@@ -373,7 +371,6 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
     %{NumRR, AccRR} = RelayRead,
   %lager:error("~w relay read ~p", [TxId, Key]),
-    %clock_service:update_ts(TxId#tx_id.snapshot_time),
     %T1 = os:timestamp(),
     case From of
         no_specula ->

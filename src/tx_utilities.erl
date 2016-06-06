@@ -21,13 +21,6 @@
 
 -include("antidote.hrl").
 
-
--ifdef(TEST).
--define(GET_AND_UPDATE_TS(_), now_microsec()).
--else.
--define(GET_AND_UPDATE_TS(Clock), clock_service:get_and_update_ts(Clock)).
--endif.
-
 -export([create_tx_id/1, now_microsec/0, open_table/2, open_private_table/1, get_table_name/2, open_public_table/1]).
 
 -spec create_tx_id(snapshot_time() | ignore) -> txid().
