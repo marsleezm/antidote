@@ -358,7 +358,6 @@ handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{
 
 handle_command({read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBlocked, 
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=_Partition, max_ts=MaxTS}) ->
-    %clock_service:update_ts(TxId#tx_id.snapshot_time),
     MaxTS1 = max(MaxTS, TxId#tx_id.snapshot_time),
     case ready_or_block(TxId, Key, PreparedTxs, Sender) of
         not_ready->
@@ -374,7 +373,6 @@ handle_command({relay_read, Key, TxId, Reader, From}, _Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS}) ->
     %{NumRR, AccRR} = RelayRead,
   %lager:error("~w relay read ~p", [TxId, Key]),
-    %clock_service:update_ts(TxId#tx_id.snapshot_time),
     %T1 = os:timestamp(),
     MaxTS1 = max(MaxTS, TxId#tx_id.snapshot_time),
     %lager:warning("MaxTS is ~w", [MaxTS]),

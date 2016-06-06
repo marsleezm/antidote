@@ -80,30 +80,11 @@ init(_Args) ->
     VnodeMaster = { clocksi_vnode_master,
                         {riak_core_vnode_master, start_link, [clocksi_vnode]},
                         permanent, 5000, worker, [riak_core_vnode_master]}, 
-
-    %ClockSIsTxCoordSup =  { clocksi_static_tx_coord_sup,
-    %                       {clocksi_static_tx_coord_sup, start_link, []},
-    %                       permanent, 5000, supervisor, [clockSI_static_tx_coord_sup]},
-
-    %ClockSIiTxCoordSup =  { clocksi_interactive_tx_coord_sup,
-    %                        {clocksi_interactive_tx_coord_sup, start_link, []},
-    %                        permanent, 5000, supervisor,
-    %                        [clockSI_interactive_tx_coord_sup]},
     
     ReplFsmSup = {repl_fsm_sup,
                   {repl_fsm_sup, start_link, []},
                   permanent, 5000, supervisor,
                   [repl_fsm_sup]},
-
-    %ClockService = {clock_service,
-    %                {clock_service,  start_link,
-    %                []},
-    %                permanent, 5000, worker, [clock_service]},
-
-    StatServer = {stat_server,
-                    {stat_server,  start_link,
-                    []},
-                    permanent, 5000, worker, [stat_server]},
 
     CertSup = {tx_cert_sup,
                     {tx_cert_sup,  start_link, []},
@@ -113,10 +94,5 @@ init(_Args) ->
     {ok,
      {{one_for_one, 5, 10},
       [VnodeMaster,
-       %ClockSIsTxCoordSup,
-       %ClockSIiTxCoordSup,
-       %GeneralTxSup,
        ReplFsmSup,
-       %ClockService,
-       CertSup,
-       StatServer]}}.
+       CertSup]}}.
