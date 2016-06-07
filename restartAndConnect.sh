@@ -9,7 +9,7 @@ else
     DoSpecula=true
     FastReply=true
     SpeculaLength=5
-    SpeculaRead=specula
+    SpeculaRead=true
 fi
 
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev1/antidote.config
