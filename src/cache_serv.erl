@@ -132,7 +132,7 @@ handle_call({read, Key, TxId, Node}, Sender,
     case ets:lookup(CacheLog, Key) of
         [] ->
             %lager:info("Relaying read to ~w", [Node]),
-            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
+            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
             %lager:info("Well, from clocksi_vnode"),
             %lager:info("Nothing!"),
             {noreply, SD0};
@@ -147,7 +147,7 @@ handle_call({read, Key, TxId, Node}, Sender,
                     %{reply, {{specula, SpeculaTxId}, Value}, SD0};
                     {reply, {ok, Value}, SD0};
                 [] ->
-                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, no_specula),
+                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
                     %lager:info("Well, from clocksi_vnode"),
                     {noreply, SD0}
             end
