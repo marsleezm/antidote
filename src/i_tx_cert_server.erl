@@ -48,10 +48,8 @@
         rep_dict :: dict(),
         cdf :: cache_id()|false,
         prepare_time = 0 :: non_neg_integer(),
-        pend_txn_start=[],
+        pend_txn_start=nil,
         stage :: read | local_cert | remote_cert,
-        lp_start :: term(),
-        rp_start :: term(),
         local_parts :: [],
         remote_parts :: [],
         txn_type :: term(),
@@ -95,11 +93,7 @@ handle_call({get_cdf}, _Sender, SD0=#state{name=Name, cdf=Cdf}) ->
                                 _ ->
                                     FinalFileName = atom_to_list(Name) ++ "final-latency",
                                     {ok, FinalFile} = file:open(FinalFileName, [raw, binary, write]),
-                                    lists:foreach(fun({_, Lat}) -> RLat = lists:reverse(Lat), [H|T]=RLat,
-                                                        {_,Res} = lists:foldl(fun(V, {First, Acc}) ->
-                                                                    {First, [get_time_diff(First, V)|Acc]}
-                                                                    end, {H, []}, T),
-                                                        file:write(FinalFile,  io_lib:format("~w\n", [lists:reverse(Res)]))
+                                    lists:foreach(fun({_, Lat}) -> file:write(FinalFile,  io_lib:format("~w\n", [Lat]))
                                                   end, List),
                                     file:close(FinalFile)
                     end
@@ -120,6 +114,8 @@ handle_call({get_hash_fun}, _Sender, SD0) ->
     L = hash_fun:get_hash_fun(),
     {reply, L, SD0};
 
+handle_call({start_tx, _, _}, Sender, SD0) ->
+    handle_call({start_tx}, Sender, SD0);
 handle_call({start_tx}, _Sender, SD0=#state{last_commit_ts=LastCommitTS}) ->
     TxId = tx_utilities:create_tx_id(LastCommitTS+1),
     {reply, TxId, SD0#state{last_commit_ts=LastCommitTS+1, stage=read, pending_to_ack=0}};
@@ -132,13 +128,11 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
     clocksi_vnode:relay_read(Node, Key, TxId, Sender, false),
     {noreply, SD0};
 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
-    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0); 
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, Time}},  Sender, SD0=#state{pend_txn_start=L}) ->
-    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0#state{pend_txn_start=[Time|L]});
-%handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, _Time}},  Sender, SD0) ->
-%    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, general}, Sender, SD0);
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=#state{last_commit_ts=LastCommitTs, 
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, Time}},  Sender, SD0=#state{pend_txn_start=nil}) ->
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates}, Sender, SD0#state{pend_txn_start=Time});
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, _Time}},  Sender, SD0) ->
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates}, Sender, SD0);
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{last_commit_ts=LastCommitTs, 
             total_repl_factor=TotalReplFactor}) ->
     case length(LocalUpdates) of
         0 ->
@@ -149,13 +143,14 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, TxnType},  Sender, SD0=
                     RemoteParts = [P || {P, _} <- RemoteUpdates],
                     clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
                     Now = os:timestamp(),
-                    {noreply, SD0#state{tx_id=TxId, lp_start=Now, rp_start=Now, to_ack=length(RemoteUpdates)*TotalReplFactor, local_parts=[], remote_parts=RemoteParts, sender=Sender, stage=remote_cert, txn_type=TxnType}}
+                    {noreply, SD0#state{tx_id=TxId, pend_txn_start=Now, to_ack=length(RemoteUpdates)*TotalReplFactor, local_parts=[], remote_parts=RemoteParts, sender=Sender, stage=remote_cert}}
             end;
         N ->
             LocalParts = [Part || {Part, _} <- LocalUpdates],
+            Now = os:timestamp(),
             clocksi_vnode:prepare(LocalUpdates, TxId, local),
             {noreply, SD0#state{tx_id=TxId, to_ack=N, pending_to_ack=N*(TotalReplFactor-1), local_parts=LocalParts, remote_parts=
-                RemoteUpdates, sender=Sender, stage=local_cert, lp_start=os:timestamp(), rp_start=0, txn_type=TxnType}}
+                RemoteUpdates, sender=Sender, stage=local_cert, pend_txn_start=Now}}
     end;
 
 handle_call({go_down},_Sender,SD0) ->
@@ -178,7 +173,7 @@ handle_cast({clean_data, Sender}, SD0=#state{cdf=OldCdf, name=Name}) ->
                 _ -> false
             end,
     Sender ! cleaned,
-    {noreply, SD0#state{cdf=Cdf, pend_txn_start=[]}};
+    {noreply, SD0#state{cdf=Cdf, pend_txn_start=nil}};
 
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{to_ack=N, tx_id=TxId, pending_to_ack=PN, local_parts=LocalParts, stage=local_cert, cdf=Cdf, pend_txn_start=PendStart,
@@ -195,16 +190,18 @@ handle_cast({prepared, TxId, PrepareTime},
                             repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
                             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
                             %ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
-                            ets:insert(Cdf, {TxId#tx_id.snapshot_time, [os:timestamp()|PendStart]}),
-                            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, pend_txn_start=[]}};
+                            case Cdf of false -> ok;
+                                        _ -> ets:insert(Cdf, {TxId#tx_id.snapshot_time, get_time_diff(PendStart, os:timestamp())})
+                            end, 
+                            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, pend_txn_start=nil}};
                         _ ->
-                            {noreply, SD0#state{to_ack=PN, pending_to_ack=0, rp_start=os:timestamp(), prepare_time=max(PrepareTime, OldPrepTime), stage=remote_cert}}
+                            {noreply, SD0#state{to_ack=PN, pending_to_ack=0, prepare_time=max(PrepareTime, OldPrepTime), stage=remote_cert}}
                     end;
                 L ->
                     MaxPrepTime = max(PrepareTime, OldPrepTime),
                     clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
                     {noreply, SD0#state{prepare_time=MaxPrepTime, to_ack=L*TotalReplFactor+PN, pending_to_ack=0,
-                        remote_parts=RemoteParts, stage=remote_cert, rp_start=os:timestamp()}}
+                        remote_parts=RemoteParts, stage=remote_cert}}
                 end;
         _ ->
             MaxPrepTime = max(OldPrepTime, PrepareTime),
@@ -243,9 +240,11 @@ handle_cast({prepared, TxId, PrepareTime},
             repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, false, RepDict),
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
             %ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
-            ets:insert(Cdf, {TxId#tx_id.snapshot_time, [os:timestamp()|PendStart]}),
+            case Cdf of false -> ok;
+                        _ -> ets:insert(Cdf, {TxId#tx_id.snapshot_time, get_time_diff(PendStart, os:timestamp())})
+            end,
             %ets:insert(Cdf, {TxId, [os:timestamp()|PendStart]}),
-            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, pend_txn_start=[]}};
+            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, pend_txn_start=nil}};
         N ->
             {noreply, SD0#state{to_ack=N-1, prepare_time=max(MaxPrepTime, PrepareTime)}}
     end;
