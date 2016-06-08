@@ -76,7 +76,7 @@
         lp_start :: non_neg_integer(),
         rp_start :: non_neg_integer(),
         %specula_length :: non_neg_integer(),
-        if_specula :: boolean(),
+        specula_commit :: boolean(),
 
         stage :: read|local_cert|remote_cert,
         %specula_data :: cache_id(),
@@ -88,7 +88,6 @@
         min_snapshot_ts = 0 :: non_neg_integer(),
         invalid_ts=0 :: non_neg_integer(),
         pending_prepares=0 :: non_neg_integer(),
-        num_specula_read=0 :: non_neg_integer(),
         committed=0 :: non_neg_integer(),
         start_prepare=0 :: non_neg_integer(),
         txn_type :: term(),
@@ -143,12 +142,14 @@ handle_call({start_read_tx}, _Sender, SD0) ->
     TxId = tx_utilities:create_tx_id(0),
     {reply, TxId, SD0};
 
-handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS}) ->
+handle_call({start_tx}, _Sender, SD0=#state{specula_read=SpeculaRead}) ->
+    handle_call({start_tx, SpeculaRead, false}, _Sender, SD0);
+handle_call({start_tx, SpeculaRead, SpeculaCommit}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS}) ->
     NewSnapshotTS = max(MinSnapshotTS, MinCommitTS) + 1, 
-    TxId = tx_utilities:create_tx_id(NewSnapshotTS),
+    TxId = tx_utilities:create_tx_id(NewSnapshotTS, SpeculaRead),
     %lager:warning("Starting txid ~w, MinSnapshotTS is ~w", [TxId, MinSnapshotTS+1]),
     D1 = dict:store(TxId, {0, [], 0}, D),
-    {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS, pending_prepares=0}};
+    {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS, pending_prepares=0, specula_commit=SpeculaCommit}};
 
 handle_call({get_cdf}, _Sender, SD0=#state{name=Name, cdf=Cdf}) ->
     case Cdf of false -> ok;
@@ -176,9 +177,9 @@ handle_call({get_cdf}, _Sender, SD0=#state{name=Name, cdf=Cdf}) ->
     {reply, ok, SD0};
 
 
-handle_call({get_stat}, _Sender, SD0=#state{cert_aborted=CertAborted, committed=Committed, read_aborted=ReadAborted, cascade_aborted=CascadeAborted, num_specula_read=NumSpeculaRead, read_invalid=ReadInvalid}) ->
+handle_call({get_stat}, _Sender, SD0=#state{cert_aborted=CertAborted, committed=Committed, read_aborted=ReadAborted, cascade_aborted=CascadeAborted, read_invalid=ReadInvalid}) ->
     %lager:warning("Num of read cert_aborted ~w, Num of cert_aborted is ~w, Num of committed is ~w, NumSpeculaRead is ~w", [ReadAborted, CascadeAborted, Committed, NumSpeculaRead]),
-    {reply, [ReadAborted, ReadInvalid, CertAborted, CascadeAborted, Committed, 0, NumSpeculaRead], SD0};
+    {reply, [ReadAborted, ReadInvalid, CertAborted, CascadeAborted, Committed, 0, 0], SD0};
 
 handle_call({set_int_data, Type, Param}, _Sender, SD0)->
     case Type of
@@ -249,10 +250,10 @@ handle_call({get_int_data, Type, Param}, _Sender, SD0=#state{pending_list=Pendin
     end;
 
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
-    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, os:timestamp(), false},  Sender, SD0);
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, os:timestamp()},  Sender, SD0);
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, Time}},  Sender, SD0) ->
-    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, Time, false}, Sender, SD0);
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime, IfSpecula},  Sender, SD0=#state{rep_dict=RepDict, cascade_aborted=CascadeAborted, read_invalid=ReadInvalid, total_repl_factor=TotalReplFactor, committed=Committed, pending_txs=PendingTxs, min_commit_ts=LastCommitTs, tx_id=TxId,  invalid_ts=InvalidTs, pending_list=PendingList, dep_dict=DepDict, num_specula_read=NumSpeculaRead, cdf=Cdf}) ->
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, Time}, Sender, SD0);
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD0=#state{rep_dict=RepDict, cascade_aborted=CascadeAborted, read_invalid=ReadInvalid, total_repl_factor=TotalReplFactor, committed=Committed, pending_txs=PendingTxs, min_commit_ts=LastCommitTs, tx_id=TxId,  invalid_ts=InvalidTs, pending_list=PendingList, dep_dict=DepDict, cdf=Cdf, specula_commit=SpeculaCommit}) ->
     %% If there was a legacy ongoing transaction.
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
@@ -277,20 +278,17 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime, IfSpecula}, 
                                       {noreply, SD0#state{dep_dict=DepDict1, tx_id=?NO_TXN}}
                             end;
                         _ ->
-                            NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
-                                                                _ -> NumSpeculaRead+1
-                                              end, 
                             %%% !!!!!!! Add to ets if is not read only
                             %lager:warning("~w add ~w to ets", [TxId, StartTime]),
                             add_to_ets(StartTime, Cdf, PendingList),
                             %case length(PendingList) >= SpeculaLength of
-                            case IfSpecula of
+                            case SpeculaCommit of
                                 false -> %% Wait instead of speculate.
                                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                                     DepDict1 = dict:update(TxId, 
                                          fun({_, B, _}) ->   %lager:warning("Previous readdep is ~w", [B]),
                                             {TotalReplFactor*length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1} end, DepDict),
-                                    {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, local_updates=[], lp_start=StartTime, num_specula_read=NumSpeculaRead1, remote_updates=RemoteUpdates, sender=Sender, stage=remote_cert}};
+                                    {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, local_updates=[], lp_start=StartTime, remote_updates=RemoteUpdates, sender=Sender, stage=remote_cert}};
                                 true -> %% Can speculate. After replying, removing TxId
                                       %lager:warning("Speculating directly for ~w", [TxId]),
                                     %% Update specula data structure, and clean the txid so we know current txn is already replied
@@ -304,7 +302,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime, IfSpecula}, 
                                             {TotalReplFactor*length(RemotePartitions)-AvoidNum, ReadDepTxs--B, LastCommitTs+1} end, DepDict),
                                     ets:insert(PendingTxs, {TxId, {[], RemotePartitions, StartTime, os:timestamp(), no_wait}}),
                                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, min_snapshot_ts=ProposeTS, 
-                                pending_list=PendingList1, num_specula_read=NumSpeculaRead1}}
+                                pending_list=PendingList1}}
                             end
                         end;
                 _ ->
@@ -317,13 +315,10 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime, IfSpecula}, 
                              {NumToAck, ReadDepTxs--B, LastCommitTs+1} end, DepDict),
                     %lager:warning("Prepare ~w to ~w", [TxId, LocalPartitions]),
                     ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local),
-                    NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
-                                                        _ -> NumSpeculaRead+1
-                                      end,
                     %lager:warning("Total repl fact is ~w", [TotalReplFactor]),
                     %lager:warning("Total to ack is ~w", [(TotalReplFactor-1)*NumToAck]),
                     {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, sender=Sender, local_updates=LocalPartitions, 
-                        remote_updates=RemoteUpdates, lp_start=StartTime, pending_prepares=(TotalReplFactor-1)*NumToAck, stage=local_cert, num_specula_read=NumSpeculaRead1, if_specula=IfSpecula}}
+                        remote_updates=RemoteUpdates, lp_start=StartTime, pending_prepares=(TotalReplFactor-1)*NumToAck, stage=local_cert, specula_commit=SpeculaCommit}}
             end;
         ?FLOW_ABORT -> 
             %% Some read is invalid even before the txn starts.. If invalid_ts is larger than 0, it can possibly be saved.
@@ -343,8 +338,8 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime, IfSpecula}, 
 %    lager:error("Current tx is cert_aborted, received certify of ~w", [TxId]),
 %    {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict)}};
 
-handle_call({read, Key, TxId, Node}, Sender, SD0=#state{specula_read=SpeculaRead}) ->
-    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, SpeculaRead),
+handle_call({read, Key, TxId, Node}, Sender, SD0) ->
+    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender),
     {noreply, SD0};
 
 handle_call({go_down},_Sender,SD0) ->
@@ -387,7 +382,7 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, c
 %%  Current transaction that has not finished local cert phase
 %%  Transaction that has already cert_aborted.
 handle_cast({pending_prepared, TxId, PrepareTime}, 
-	    SD0=#state{tx_id=TxId, local_updates=LocalParts, remote_updates=RemoteUpdates, sender=Sender, if_specula=IfSpecula, 
+	    SD0=#state{tx_id=TxId, local_updates=LocalParts, remote_updates=RemoteUpdates, sender=Sender, specula_commit=SpeculaCommit, 
                dep_dict=DepDict, pending_list=PendingList, total_repl_factor=TotalReplFactor, pending_prepares=PendingPrepares, pending_txs=PendingTxs, rep_dict=RepDict, lp_start=LT}) ->  
     %lager:warning("Speculative receive pending_prepared for ~w, current pp is ~w", [TxId, PendingPrepares+1]),
     case dict:find(TxId, DepDict) of
@@ -397,7 +392,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
             RemoteParts = [P || {P, _} <- RemoteUpdates],
             RemoteToAck = length(RemoteParts),
             %case length(PendingList) >= SpeculaLength of
-            case IfSpecula of
+            case SpeculaCommit of
                 false ->
                       %lager:warning("Pedning prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
@@ -436,7 +431,7 @@ handle_cast({pending_prepared, _OtherTxId, _}, SD0) ->
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{tx_id=TxId, local_updates=LocalParts, stage=local_cert, total_repl_factor=TotalReplFactor, 
             remote_updates=RemoteUpdates, sender=Sender, dep_dict=DepDict, pending_list=PendingList, 
-             min_commit_ts=LastCommitTs, pending_prepares=PendingPrepares, lp_start=LT, if_specula=IfSpecula,
+             min_commit_ts=LastCommitTs, pending_prepares=PendingPrepares, lp_start=LT, specula_commit=SpeculaCommit,
             pending_txs=PendingTxs, rep_dict=RepDict, committed=Committed, cdf=Cdf}) ->
      %lager:warning("Got local prepare for ~w", [TxId, PrepareTime]),
     case dict:find(TxId, DepDict) of
@@ -464,7 +459,7 @@ handle_cast({prepared, TxId, PrepareTime},
                 false ->
                     %lager:info("Pending list is ~w, pending prepares is ~w, ReadDepTxs is ~w", [PendingList, PendingPrepares, ReadDepTxs]),
                     %case length(PendingList) >= SpeculaLength of
-                    case IfSpecula of
+                    case SpeculaCommit of
                         false -> 
                             %%In wait stage, only prepare and doesn't add data to table
                               %lager:warning("Decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),

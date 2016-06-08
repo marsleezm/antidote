@@ -170,17 +170,10 @@ get_stat() ->
             add_two(Res, Acc, [])
             end, lists:duplicate(7,0), SPL).
     %LocalServ = hash_fun:get_local_servers(),
-    %PRead = lists:foldl(fun(S, Acc) ->
-    %                    Num = helper:num_specula_read(S), Num+Acc
-    %                    end, 0, LocalServ), 
     %Lists = antidote_config:get(to_repl),
     %[LocalRepList] = [LocalReps || {Node, LocalReps} <- Lists, Node == node()],
     %LocalRepNames = [list_to_atom(atom_to_list(node())++"repl"++atom_to_list(L))  || L <- LocalRepList ],
-    %{DSpeculaRead, DTotalRead} = lists:foldl(fun(S, {Acc1, Acc2}) ->
-    %                    {Num1, Num2} = data_repl_serv:num_specula_read(S), {Num1+Acc1, Num2+Acc2}
-    %                    end, {0, 0}, LocalRepNames), 
     %lager:info("Data replica specula read is ~w, Data replica read is ~w", [DSpeculaRead, DTotalRead]),
-    %{CacheSpeculaRead, CacheAttemptRead} = cache_serv:num_specula_read(),
     %RealCnt = max(1, Cnt),
     %{ListA, ListB} = lists:split(7, OtherResult),
     %L1 = ListA ++ [PRead, DSpeculaRead, DTotalRead, CacheSpeculaRead, CacheAttemptRead],

@@ -28,7 +28,6 @@
         relay_read_stat/1,
 	    check_tables_ready/0,
 	    check_prepared_empty/0,
-        num_specula_read/1,
         print_stat/0]).
 
 -export([
@@ -114,12 +113,6 @@ check_prepared_empty() ->
     {ok, CHBin} = riak_core_ring_manager:get_chash_bin(),
     PartitionList = chashbin:to_list(CHBin),
     check_prepared_empty(PartitionList).
-
-num_specula_read(Node) ->
-    riak_core_vnode_master:sync_command(Node,
-						 {num_specula_read},
-						 ?CLOCKSI_MASTER,
-						 infinity).
 
 check_prepared_empty([]) ->
     ok;

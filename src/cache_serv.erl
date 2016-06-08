@@ -50,7 +50,6 @@
         commit_specula/3,
         abort_specula/2,
         if_prepared/2,
-        num_specula_read/0,
         read/4,
         read/2,
         read/3]).
@@ -60,8 +59,6 @@
 -record(state, {
         cache_log :: cache_id(),
         delay :: non_neg_integer(),
-        specula_read :: boolean(),
-        num_specula_read :: non_neg_integer(),
         num_attempt_read :: non_neg_integer(),
 		self :: atom()}).
 
@@ -82,9 +79,6 @@ read(Key, TxId, Node) ->
 read(Key, TxId) ->
     gen_server:call(node(), {read, Key, TxId}).
 
-num_specula_read() ->
-    gen_server:call(node(), {num_specula_read}).
-
 if_prepared(TxId, Keys) ->
     gen_server:call(node(), {if_prepared, TxId, Keys}).
 
@@ -104,53 +98,44 @@ commit_specula(TxId, Partition, CommitTime) ->
 init([]) ->
     lager:info("Cache server inited"),
     CacheLog = tx_utilities:open_private_table(cache_log),
-    SpeculaRead = antidote_config:get(specula_read),
-    {ok, #state{specula_read = SpeculaRead,
-                cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}}.
-
-handle_call({num_specula_read}, _Sender, 
-	    SD0=#state{num_specula_read=NumSpeculaRead, num_attempt_read=NumAttemptRead}) ->
-    {reply, {NumSpeculaRead, NumAttemptRead}, SD0};
+    {ok, #state{cache_log = CacheLog, num_attempt_read=0}}.
 
 handle_call({get_pid}, _Sender, SD0) ->
-        {reply, self(), SD0};
-
-handle_call({read, Key, TxId, Node}, Sender, 
-	    SD0=#state{specula_read=false}) ->
-    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
-    {noreply, SD0};
+    {reply, self(), SD0};
 
 handle_call({clean_data}, _Sender, SD0=#state{cache_log=OldCacheLog}) ->
     ets:delete(OldCacheLog),
     CacheLog = tx_utilities:open_private_table(cache_log),
-    {reply, ok, SD0#state{cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}};
+    {reply, ok, SD0#state{cache_log = CacheLog, num_attempt_read=0}};
 
 handle_call({read, Key, TxId, Node}, Sender, 
-	    SD0=#state{cache_log=CacheLog, specula_read=true
+	    SD0=#state{cache_log=CacheLog
             }) ->
-    %lager:warning("Cache specula read ~w of ~w", [Key, TxId]), 
-    case ets:lookup(CacheLog, Key) of
-        [] ->
-            %lager:info("Relaying read to ~w", [Node]),
-            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
-            %lager:info("Well, from clocksi_vnode"),
-            %lager:info("Nothing!"),
-            {noreply, SD0};
-        [{Key, ValueList}] ->
-            %lager:info("Value list is ~w", [ValueList]),
-            MyClock = TxId#tx_id.snapshot_time,
-            case find_version(ValueList, MyClock) of
-                {SpeculaTxId, Value} ->
-                    ets:insert(dependency, {SpeculaTxId, TxId}),         
-                    ets:insert(anti_dep, {TxId, SpeculaTxId}),        
-                    %lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
-                    %{reply, {{specula, SpeculaTxId}, Value}, SD0};
-                    {reply, {ok, Value}, SD0};
+    SpeculaRead = TxId#tx_id.specula_read,
+    case SpeculaRead of
+        true ->
+            case ets:lookup(CacheLog, Key) of
                 [] ->
-                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
-                    %lager:info("Well, from clocksi_vnode"),
-                    {noreply, SD0}
-            end
+                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender),
+                    {noreply, SD0};
+                [{Key, ValueList}] ->
+                    MyClock = TxId#tx_id.snapshot_time,
+                    case find_version(ValueList, MyClock) of
+                        {SpeculaTxId, Value} ->
+                            ets:insert(dependency, {SpeculaTxId, TxId}),         
+                            ets:insert(anti_dep, {TxId, SpeculaTxId}),        
+                            %lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
+                            %{reply, {{specula, SpeculaTxId}, Value}, SD0};
+                            {reply, {ok, Value}, SD0};
+                        [] ->
+                            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender),
+                            %lager:info("Well, from clocksi_vnode"),
+                            {noreply, SD0}
+                    end
+            end;
+        false ->
+            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender),
+            {noreply, SD0}
     end;
 
 handle_call({read, Key, TxId}, _Sender,

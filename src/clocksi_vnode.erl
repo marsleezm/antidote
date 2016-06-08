@@ -25,7 +25,7 @@
 -export([start_vnode/1,
 	    read_data_item/3,
         debug_read/3,
-	    relay_read/5,
+	    relay_read/4,
         %set_prepared/5,
         get_table/1,
         clean_data/2,
@@ -91,7 +91,6 @@
                 %total_time :: non_neg_integer(),
                 %prepare_count :: non_neg_integer(),
 		        %relay_read :: {non_neg_integer(), non_neg_integer()},
-                %num_specula_read :: non_neg_integer(),
                 %num_aborted :: non_neg_integer(),
                 %num_blocked :: non_neg_integer(),
                 %num_cert_fail :: non_neg_integer(),
@@ -139,9 +138,9 @@ clean_data(Node, From) ->
                                    {clean_data, From}, self(),
                                    ?CLOCKSI_MASTER).
 
-relay_read(Node, Key, TxId, Reader, From) ->
+relay_read(Node, Key, TxId, Reader) ->
     riak_core_vnode_master:command(Node,
-                                   {relay_read, Key, TxId, Reader, From}, self(),
+                                   {relay_read, Key, TxId, Reader}, self(),
                                    ?CLOCKSI_MASTER).
 
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
@@ -248,7 +247,6 @@ init([Partition]) ->
                 %num_aborted = 0,
                 %num_blocked = 0,
                 %blocked_time = 0,
-                %num_specula_read = 0,
                 %num_cert_fail = 0,
                 %num_committed = 0
                 }}.
@@ -289,15 +287,11 @@ handle_command({clean_data, Sender}, _Sender, SD0=#state{inmemory_store=OldInMem
                 dep_dict = DepDict1}};
                 %max_ts=0, total_time = 0, prepare_count = 0, num_aborted = 0, num_blocked = 0,
                 %blocked_time = 0,
-                %num_specula_read = 0,
                 %num_cert_fail = 0,
                 %num_committed = 0}};
 
 handle_command({relay_read_stat},_Sender,SD0) -> %=#state{relay_read=RelayRead}) ->
     %R = helper:handle_relay_read_stat(RelayRead),
-    {reply, 0, SD0};
-
-handle_command({num_specula_read},_Sender,SD0) -> %=#state{num_specula_read=NumSpeculaRead}) ->
     {reply, 0, SD0};
 
 handle_command({check_key_record, Key, Type},_Sender,SD0=#state{prepared_txs=PreparedTxs, committed_txs=CommittedTxs}) ->
@@ -367,11 +361,12 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBlocked,
             {reply, Result, SD0}
     end;
 
-handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state{
+handle_command({relay_read, Key, TxId, Reader}, _Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
     %{NumRR, AccRR} = RelayRead,
   %lager:error("~w relay read ~p", [TxId, Key]),
     %T1 = os:timestamp(),
+    SpeculaRead = TxId#tx_id.specula_read,
     case SpeculaRead of
         false ->
             case ready_or_block(TxId, Key, PreparedTxs, {relay, Reader}) of
@@ -1053,7 +1048,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                     case Result of
                         first ->
                             %% There is more than one speculative version
-                            case prepared_by_local(PreparedTxId) of
+                            case prepared_by_local(TxId, PreparedTxId) of
                                 true ->
                                     add_read_dep(TxId, PreparedTxId, Key),
                                     case SnapshotTime > LastReaderTime of
@@ -1069,7 +1064,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                             end;
                         {ApprTxId, _, ApprPPValue} ->
                             %% There is more than one speculative version
-                            case prepared_by_local(ApprTxId) of
+                            case prepared_by_local(TxId, ApprTxId) of
                                 true ->
                                     add_read_dep(TxId, ApprTxId, Key),
                                     case SnapshotTime > LastReaderTime of
@@ -1098,7 +1093,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
     end.
 
 add_read_dep(ReaderTx, WriterTx, _Key) ->
-   %lager:warning("Inserting anti_dep from ~w to ~w for ~p", [ReaderTx, WriterTx, Key]),
+    %lager:warning("Specula_read: dep from ~w to ~w for ~p", [ReaderTx, WriterTx, Key]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
@@ -1268,5 +1263,5 @@ find(SnapshotTime, [{TxId, Time, Value}|Rest], ToReturn) ->
 %get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->
 %    ((A2-A1)*1000000+ (B2-B1))*1000000+ C2-C1.
 
-prepared_by_local(TxId) ->
-    node(TxId#tx_id.server_pid) == node().
+prepared_by_local(ReadTxId, PrepTxId) ->
+    (node(PrepTxId#tx_id.server_pid) == node()) and (node() == node(ReadTxId#tx_id.server_pid)) .
