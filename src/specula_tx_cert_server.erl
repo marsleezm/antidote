@@ -656,7 +656,7 @@ delete_first(Cdf) ->
 %%%%%%%%%%%%%%%%%%%%%
 try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, rep_dict=RepDict, dep_dict=DepDict, 
             pending_list=PendingList, read_invalid=ReadInvalid, tx_id=CurrentTxId, committed=Committed,
-            lp_start=LT, min_commit_ts=MinCommitTS, sender=Sender, stage=Stage, cdf=Cdf, 
+            min_commit_ts=MinCommitTS, sender=Sender, stage=Stage, cdf=Cdf, 
             cascade_aborted=CascadAborted, local_updates=LocalParts, remote_updates=RemoteUpdates}) ->
     case PendingList of
         [] -> %% This is the just report_committed txn.. But new txn has not come yet.
@@ -740,21 +740,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     end,
                     gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
                     {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN, 
-                          pending_list=[], committed=NewCommitted+1, dep_dict=DepDict3}};
-                specula -> %% Can not commit, but can specualte (due to the number of specula txns decreased)
-                    CurrentTxId = 1, %% Will never happen
-                    {ok, {Prep, Read, OldCurPrepTime}} = dict:find(CurrentTxId, DepDict2),
-                    SpeculaPrepTime = max(NewMaxPT+1, OldCurPrepTime),
-                    {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
-                    DepDict3=dict:store(CurrentTxId, {Prep-AvoidNum, Read, max(SpeculaPrepTime, ProposeTS)}, DepDict2),
-                    %lager:warning("Specula current txn ~w, got propose time ~w, avoided ~w, still need ~w", [CurrentTxId, ProposeTS, AvoidNum, Prep-AvoidNum]),
-                    gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime}}),
-                    PendingList1 = NewPendingList ++ [CurrentTxId],
-                    RemoteParts = [P||{P, _} <-RemoteUpdates],
-                    ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, LT, os:timestamp(), waited}}),
-                    {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict3, 
-                            pending_list=PendingList1, min_commit_ts=NewMaxPT, min_snapshot_ts=SpeculaPrepTime,
-                                      committed=NewCommitted}}
+                          pending_list=[], committed=NewCommitted+1, dep_dict=DepDict3}}
             end;
         _ ->
             DepDict1 = dict:store(PendingTxId, {0, [], NowPrepTime}, DepDict),
@@ -877,9 +863,9 @@ decide_after_cascade(PendingList, DepDict, NumAborted, TxId, Stage) ->
                                         [] -> 
                                             case R of            
                                                 {ok, {0, [], PrepTime}} -> {commit, PrepTime};
-                                                 _ -> specula
+                                                 _ -> wait %specula
                                             end;
-                                        _ -> specula 
+                                        _ -> wait %specula 
                                     end;
                                 %% Can not specula commit during read or local_cert stage
                                 _ -> wait
