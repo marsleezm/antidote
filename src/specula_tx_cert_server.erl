@@ -271,7 +271,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
                                       DepDict1 = dict:erase(TxId, DepDict),
                                       {noreply, SD0#state{dep_dict=DepDict1, committed=Committed+1, 
                                                   tx_id=?NO_TXN}}; 
-                                _ ->  ReadDepTxs = 2, %% Will raise exception if happens
+                                _ ->  %% Will raise exception if happens
                                       gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs}}),
                                       DepDict1 = dict:update(TxId, fun({_, B, _}) -> 
                                         {read_only, ReadDepTxs--B, LastCommitTs} end, DepDict),
