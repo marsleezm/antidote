@@ -962,8 +962,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
                                 case TxServer of
                                     Self ->
                                         case dict:find(DepTxId, DepTxId) of
-                                            {ok, {read_only, _, _}} -> 
-                                                ?READ_ABORTED(Self, -1, DepTxId);
+                                            {ok, {read_only, _, _}} -> ?READ_ABORTED(Self, -1, DepTxId);
                                             _ -> ok 
                                         end;
                                     _ ->
@@ -989,7 +988,10 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
                               ets:delete_object(dependency, {TxId, DepTxId}),
                               case TxServer of
                                   Self ->
-                                      ok;
+                                    case dict:find(DepTxId, DepTxId) of
+                                        {ok, {read_only, _, _}} -> ?READ_ABORTED(Self, -1, DepTxId);
+                                        _ -> ok 
+                                    end;
                                   _ ->
                                          %lager:warning("~w is not my own, read invalid", [DepTxId]),
                                       ?READ_ABORTED(TxServer, -1, DepTxId)
