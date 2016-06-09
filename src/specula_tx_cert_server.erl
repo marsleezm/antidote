@@ -268,11 +268,13 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
                         [] -> %% Is read-only transaction!!
                             case ReadDepTxs of 
                                 [] -> gen_server:reply(Sender, {ok, {committed, LastCommitTs}}),
+                                      lager:warning("~w committed with no read dep", [TxId]),
                                       DepDict1 = dict:erase(TxId, DepDict),
                                       {noreply, SD0#state{dep_dict=DepDict1, committed=Committed+1, 
                                                   tx_id=?NO_TXN}}; 
                                 _ ->  %% Will raise exception if happens
                                       %gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs}}),
+                                      lager:warning("~w can not commit due to read dep ~w", [TxId, ReadDepTxs]),
                                       DepDict1 = dict:update(TxId, fun({_, B, _}) -> 
                                         {read_only, ReadDepTxs--B, LastCommitTs} end, DepDict),
                                       {noreply, SD0#state{dep_dict=DepDict1, tx_id=TxId, sender=Sender}}
@@ -512,9 +514,11 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{dep_dict=DepDict,
       %lager:warning("Got read valid for ~w of ~w", [PendingTxId, PendedTxId]),
     case dict:find(PendingTxId, DepDict) of
         {ok, {read_only, [PendedTxId], ReadOnlyTs}} ->
+            lager:warning("Got read valid for ~w, committed", [PendingTxId]),
             gen_server:reply(Sender, {ok, {committed, ReadOnlyTs}}),
             {noreply, SD0#state{dep_dict=dict:erase(PendingTxId, DepDict), committed=Committed+1}};
         {ok, {read_only, MoreDeps, ReadOnlyTs}} ->
+            lager:warning("Got read valid for ~w, can not commit", [PendingTxId]),
             {noreply, SD0#state{dep_dict=dict:store(PendingTxId, {read_only, lists:delete(PendedTxId, MoreDeps), ReadOnlyTs}, DepDict)}};
         {ok, {0, SolvedReadDeps, 0}} -> 
             %% Txn is still reading!!
@@ -759,6 +763,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
      %lager:warning("Tx ~w aborted! ReadAborted is ~w, ReadInvalid is ~w", [TxId, RAD1, RID1]),
     case dict:find(TxId, DepDict) of
         {ok, {read_only, _, _}} ->
+            lager:warning("Got read invalid for ~w, abort!", [TxId]),
             gen_server:reply(Sender, {ok, {aborted, TxId}}),
             {noreply, SD0#state{dep_dict=dict:erase(TxId, DepDict), read_aborted=ReadAborted+1}};
         _ ->
@@ -1143,6 +1148,7 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                                             ets:delete_object(anti_dep, {DepTxId, TxId}), 
                                             {RD, ToAbort};
                                         {ok, {read_only, _SolvedReadDeps, _}} -> %% Local transaction is still reading
+                                            lager:warning("~w reducing read dep ~w", [TxId]),
                                             ?READ_VALID(Self, DepTxId, TxId),
                                             {RD, ToAbort};
                                         {ok, {PrepDeps, ReadDeps, PrepTime}} ->
@@ -1164,7 +1170,9 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                             case TxServer of
                                 Self ->
                                     case dict:find(DepTxId, RD) of
-                                        {ok, {read_only, _SolvedReadDeps, _}} -> ?READ_INVALID(Self, CommitTime, DepTxId), {RD, ToAbort};
+                                        {ok, {read_only, _SolvedReadDeps, _}} -> 
+                                                lager:warning("~w read invalid!", [TxId]),
+                                                ?READ_INVALID(Self, CommitTime, DepTxId), {RD, ToAbort};
                                         _ -> {RD, [DepTxId|ToAbort]}
                                     end;
                                 _ ->
