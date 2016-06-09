@@ -961,7 +961,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
                                 ets:delete_object(dependency, {TxId, DepTxId}),
                                 case TxServer of
                                     Self ->
-                                        case dict:find(DepTxId, DepTxId) of
+                                        case dict:find(DepTxId, DepDict) of
                                             {ok, {read_only, _, _}} -> ?READ_ABORTED(Self, -1, DepTxId);
                                             _ -> ok 
                                         end;
@@ -988,7 +988,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
                               ets:delete_object(dependency, {TxId, DepTxId}),
                               case TxServer of
                                   Self ->
-                                    case dict:find(DepTxId, DepTxId) of
+                                    case dict:find(DepTxId, DepDict) of
                                         {ok, {read_only, _, _}} -> ?READ_ABORTED(Self, -1, DepTxId);
                                         _ -> ok 
                                     end;
