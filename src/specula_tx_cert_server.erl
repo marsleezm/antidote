@@ -142,6 +142,8 @@ handle_call({start_read_tx}, _Sender, SD0) ->
     TxId = tx_utilities:create_tx_id(0),
     {reply, TxId, SD0};
 
+handle_call({start_tx, _, _}, Sender, SD0) ->
+    handle_call({start_tx}, Sender, SD0); 
 handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS}) ->
     NewSnapshotTS = max(MinSnapshotTS, MinCommitTS) + 1, 
     TxId = tx_utilities:create_tx_id(NewSnapshotTS),
