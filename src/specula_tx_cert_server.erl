@@ -1139,8 +1139,10 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                                   %lager:warning("~w is my own, read valid", [DepTxId]),
                                     case dict:find(DepTxId, RD) of
                                         {ok, {0, _SolvedReadDeps, 0}} -> %% Local transaction is still reading
-                                          %lager:warning("Deleting {~w, ~w} from antidep", [DepTxId, TxId]),
                                             ets:delete_object(anti_dep, {DepTxId, TxId}), 
+                                            {RD, ToAbort};
+                                        {ok, {read_only, _SolvedReadDeps, 0}} -> %% Local transaction is still reading
+                                            ?READ_VALID(TxServer, DepTxId, TxId),
                                             {RD, ToAbort};
                                         {ok, {PrepDeps, ReadDeps, PrepTime}} ->
                                           %lager:warning("Storing ~w for ~w", [lists:delete(TxId, ReadDeps), DepTxId]),
@@ -1160,8 +1162,10 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                             %% Read is not valid
                             case TxServer of
                                 Self ->
-                                     %lager:warning("~w is my own, read invalid", [DepTxId]),
-                                    {RD, [DepTxId|ToAbort]};
+                                    case dict:find(DepTxId, RD) of
+                                        {ok, {read_only, _SolvedReadDeps, _}} -> ?READ_INVALID(Self, CommitTime, DepTxId);
+                                        _ -> {RD, [DepTxId|ToAbort]}
+                                    end;
                                 _ ->
                                   %lager:warning("~w is not my own, read invalid", [DepTxId]),
                                     ?READ_INVALID(TxServer, CommitTime, DepTxId),
