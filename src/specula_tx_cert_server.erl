@@ -759,6 +759,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
      %lager:warning("Tx ~w aborted! ReadAborted is ~w, ReadInvalid is ~w", [TxId, RAD1, RID1]),
     case dict:find(TxId, DepDict) of
         {ok, {read_only, _, _}} ->
+            gen_server:reply(Sender, {ok, {aborted, TxId}}),
             {noreply, SD0#state{dep_dict=dict:erase(TxId, DepDict), read_aborted=ReadAborted+1}};
         _ ->
         case start_from_list(TxId, PendingList) of
