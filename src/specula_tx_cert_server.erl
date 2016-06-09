@@ -1141,8 +1141,8 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                                         {ok, {0, _SolvedReadDeps, 0}} -> %% Local transaction is still reading
                                             ets:delete_object(anti_dep, {DepTxId, TxId}), 
                                             {RD, ToAbort};
-                                        {ok, {read_only, _SolvedReadDeps, 0}} -> %% Local transaction is still reading
-                                            ?READ_VALID(TxServer, DepTxId, TxId),
+                                        {ok, {read_only, _SolvedReadDeps, _}} -> %% Local transaction is still reading
+                                            ?READ_VALID(Self, DepTxId, TxId),
                                             {RD, ToAbort};
                                         {ok, {PrepDeps, ReadDeps, PrepTime}} ->
                                           %lager:warning("Storing ~w for ~w", [lists:delete(TxId, ReadDeps), DepTxId]),
