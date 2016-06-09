@@ -266,17 +266,17 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
                     RemotePartitions = [P || {P, _} <- RemoteUpdates],
                     case RemotePartitions of
                         [] -> %% Is read-only transaction!!
+                            {read_only, ValidDeps, _} = dict:fetch(TxId, DepDict),
                             case ReadDepTxs of 
-                                [] -> gen_server:reply(Sender, {ok, {committed, LastCommitTs}}),
-                                       lager:warning("~w committed with no read dep", [TxId]),
-                                      DepDict1 = dict:erase(TxId, DepDict),
-                                      {noreply, SD0#state{dep_dict=DepDict1, committed=Committed+1, 
+                                ValidDeps -> gen_server:reply(Sender, {ok, {committed, LastCommitTs}}),
+                                             lager:warning("~w committed with no read dep", [TxId]),
+                                             DepDict1 = dict:erase(TxId, DepDict),
+                                             {noreply, SD0#state{dep_dict=DepDict1, committed=Committed+1, 
                                                   tx_id=?NO_TXN}}; 
                                 _ ->  %% Will raise exception if happens
                                       %gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs}}),
                                        lager:warning("~w can not commit due to read dep ~w", [TxId, ReadDepTxs]),
-                                      DepDict1 = dict:update(TxId, fun({_, B, _}) -> 
-                                        {read_only, ReadDepTxs--B, LastCommitTs} end, DepDict),
+                                      DepDict1 = dict:store(TxId, {read_only, ReadDepTxs--ValidDeps, LastCommitTs}, DepDict),
                                       {noreply, SD0#state{dep_dict=DepDict1, tx_id=TxId, sender=Sender}}
                             end;
                         _ ->
