@@ -1163,7 +1163,7 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                             case TxServer of
                                 Self ->
                                     case dict:find(DepTxId, RD) of
-                                        {ok, {read_only, _SolvedReadDeps, _}} -> ?READ_INVALID(Self, CommitTime, DepTxId);
+                                        {ok, {read_only, _SolvedReadDeps, _}} -> ?READ_INVALID(Self, CommitTime, DepTxId), {RD, ToAbort};
                                         _ -> {RD, [DepTxId|ToAbort]}
                                     end;
                                 _ ->
