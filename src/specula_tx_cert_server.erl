@@ -144,12 +144,12 @@ handle_call({start_read_tx}, _Sender, SD0) ->
 
 handle_call({start_tx}, _Sender, SD0=#state{specula_read=SpeculaRead}) ->
     handle_call({start_tx, SpeculaRead, false}, _Sender, SD0);
-handle_call({start_tx, SpeculaRead, SpeculaCommit}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS}) ->
+handle_call({start_tx, _SpeculaRead, _SpeculaCommit}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS}) ->
     NewSnapshotTS = max(MinSnapshotTS, MinCommitTS) + 1, 
-    TxId = tx_utilities:create_tx_id(NewSnapshotTS, SpeculaRead),
+    TxId = tx_utilities:create_tx_id(NewSnapshotTS, true),
     %lager:warning("Starting txid ~w, MinSnapshotTS is ~w", [TxId, MinSnapshotTS+1]),
     D1 = dict:store(TxId, {0, [], 0}, D),
-    {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS, pending_prepares=0, specula_commit=SpeculaCommit}};
+    {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS, pending_prepares=0, specula_commit=true}};
 
 handle_call({get_cdf}, _Sender, SD0=#state{name=Name, cdf=Cdf}) ->
     case Cdf of false -> ok;
