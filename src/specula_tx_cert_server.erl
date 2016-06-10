@@ -274,10 +274,14 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
                                              {noreply, SD0#state{dep_dict=DepDict1, committed=Committed+1, 
                                                   tx_id=?NO_TXN}}; 
                                 _ ->  %% Will raise exception if happens
-                                      %gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs}}),
-                                      %lager:warning("~w can not commit due to read dep ~w", [TxId, ReadDepTxs]),
-                                      DepDict1 = dict:store(TxId, {read_only, ReadDepTxs--ValidDeps, LastCommitTs}, DepDict),
-                                      {noreply, SD0#state{dep_dict=DepDict1, tx_id=TxId, sender=Sender}}
+                                      case SpeculaCommit of
+                                          true ->
+                                            gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs}}),
+                                            {noreply, SD0#state{dep_dict=dict:erase(TxId, DepDict), tx_id=TxId, sender=Sender}};
+                                          false ->
+                                            DepDict1 = dict:store(TxId, {read_only, ReadDepTxs--ValidDeps, LastCommitTs}, DepDict),
+                                            {noreply, SD0#state{dep_dict=DepDict1, tx_id=TxId, sender=Sender}}
+                                      end
                             end;
                         _ ->
                             %%% !!!!!!! Add to ets if is not read only
