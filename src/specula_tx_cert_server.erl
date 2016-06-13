@@ -351,14 +351,7 @@ handle_call({go_down},_Sender,SD0) ->
 
 handle_cast({trace_pending}, SD0=#state{pending_list=PendingList, dep_dict=DepDict}) ->
     case PendingList of [] ->  lager:info("No pending!");
-                        [H|_T] -> case dict:fetch(H, DepDict) of
-                                    {N, [], _} ->
-                                       lager:info("PendTx ~w no pending reading!", [H, N]);
-                                    {_N, ReadDep, _} ->
-                                        lists:foreach(fun(TxId) -> 
-                                            gen_server:cast(TxId#tx_id.server_pid, {trace, [H], TxId, self()}) end, 
-                                            ReadDep)
-                                 end
+                        [H|_T] -> send_prob(DepDict, H, [], self())
     end,
     {noreply, SD0}; 
 
@@ -373,16 +366,23 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     lager:info("Replied!"),
     {noreply, SD0};
 
-handle_cast({trace, PrevTxs, TxId, Sender}, SD0=#state{dep_dict=DepDict}) ->
+handle_cast({trace, PrevTxs, TxId, Sender, InfoList}, SD0=#state{dep_dict=DepDict, pending_list=PendingList}) ->
     case dict:find(TxId, DepDict) of
-        error -> gen_server:cast(Sender, {end_trace, [TxId|PrevTxs]}, 0);
-        {N, [], _} -> gen_server:cast(Sender, {end_trace, [TxId|PrevTxs]}, N); 
-        {_N, ReadDeps, _} -> lists:foreach(fun(T) -> gen_server:cast(Sender, {trace, [TxId|PrevTxs]}, T, Sender) end, ReadDeps) 
+        error ->    Info = io_lib:format("~w: can not find this txn!!\n", [TxId]),
+                    gen_server:cast(Sender, {end_trace, PrevTxs++[TxId], InfoList++[Info]});
+        {ok, {0, [], _}} -> Info = io_lib:format("~w: probably blocked by predecessors, pend list is ~w\n", [TxId, PendingList]),
+                            [Head|_T] = PendingList,
+                            send_prob(DepDict, Head, InfoList++[Info], Sender);
+        {ok, {N, [], _}} -> Info = io_lib:format("~w: blocked with ~w remaining prepare \n", [TxId, N]),
+                            gen_server:cast(Sender, {end_trace, PrevTxs++[TxId], InfoList++[Info]}); 
+        {ok, {N, ReadDeps, _}} -> lists:foreach(fun(BTxId) ->
+                    Info = io_lib:format("~w: blocked by ~w, N is ~w, read deps are ~w \n", [TxId, BTxId, N, ReadDeps]),
+                    gen_server:cast(BTxId#tx_id.server_pid, {trace, PrevTxs++[TxId], BTxId, Sender, InfoList ++ [Info]}) end, ReadDeps)
     end,
     {noreply, SD0};
 
-handle_cast({end_trace, TList, RemainPend}, SD0) ->
-    lager:info("RemainList is ~w, pending is ~w", [TList, RemainPend]),
+handle_cast({end_trace, TList, InfoList}, SD0) ->
+    lager:info("List txn is ~p, info is ~p", [TList, InfoList]),
     {noreply, SD0};
 
 handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, cdf=OldCdf}) ->
@@ -1243,6 +1243,16 @@ get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->
 
 load_config() ->
     {antidote_config:get(specula_length), antidote_config:get(specula_read)}.
+
+send_prob(DepDict, TxId, InfoList, Sender) ->
+    case dict:fetch(TxId, DepDict) of
+        {N, [], _} ->
+            lager:info("PendTx ~w no pending reading!", [TxId, N]);
+        {N, ReadDep, _} ->
+            lists:foreach(fun(BTxId) ->
+                Info = io_lib:format("~w: blocked by ~w, N is ~w, read deps are ~w \n", [TxId, BTxId, N, ReadDep]),
+            gen_server:cast(BTxId#tx_id.server_pid, {trace, [TxId], BTxId, Sender, InfoList ++ [Info]}) end, ReadDep)
+    end.
 
 -ifdef(TEST).
 
