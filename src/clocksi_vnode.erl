@@ -879,7 +879,7 @@ check_prepared(_, TxId, PreparedTxs, Key, _Value) ->
         [] ->
             %ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, PPTime, Value, []}]}),
             {true, 1};
-        [{Key, [{PrepTxId, PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|PWaiter]}] ->
+        [{Key, [{_PrepTxId, _PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|_PWaiter]}] ->
             case LastPPTime > SnapshotTime of
                 true ->
                     %lager:warning("~w fail LastPPTime is ~w, last reader time is ~w", [TxId, LastPPTime, LastReaderTime]),
@@ -1084,7 +1084,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
             ready
     end.
 
-add_read_dep(ReaderTx, WriterTx, Key) ->
+add_read_dep(ReaderTx, WriterTx, _Key) ->
    %lager:warning("Inserting anti_dep from ~w to ~w for ~p", [ReaderTx, WriterTx, Key]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
