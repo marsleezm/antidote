@@ -421,7 +421,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     case Debug of
                         false ->
                             PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
-                            gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
+                            gen_server:cast(Sender, {prepared, TxId, PrepareTime, Partition}),
                             repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
                             {noreply, State};
                         true ->
@@ -435,7 +435,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     case Debug of
                         false ->
                            %lager:warning("~w prepared with ~w", [TxId, PrepareTime]),
-                            gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
+                            gen_server:cast(Sender, {prepared, TxId, PrepareTime, Partition}),
                             {noreply, State};
                         true ->
                             ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {prepared, TxId, PrepareTime, RepMode}}}),
@@ -1152,7 +1152,7 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
  %lager:warning("Trying to unblocking transaction ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         {ok, {1, PrepareTime, Sender, RepMode}} ->
-            gen_server:cast(Sender, {prepared, TxId, PrepareTime}), 
+            gen_server:cast(Sender, {prepared, TxId, PrepareTime, Partition}), 
             case Partition of
                 ignore ->
                     ok;
