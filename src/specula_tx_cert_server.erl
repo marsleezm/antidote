@@ -368,21 +368,21 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
 
 handle_cast({trace, PrevTxs, TxId, Sender, InfoList}, SD0=#state{dep_dict=DepDict, pending_list=PendingList}) ->
     case dict:find(TxId, DepDict) of
-        error ->    Info = io_lib:format("~w: can not find this txn!!\n", [TxId]),
+        error ->    Info = io_lib:format("~p: can not find this txn!!\n", [TxId]),
                     gen_server:cast(Sender, {end_trace, PrevTxs++[TxId], InfoList++[Info]});
-        {ok, {0, [], _}} -> Info = io_lib:format("~w: probably blocked by predecessors, pend list is ~w\n", [TxId, PendingList]),
+        {ok, {0, [], _}} -> Info = io_lib:format("~p: probably blocked by predecessors, pend list is ~p\n", [TxId, PendingList]),
                             [Head|_T] = PendingList,
                             send_prob(DepDict, Head, InfoList++[Info], Sender);
-        {ok, {N, [], _}} -> Info = io_lib:format("~w: blocked with ~w remaining prepare \n", [TxId, N]),
+        {ok, {N, [], _}} -> Info = io_lib:format("~p: blocked with ~w remaining prepare \n", [TxId, N]),
                             gen_server:cast(Sender, {end_trace, PrevTxs++[TxId], InfoList++[Info]}); 
         {ok, {N, ReadDeps, _}} -> lists:foreach(fun(BTxId) ->
-                    Info = io_lib:format("~w: blocked by ~w, N is ~w, read deps are ~w \n", [TxId, BTxId, N, ReadDeps]),
+                    Info = io_lib:format("~p: blocked by ~p, N is ~p, read deps are ~p \n", [TxId, BTxId, N, ReadDeps]),
                     gen_server:cast(BTxId#tx_id.server_pid, {trace, PrevTxs++[TxId], BTxId, Sender, InfoList ++ [Info]}) end, ReadDeps)
     end,
     {noreply, SD0};
 
 handle_cast({end_trace, TList, InfoList}, SD0) ->
-    lager:info("List txn is ~p, info is ~p", [TList, InfoList]),
+    lager:info("List txn is ~p, info is ~p", [TList, lists:flatten(InfoList)]),
     {noreply, SD0};
 
 handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, cdf=OldCdf}) ->
@@ -1250,7 +1250,7 @@ send_prob(DepDict, TxId, InfoList, Sender) ->
             lager:info("PendTx ~w no pending reading!", [TxId, N]);
         {N, ReadDep, _} ->
             lists:foreach(fun(BTxId) ->
-                Info = io_lib:format("~w: blocked by ~w, N is ~w, read deps are ~w \n", [TxId, BTxId, N, ReadDep]),
+                Info = io_lib:format("~p: blocked by ~p, N is ~p, read deps are ~p \n", [TxId, BTxId, N, ReadDep]),
             gen_server:cast(BTxId#tx_id.server_pid, {trace, [TxId], BTxId, Sender, InfoList ++ [Info]}) end, ReadDep)
     end.
 
