@@ -348,7 +348,7 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, ToPrepTS},
                               [Key|KS]
                       end end, [], WriteSet),
     ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
-    %lager:warning("Specula prepare for [~w, ~w]", [TxId, Partition]),
+    lager:warning("Specula prepare for [~w, ~w]", [TxId, Partition]),
     {noreply, SD0};
 
 handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pending_log=OldPendingLog}) ->
@@ -394,15 +394,15 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
         prepared ->
             case dict:find(TxId, CurrentDict) of
                 {ok, finished} ->
-                 %lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                    lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 error ->
                     case dict:find(TxId, BackupDict) of
                         {ok, finished} ->
-                         %lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                            lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         error ->
-                          %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
+                            %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
                             insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender),
                             {noreply, SD0}
                     end
@@ -411,7 +411,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
             AppendFun = fun({Key, Value}) ->
                 case ets:lookup(ReplicatedLog, Key) of
                     [] ->
-                         %lager:warning("Data repl inserting ~p, ~p of ~w to table", [Key, Value, TimeStamp]),
+                        %lager:warning("Data repl inserting ~p, ~p of ~w to table", [Key, Value, TimeStamp]),
                         true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value}]});
                     [{Key, ValueList}] ->
                         {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
@@ -798,7 +798,7 @@ insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender) ->
                                   true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]})
               end end,  WriteSet),
 
-            %lager:warning("Got repl prepare for ~w, propose ~p and replied", [TxId, ToPrepTS]),
+              lager:warning("Got repl prepare for ~w, propose ~p and replied", [TxId, ToPrepTS]),
               ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
               gen_server:cast(Sender, {prepared, TxId, ToPrepTS});
           _ ->
