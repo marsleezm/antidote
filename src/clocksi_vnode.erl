@@ -123,13 +123,11 @@ get_table(Node) ->
 
 %% @doc Sends a read request to the Node that is responsible for the Key
 read_data_item(Node, Key, TxId) ->
-    lager:warning("Trying to read ~w in node ~w", [Key, Node]),
     riak_core_vnode_master:sync_command(Node,
                                    {read, Key, TxId},
                                    ?CLOCKSI_MASTER, infinity).
 
 debug_read(Node, Key, TxId) ->
-    lager:warning("Trying to read ~w in node ~w", [Key, Node]),
     riak_core_vnode_master:sync_command(Node,
                                    {debug_read, Key, TxId},
                                    ?CLOCKSI_MASTER, infinity).
@@ -351,7 +349,7 @@ handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{
             inmemory_store=InMemoryStore, partition=_Partition}) ->
     %MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
     Result = read_value(Key, TxId, InMemoryStore),
-    lager:warning("~w, Reading ~w value is ~w", [TxId, Key, Result]),
+    %lager:warning("~w, Reading ~w value is ~w", [TxId, Key, Result]),
     {reply, Result, SD0};
 
 handle_command({read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBlocked, 
@@ -384,14 +382,14 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
                     {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
-             lager:warning("Specula read!!"),
+             %lager:warning("Specula read!!"),
             case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
                 not_ready->
                     {noreply, SD0};
                 {specula, Value} ->
                     gen_server:reply(Reader, {ok, Value}), 
     		        %T2 = os:timestamp(),
-                  lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
+                  %lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
                     {noreply, SD0};
 				        %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
                 ready ->
@@ -559,16 +557,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
         end,
     case Result of
         {ok, committed, DepDict1} ->
-            %case IfReplicate of
-            %    true ->
-            %        PendingRecord = {commit, Sender, 
-            %            false, {TxId, TxCommitTime}},
-                    %repl_fsm:replicate(Partition, {TxId, PendingRecord}),
-            %        {noreply, State#state{
-            %                num_committed=NumCommitted+1}};
-            %    false ->
-                    {noreply, State#state{dep_dict=DepDict1}};
-            %end;
+            {noreply, State#state{dep_dict=DepDict1}};
         {error, no_updates} ->
             {reply, no_tx_record, State}
     end;
@@ -766,9 +755,7 @@ commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Pa
                 true -> specula_utilities:deal_commit_deps(TxId, TxCommitTime);
                 false -> ok
             end,
-            lager:warning("Before update store!"),
             DepDict1 = update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, 0),
-            lager:warning("After commit ~w", [TxId]),
             true = ets:delete(PreparedTxs, TxId),
             {ok, committed, DepDict1};
         [] ->
@@ -1086,7 +1073,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                             lager:warning("Wait as pending reader"),
                             ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, NextReaderTime, LastPPTime, Value,
                                 [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
-                        lager:warning("~w specula reads ~p is blocked by whatever, maybe ~w! PrepareTime is ~w", [TxId, Key, PreparedTxId, PrepareTime]),
+                            lager:warning("~w specula reads ~p is blocked by whatever, maybe ~w! PrepareTime is ~w", [TxId, Key, PreparedTxId, PrepareTime]),
                             not_ready
                     end; 
                 false ->
@@ -1235,7 +1222,7 @@ find_appr_version(LastPPTime, SnapshotTime, PendingPrepare) ->
     end.
 
 find(SnapshotTime, [], ToReturn) ->
-     lager:warning("Now in last version. Snapshot time is ~w, ToReturn is ~w", [SnapshotTime, ToReturn]),
+     %lager:warning("Now in last version. Snapshot time is ~w, ToReturn is ~w", [SnapshotTime, ToReturn]),
     case ToReturn of
                 first ->
                     first;

@@ -283,13 +283,12 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
                                                                 _ -> NumSpeculaRead+1
                                               end, 
                             %%% !!!!!!! Add to ets if is not read only
-                             lager:warning("~w add ~w to ets", [TxId, StartTime]),
                             add_to_ets(StartTime, Cdf, PendingList),
                             case length(PendingList) >= SpeculaLength of
                                 true -> %% Wait instead of speculate.
                                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                                     DepDict1 = dict:update(TxId, 
-                                         fun({_, B, _}) ->    lager:warning("Previous readdep is ~w", [B]),
+                                         fun({_, B, _}) -> 
                                             {TotalReplFactor*length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1} end, DepDict),
                                     {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, local_updates=[], lp_start=StartTime, num_specula_read=NumSpeculaRead1, remote_updates=RemoteUpdates, sender=Sender, stage=remote_cert}};
                                 false -> %% Can speculate. After replying, removing TxId
