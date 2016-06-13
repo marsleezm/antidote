@@ -135,6 +135,7 @@ handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
     clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
     {noreply, SD0};
 
+
 handle_call({get_pid}, _Sender, SD0) ->
     {reply, self(), SD0};
 
@@ -348,6 +349,19 @@ handle_call({read, Key, TxId, Node}, Sender, SD0=#state{specula_read=SpeculaRead
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
+handle_cast({trace_pending}, SD0=#state{pending_list=PendingList, dep_dict=DepDict}) ->
+    case PendingList of [] ->  lager:info("No pending!");
+                        [H|_T] -> case dict:fetch(H, DepDict) of
+                                    {N, [], _} ->
+                                       lager:info("PendTx ~w no pending reading!", [H, N]);
+                                    {_N, ReadDep, _} ->
+                                        lists:foreach(fun(TxId) -> 
+                                            gen_server:cast(TxId#tx_id.server_pid, {trace, [H], TxId, self()}) end, 
+                                            ReadDep)
+                                 end
+    end,
+    {noreply, SD0}; 
+
 handle_cast({load, Sup, Type, Param}, SD0) ->
     lager:info("Got load req!"),
     case Type of tpcc -> tpcc_load:load(Param);
@@ -357,6 +371,18 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     lager:info("Finished loading!"),
     Sup ! done,
     lager:info("Replied!"),
+    {noreply, SD0};
+
+handle_cast({trace, PrevTxs, TxId, Sender}, SD0=#state{dep_dict=DepDict}) ->
+    case dict:find(TxId, DepDict) of
+        error -> gen_server:cast(Sender, {end_trace, [TxId|PrevTxs]}, 0);
+        {N, [], _} -> gen_server:cast(Sender, {end_trace, [TxId|PrevTxs]}, N); 
+        {_N, ReadDeps, _} -> lists:foreach(fun(T) -> gen_server:cast(Sender, {trace, [TxId|PrevTxs]}, T, Sender) end, ReadDeps) 
+    end,
+    {noreply, SD0};
+
+handle_cast({end_trace, TList, RemainPend}, SD0) ->
+    lager:info("RemainList is ~w, pending is ~w", [TList, RemainPend]),
     {noreply, SD0};
 
 handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, cdf=OldCdf}) ->
