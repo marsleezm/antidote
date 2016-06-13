@@ -27,7 +27,7 @@
 -export([start_link/0]).
 
 -export([init/1, certify/4, get_stat/0, get_cdf/0, get_int_data/3, start_tx/1, single_read/3, clean_all_data/0, clean_data/1, 
-            load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, 
+            load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, trace/1, 
             get_pid/1, get_global_pid/1]).
 
 -define(READ_TIMEOUT, 30000).
@@ -70,7 +70,10 @@ load_local(Sender, Type, Param) ->
     gen_server:cast(CertServer, {load, self(), Type, Param}),
     receive done -> ok end,
     Sender ! done.
-    
+
+trace(Num) ->
+    CertServer = list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list(Num)),
+    gen_server:cast(CertServer, {trace_pending}).
 
 start_tx(Name) ->
     case is_integer(Name) of
