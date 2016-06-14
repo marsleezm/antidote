@@ -171,7 +171,7 @@ get_oldest() ->
                 nil ->  OldT;
                 T -> case OldT of
                         nil -> T;
-                        false -> case T of nil -> OldT; 
+                        _ -> case T of nil -> OldT; 
                                             _ ->
                                         case T#tx_id.snapshot_time < OldT#tx_id.snapshot_time of
                                             true -> T;
