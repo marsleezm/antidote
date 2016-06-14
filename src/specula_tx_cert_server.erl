@@ -687,6 +687,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
             pending_list=PendingList, read_invalid=ReadInvalid, tx_id=CurrentTxId, committed=Committed,
             lp_start=LT, min_commit_ts=MinCommitTS, sender=Sender, stage=Stage, cdf=Cdf, 
             cascade_aborted=CascadAborted, local_updates=LocalParts, remote_updates=RemoteUpdates}) ->
+    lager:warning("Pending list is ~w", [PendingList]),
     case PendingList of
         [] -> %% This is the just report_committed txn.. But new txn has not come yet.
             CurCommitTime = max(MinCommitTS+1, NowPrepTime),
@@ -766,7 +767,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     SpeculaPrepTime = max(NewMaxPT+1, OldCurPrepTime),
                     {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
                     case (AvoidNum == Prep) and (Read == []) of
-                        true -> lager:warning("Can already commit!!!"),
+                        true -> lager:warning("Can already commit ~w!!", [CurrentTxId]),
                             CurCommitTime = max(SpeculaPrepTime, ProposeTS), 
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
