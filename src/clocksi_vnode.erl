@@ -547,7 +547,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
                       %num_committed=NumCommitted,
                       if_specula=IfSpecula
                       } = State) ->
-     %lager:warning("~w: Got commit req for ~w with ~w", [Partition, TxId, TxCommitTime]),
+    lager:warning("~w: Got commit req for ~w with ~w", [Partition, TxId, TxCommitTime]),
     Result = 
         case IfReplicate of
             true ->
@@ -565,7 +565,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
 handle_command({abort, TxId}, _Sender,
                State = #state{partition=Partition, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore,
                 dep_dict=DepDict, if_replicate=IfReplicate, if_specula=IfSpecula}) ->
-   %lager:warning("~w: Aborting ~w", [Partition, TxId]),
+   lager:warning("~w: Aborting ~w", [Partition, TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, {waiting, WriteSet}}] ->
             Keys = [Key || {Key, _} <- WriteSet],
@@ -669,7 +669,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTime)->
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
 		    {ok, PrepareTime};
         {N, PrepareTime} ->
-            %lager:warning("~w passed but has ~w deps, prepare with ~w", [TxId, N, PrepareTime]),
+            lager:warning("~w passed but has ~w deps, prepare with ~w", [TxId, N, PrepareTime]),
 		    %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             lists:foreach(fun({K, V}) ->
                           case ets:lookup(PreparedTxs, K) of
