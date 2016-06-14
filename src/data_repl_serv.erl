@@ -447,7 +447,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentD1}};
     %      false ->
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
-    %  end;
+    %end;
 
 handle_cast({repl_abort, TxId, Partitions, IfWaited}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, specula_read=SpeculaRead, current_dict=CurrentDict, set_size=SetSize}) ->

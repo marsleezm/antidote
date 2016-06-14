@@ -463,7 +463,7 @@ handle_cast({prepared, TxId, PrepareTime, Partition},
             remote_updates=RemoteUpdates, sender=Sender, dep_dict=DepDict, pending_list=PendingList, 
              min_commit_ts=LastCommitTs, specula_length=SpeculaLength, pending_prepares=PendingPrepares, lp_start=LT,
             pending_txs=PendingTxs, rep_dict=RepDict, committed=Committed, cdf=Cdf}) ->
-     lager:warning("Got local prepare for ~w", [TxId, PrepareTime]),
+     lager:warning("Got local prepare for ~w from ~w", [TxId, Partition]),
     case dict:find(TxId, DepDict) of
         %% Maybe can commit already.
         {ok, {1, ReadDepTxs, OldPrepTime, ReturnParts}} ->
@@ -518,7 +518,7 @@ handle_cast({prepared, TxId, PrepareTime, Partition},
 
 handle_cast({prepared, PendingTxId, PendingPT, Partition}, 
 	    SD0=#state{dep_dict=DepDict}) ->
-    lager:warning("Got remote prepare for ~w, pt is ~w", [PendingTxId, PendingPT]),
+    lager:warning("Got remote prepare for ~w from partition ~w", [PendingTxId, Partition]),
     case dict:find(PendingTxId, DepDict) of
         {ok, {1, [], OldPrepTime, _ReturnParts}} -> %% Maybe the transaction can commit 
             NowPrepTime =  max(OldPrepTime, PendingPT),
@@ -765,9 +765,8 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     case (AvoidNum == Prep) and (Read == []) of
                         true -> lager:warning("Can already commit!!!"),
                             CurCommitTime = max(SpeculaPrepTime, ProposeTS), 
-                            RemoteParts = [P||{P, _} <-RemoteUpdates],
-                            {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
-                                dict:erase(CurrentTxId, DepDict2), RepDict),
+                            {DepDict3, _} = commit_specula_tx(CurrentTxId, CommitTime,
+                                    dict:erase(CurrentTxId, DepDict2), RepDict, PendingTxs, Cdf),
                             case Cdf of false -> ok;
                                         _ -> LastTime = delete_first(Cdf),
                                             ets:insert(Cdf, {CurrentTxId, get_time_diff(LastTime, os:timestamp())})
@@ -979,7 +978,7 @@ commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs, Cdf) ->
     ?CLOCKSI_VNODE:commit(RemoteParts, TxId, CommitTime),
     %?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, DoRepl),
     ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, true, RepDict, IfWaited),
-      lager:warning("Specula commit ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
+    lager:warning("Specula commit ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     %io:format(user, "Calling commit to table with ~w, ~w, ~w ~n", [RemoteParts, TxId, CommitTime]),
     %commit_to_table(RemoteParts, TxId, CommitTime, RepDict),
     {DepDict1, ToAbortTxs}.
