@@ -699,8 +699,8 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                         _ -> LastTime = delete_first(Cdf),
                              ets:insert(Cdf, {PendingTxId, get_time_diff(LastTime, os:timestamp())})
             end,
-            {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN,
-                 pending_list=[], dep_dict=DepDict3, committed=Committed+1}};
+            {noreply, SD0#state{min_commit_ts=CurCommitTime, pending_list=[], dep_dict=DepDict3, 
+                committed=Committed+1}};
         [PendingTxId|Rest] ->
             CommitTime = max(NowPrepTime, MinCommitTS+1),
             {DepDict1, ToAbortTxs} = commit_specula_tx(PendingTxId, CommitTime,
@@ -729,7 +729,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     gen_server:reply(Sender, {aborted, CurrentTxId}),
                      lager:warning("~w aborted!", [CurrentTxId]),
                     {noreply, SD0#state{
-                      pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
+                      pending_list=NewPendingList, dep_dict=DepDict3,
                         min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
                               cascade_aborted=CascadAborted+max(NumAborted-1, 0)+CFlowAbort,  committed=NewCommitted}};
                 {abort_remote, CFlowAbort, CReadInvalid} ->
@@ -740,7 +740,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                      lager:warning("~w aborted!", [CurrentTxId]),
                     gen_server:reply(Sender, {aborted, CurrentTxId}),
                     {noreply, SD0#state{
-                      pending_list=NewPendingList, tx_id=?NO_TXN, dep_dict=DepDict3,
+                      pending_list=NewPendingList, dep_dict=DepDict3,
                         min_commit_ts=NewMaxPT,  read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
                               cascade_aborted=CascadAborted+max(NumAborted-1,0)+CFlowAbort, committed=NewCommitted}};
                 wait -> 
