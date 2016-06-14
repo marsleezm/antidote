@@ -148,7 +148,7 @@ handle_call({start_tx, _, _}, Sender, SD0) ->
 handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS}) ->
     NewSnapshotTS = max(MinSnapshotTS, MinCommitTS) + 1, 
     TxId = tx_utilities:create_tx_id(NewSnapshotTS),
-    lager:warning("Starting txid ~w, MinSnapshotTS is ~w", [TxId, MinSnapshotTS+1]),
+    %lager:warning("Starting txid ~w, MinSnapshotTS is ~w", [TxId, MinSnapshotTS+1]),
     D1 = dict:store(TxId, {0, [], 0, []}, D),
     {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, min_snapshot_ts=NewSnapshotTS, pending_prepares=0}};
 
@@ -296,7 +296,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
                                    %lager:warning("Speculating directly for ~w", [TxId]),
                                     %% Update specula data structure, and clean the txid so we know current txn is already replied
                                     {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, TxId, LastCommitTs, RepDict),
-                                    lager:warning("Specula txn ~w, got propose time ~w, avoided ~w, still need ~w", [TxId, ProposeTS, AvoidNum, TotalReplFactor*length(RemotePartitions)-AvoidNum]),
+                                    %lager:warning("Specula txn ~w, got propose time ~w, avoided ~w, still need ~w", [TxId, ProposeTS, AvoidNum, TotalReplFactor*length(RemotePartitions)-AvoidNum]),
                                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, ProposeTS, TxId, {remote, node()}),
                                     gen_server:reply(Sender, {ok, {specula_commit, ProposeTS}}),
                                     PendingList1 = PendingList ++ [TxId],
@@ -315,7 +315,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
                     DepDict1 = dict:update(TxId, 
                             fun({_, B, _, PL}) ->
                              {NumToAck, ReadDepTxs--B, LastCommitTs+1, PL} end, DepDict),
-                    lager:warning("Prepare ~w to ~w", [TxId, LocalPartitions]),
+                    %lager:warning("Prepare ~w to ~w", [TxId, LocalPartitions]),
                     ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local),
                     NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
                                                         _ -> NumSpeculaRead+1
@@ -538,7 +538,7 @@ handle_cast({prepared, PendingTxId, PendingPT, Partition},
 %%       and here we should check if the transaction can be directly committed or not. 
 handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{dep_dict=DepDict, 
             committed=Committed, sender=_Sender}) ->
-    lager:warning("Got read valid for ~w of ~w", [PendingTxId, PendedTxId]),
+    %lager:warning("Got read valid for ~w of ~w", [PendingTxId, PendedTxId]),
     case dict:find(PendingTxId, DepDict) of
         {ok, {read_only, [PendedTxId], _ReadOnlyTs, []}} ->
             %gen_server:reply(Sender, {ok, {committed, ReadOnlyTs}}),
