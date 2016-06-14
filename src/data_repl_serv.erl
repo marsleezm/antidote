@@ -800,7 +800,7 @@ insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender) ->
 
                %lager:warning("Got repl prepare for ~w, propose ~p and replied", [TxId, ToPrepTS]),
               ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
-              gen_server:cast(Sender, {prepared, TxId, ToPrepTS, Partition});
+              gen_server:cast(Sender, {prepared, TxId, ToPrepTS});
           _ ->
              %lager:warning("Not replying for ~w, ~w because already prepard", [TxId, Partition]),
               ok

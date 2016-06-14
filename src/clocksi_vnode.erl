@@ -421,7 +421,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     case Debug of
                         false ->
                             PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
-                            gen_server:cast(Sender, {prepared, TxId, PrepareTime, Partition}),
+                            gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
                             repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
                             {noreply, State};
                         true ->
@@ -435,7 +435,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     case Debug of
                         false ->
                            %lager:warning("~w prepared with ~w", [TxId, PrepareTime]),
-                            gen_server:cast(Sender, {prepared, TxId, PrepareTime, Partition}),
+                            gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
                             {noreply, State};
                         true ->
                             ets:insert(PreparedTxs, {{pending, TxId}, {Sender, {prepared, TxId, PrepareTime, RepMode}}}),
@@ -879,14 +879,14 @@ check_prepared(_, TxId, PreparedTxs, Key, _Value) ->
         [] ->
             %ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, PPTime, Value, []}]}),
             {true, 1};
-        [{Key, [{PrepTxId, PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|_PWaiter]}] ->
+        [{Key, [{_PrepTxId, _PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|_PWaiter]}] ->
             case LastPPTime > SnapshotTime of
                 true ->
                     %lager:warning("~w fail LastPPTime is ~w, last reader time is ~w", [TxId, LastPPTime, LastReaderTime]),
                     false;
                 false ->
                     %ToPrepTime = max(LastReaderTime+1, PPTime),
-                    lager:warning("~p: ~w waits for ~w with ~w", [Key, TxId, PrepTxId, PrepareTime]),
+                    %lager:warning("~p: ~w waits for ~w with ~w", [Key, TxId, PrepTxId, PrepareTime]),
                     %ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, ToPrepTime, PPTime, PrepValue, RWaiter}|
                     %         (PWaiter++[{TxId, ToPrepTime, Value}])]}),
                     {wait, LastReaderTime+1}
@@ -1151,12 +1151,12 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
  %lager:warning("Trying to unblocking transaction ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         {ok, {1, PrepareTime, Sender, RepMode}} ->
-            gen_server:cast(Sender, {prepared, TxId, PrepareTime, Partition}), 
+            gen_server:cast(Sender, {prepared, TxId, PrepareTime}), 
             case Partition of
                 ignore ->
                     ok;
                 _ ->
-                   lager:warning("~w unblocked, replicating writeset", [TxId]),
+                   %lager:warning("~w unblocked, replicating writeset", [TxId]),
                     [{TxId, {waiting, WriteSet}}] = ets:lookup(PreparedTxs, TxId),
                     ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
                     case RepMode of
