@@ -425,7 +425,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 
 handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, specula_read=SpeculaRead, current_dict=CurrentDict}) ->
-     %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
+    lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
     lists:foreach(fun(Partition) ->
                     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
                     %case ets:lookup(PendingLog, {TxId, Partition}) of [] -> ok; 
