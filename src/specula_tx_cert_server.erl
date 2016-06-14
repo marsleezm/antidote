@@ -552,7 +552,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{dep_dict=DepDict,
             %% Txn is still reading!!
             %lager:warning("Inserting read valid for ~w, old deps are ~w",[PendingTxId, SolvedReadDeps]),
             {noreply, SD0#state{dep_dict=dict:store(PendingTxId, {0, [PendedTxId|SolvedReadDeps], 0}, DepDict)}};
-        {ok, {0, [PendedTxId], OldPrepTime, _}} -> %% Maybe the transaction can commit 
+        {ok, {0, [PendedTxId], OldPrepTime}} -> %% Maybe the transaction can commit 
             try_commit_pending(OldPrepTime, PendingTxId, SD0);
         {ok, {PrepDeps, ReadDepTxs, OldPrepTime}} -> 
             %lager:warning("Can not commit... Remaining prepdep is ~w, read dep is ~w", [PrepDeps, lists:delete(PendedTxId, ReadDepTxs)]),
@@ -807,7 +807,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
                    end,
       lager:warning("Tx ~w aborted! ReadAborted is ~w, ReadInvalid is ~w", [TxId, RAD1, RID1]),
     case dict:find(TxId, DepDict) of
-        {ok, {read_only, _, _, _}} ->
+        {ok, {read_only, _, _}} ->
             {noreply, SD0#state{dep_dict=dict:erase(TxId, DepDict), read_aborted=ReadAborted+1}};
         _ ->
         case start_from_list(TxId, PendingList) of
@@ -911,7 +911,7 @@ decide_after_cascade(PendingList, DepDict, NumAborted, TxId, Stage) ->
                                     case PendingList of 
                                         [] -> 
                                             case R of            
-                                                {ok, {0, [], PrepTime, _}} -> {commit, PrepTime};
+                                                {ok, {0, [], PrepTime}} -> {commit, PrepTime};
                                                  _ -> specula
                                             end;
                                         _ -> specula 
@@ -1189,7 +1189,7 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                                 Self ->
                                    lager:warning("~w is my own, read valid", [DepTxId]),
                                     case dict:find(DepTxId, RD) of
-                                        {ok, {0, _SolvedReadDeps, 0, _}} -> %% Local transaction is still reading
+                                        {ok, {0, _SolvedReadDeps, 0}} -> %% Local transaction is still reading
                                            lager:warning("Deleting {~w, ~w} from antidep", [DepTxId, TxId]),
                                             ets:delete_object(anti_dep, {DepTxId, TxId}), 
                                             {RD, ToAbort};
