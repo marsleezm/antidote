@@ -746,11 +746,11 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                             read_invalid=ReadInvalid+min(NumAborted, 1), min_commit_ts=NewMaxPT,
                               cascade_aborted=CascadAborted+max(0, NumAborted-1), committed=NewCommitted}};
                 {commit, OldCurPrepTime} ->
-                     lager:warning("Commit local txn"),
+                    lager:warning("Commit local txn"),
                     CurCommitTime = max(NewMaxPT+1, OldCurPrepTime),
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
                     {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
-                    dict:erase(CurrentTxId, DepDict2), RepDict),
+                        dict:erase(CurrentTxId, DepDict2), RepDict),
                     case Cdf of false -> ok;
                                 _ -> LastTime = delete_first(Cdf),
                                     ets:insert(Cdf, {CurrentTxId, get_time_diff(LastTime, os:timestamp())})
@@ -765,8 +765,9 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     case (AvoidNum == Prep) and (Read == []) of
                         true -> lager:warning("Can already commit!!!"),
                             CurCommitTime = max(SpeculaPrepTime, ProposeTS), 
-                            {DepDict3, _} = commit_specula_tx(CurrentTxId, CommitTime,
-                                    dict:erase(CurrentTxId, DepDict2), RepDict, PendingTxs, Cdf),
+                            RemoteParts = [P||{P, _} <-RemoteUpdates],
+                            {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
+                                dict:erase(CurrentTxId, DepDict2), RepDict, true),
                             case Cdf of false -> ok;
                                         _ -> LastTime = delete_first(Cdf),
                                             ets:insert(Cdf, {CurrentTxId, get_time_diff(LastTime, os:timestamp())})
@@ -936,17 +937,16 @@ try_to_abort(PendingList, ToAbortTxs, DepDict, RepDict, PendingTxs, ReadAborted)
 
 %% Same reason, no need for RemoteParts
 commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
+    commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict, false).
+
+commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict, IfWaited) ->
     DepList = ets:lookup(dependency, TxId),
-      lager:warning("Committing tx ~w with ~w", [TxId, CommitTime]),
-    lager:warning("~w: My read dependncy are ~w", [TxId, DepList]),
     {DepDict1, ToAbortTxs} = solve_read_dependency(CommitTime, DepDict, DepList),
     lager:warning("Commit ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
     ?CLOCKSI_VNODE:commit(LocalParts, TxId, CommitTime),
-    %?REPL_FSM:repl_commit(LocalParts, TxId, CommitTime, DoRepl),
     ?REPL_FSM:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
     ?CLOCKSI_VNODE:commit(RemoteParts, TxId, CommitTime),
-    %?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, DoRepl),
-    ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, false, RepDict),
+    ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, IfWaited, RepDict),
     {DepDict1, ToAbortTxs}.
 
 commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs, Cdf) ->
