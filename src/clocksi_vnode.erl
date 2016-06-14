@@ -415,7 +415,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
     case Result of
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
-           %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
+           lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
             case IfReplicate of
                 true ->
                     case Debug of
@@ -879,14 +879,14 @@ check_prepared(_, TxId, PreparedTxs, Key, _Value) ->
         [] ->
             %ets:insert(PreparedTxs, {Key, [{TxId, PPTime, PPTime, PPTime, Value, []}]}),
             {true, 1};
-        [{Key, [{_PrepTxId, _PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|_PWaiter]}] ->
+        [{Key, [{PrepTxId, PrepareTime, LastReaderTime, LastPPTime, _PrepValue, _RWaiter}|_PWaiter]}] ->
             case LastPPTime > SnapshotTime of
                 true ->
                     %lager:warning("~w fail LastPPTime is ~w, last reader time is ~w", [TxId, LastPPTime, LastReaderTime]),
                     false;
                 false ->
                     %ToPrepTime = max(LastReaderTime+1, PPTime),
-                    %lager:warning("~p: ~w waits for ~w with ~w", [Key, TxId, PrepTxId, PrepareTime]),
+                    lager:warning("~p: ~w waits for ~w with ~w", [Key, TxId, PrepTxId, PrepareTime]),
                     %ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, ToPrepTime, PPTime, PrepValue, RWaiter}|
                     %         (PWaiter++[{TxId, ToPrepTime, Value}])]}),
                     {wait, LastReaderTime+1}
