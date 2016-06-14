@@ -748,7 +748,7 @@ prepare_and_commit(TxId, [{Key, Value}], CommittedTxs, PreparedTxs, InMemoryStor
 %    set_prepared(PreparedTxs,Rest,TxId,Time, [Key|KeySet]).
 
 commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula)->
-    %lager:warning("Before commit ~w", [TxId]),
+    lager:warning("Before commit ~w", [TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             case IfSpecula of
@@ -906,11 +906,10 @@ update_store([], _TxId, TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTx
     %DepDict;
     dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PTime) ->
-    %lager:warning("Trying to insert key ~p with for ~w, commit time is ~w", [Key, TxId, TxCommitTime]),
+    lager:warning("Trying to insert key ~p with for ~w, commit time is ~w", [Key, TxId, TxCommitTime]),
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, PrepareTime, PrepareTime, LastPPTime, Value, []}|Deps] }] ->		
-           %lager:warning("Trying to insert key ~p with for ~w, preptime is ~w, diff with commit~w", [Key, TxId, PrepareTime, TxCommitTime-PrepareTime]),
            %lager:warning("~w No pending reader! Waiter is ~p", [TxId, Deps]),
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
@@ -928,7 +927,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
 								 PreparedTxs, DepDict1, Partition, PrepareTime);
                 _ ->
-                    %lager:warning("Record is ~p!", [Record]),
+                    lager:warning("Record is ~p!", [Record]),
 					true = ets:insert(PreparedTxs, {Key, Record}),
                     DepDict2 = unblock_prepare(PPTxId, DepDict1, PreparedTxs, Partition),
 					update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
@@ -984,7 +983,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                                     PReaders
                             end end,
                         [], PendingReaders),
-                    %lager:warning("Inserting back remaining!!! ~p", [Remaining]),
+                    lager:warning("Inserting back remaining!!! ~p", [Remaining]),
                     true = ets:insert(PreparedTxs, {Key, [{PPTxId, PPTime, LLReaderTime, LastPPTime, PPValue, NewPendingReaders}|Remaining]}),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
                         DepDict2, Partition, PrepareTime)
