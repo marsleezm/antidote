@@ -348,7 +348,7 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, ToPrepTS},
                               [Key|KS]
                       end end, [], WriteSet),
     ets:insert(PendingLog, {{TxId, Partition}, KeySet}),
-     lager:warning("Specula prepare for [~w, ~w]", [TxId, Partition]),
+    lager:warning("Specula prepared for [~w, ~w]", [TxId, Partition]),
     {noreply, SD0};
 
 handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pending_log=OldPendingLog}) ->
@@ -402,7 +402,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
                              lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         error ->
-                             lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
+                            %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
                             insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender),
                             {noreply, SD0}
                     end
