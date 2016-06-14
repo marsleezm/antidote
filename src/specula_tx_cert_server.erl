@@ -541,7 +541,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
 %%       and here we should check if the transaction can be directly committed or not. 
 handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{dep_dict=DepDict, 
             committed=Committed, sender=_Sender}) ->
-    %lager:warning("Got read valid for ~w of ~w", [PendingTxId, PendedTxId]),
+    lager:warning("Got read valid for ~w of ~w", [PendingTxId, PendedTxId]),
     case dict:find(PendingTxId, DepDict) of
         {ok, {read_only, [PendedTxId], _ReadOnlyTs}} ->
             %gen_server:reply(Sender, {ok, {committed, ReadOnlyTs}}),
