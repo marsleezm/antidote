@@ -346,6 +346,11 @@ handle_call({read, Key, TxId, Node}, Sender, SD0=#state{specula_read=SpeculaRead
     ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, SpeculaRead),
     {noreply, SD0};
 
+handle_call({get_oldest}, _Sender, SD0=#state{pending_list=PendingList}) ->
+    case PendingList of [] ->  {reply, nil, SD0}; 
+                        [H|_T] -> {reply, H, SD0}
+    end;
+
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
