@@ -261,7 +261,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
     %OldReadDeps = dict:find(TxId, DepDict),
-    lager:warning("Start certifying ~w, readDepTxs is ~w", [TxId, ReadDepTxs]),
+    %lager:warning("Start certifying ~w, readDepTxs is ~w", [TxId, ReadDepTxs]),
     case InvalidTs  of
         0 ->
             case LocalUpdates of
@@ -424,16 +424,16 @@ handle_cast({pending_prepared, TxId, PrepareTime},
             RemoteToAck = length(RemoteParts),
             case length(PendingList) >= SpeculaLength of
                 true ->
-                    lager:warning("Pedning prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
+                    %lager:warning("Pedning prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                     DepDict1 = dict:store(TxId, {RemoteToAck*TotalReplFactor+PendingPrepares+1, ReadDepTxs, NewMaxPrep, ReturnParts}, DepDict),
                     {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert}};
                 false ->
-                    lager:warning("Pending prep: decided to speculate ~w and prepare to ~w pending list is ~w!!", [TxId, RemoteUpdates, PendingList]),
+                    %lager:warning("Pending prep: decided to speculate ~w and prepare to ~w pending list is ~w!!", [TxId, RemoteUpdates, PendingList]),
                     %% Add dependent data into the table
                     ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, LT, os:timestamp(), no_wait}}),
                     {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
-                    lager:warning("Specula txn ~w, got propose time ~w, avoided ~w, still need ~w", [TxId, ProposeTS, AvoidNum, TotalReplFactor*RemoteToAck+PendingPrepares+1-AvoidNum]),
+                    %lager:warning("Specula txn ~w, got propose time ~w, avoided ~w, still need ~w", [TxId, ProposeTS, AvoidNum, TotalReplFactor*RemoteToAck+PendingPrepares+1-AvoidNum]),
                      %lager:warning("Proposets for ~w is ~w", [ProposeTS, TxId]),
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, ProposeTS, TxId, {remote, node()}),
                     gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
@@ -441,7 +441,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, pending_list=PendingList++[TxId]}}
             end;
         {ok, {N, ReadDeps, OldPrepTime, ReturnParts}} ->
-              lager:warning("~w needs ~w local prep replies", [TxId, N-1]),
+              %lager:warning("~w needs ~w local prep replies", [TxId, N-1]),
             DepDict1 = dict:store(TxId, {N-1, ReadDeps, max(PrepareTime, OldPrepTime), ReturnParts}, DepDict),
             {noreply, SD0#state{dep_dict=DepDict1, pending_prepares=PendingPrepares+1}};
         error ->
@@ -463,7 +463,7 @@ handle_cast({prepared, TxId, PrepareTime, Partition},
             remote_updates=RemoteUpdates, sender=Sender, dep_dict=DepDict, pending_list=PendingList, 
              min_commit_ts=LastCommitTs, specula_length=SpeculaLength, pending_prepares=PendingPrepares, lp_start=LT,
             pending_txs=PendingTxs, rep_dict=RepDict, committed=Committed, cdf=Cdf}) ->
-    lager:warning("Got local prepare for ~w", [TxId, PrepareTime]),
+    %lager:warning("Got local prepare for ~w", [TxId, PrepareTime]),
     case dict:find(TxId, DepDict) of
         %% Maybe can commit already.
         {ok, {1, ReadDepTxs, OldPrepTime, ReturnParts}} ->
@@ -491,7 +491,7 @@ handle_cast({prepared, TxId, PrepareTime, Partition},
                     case length(PendingList) >= SpeculaLength of
                         true -> 
                             %%In wait stage, only prepare and doesn't add data to table
-                            lager:warning("Decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
+                            %lager:warning("Decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                             DepDict1 = dict:store(TxId, {TotalReplFactor*RemoteToAck+PendingPrepares, ReadDepTxs, NewMaxPrep, [Partition|ReturnParts]}, DepDict),
                             {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert}};
@@ -694,10 +694,6 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
             gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
             case Cdf of false -> ok;
                         _ -> LastTime = delete_first(Cdf),
-                            %case LastTime of LT -> ok; %%lager:warning("First is ~w same as LP", [LastTime]);
-                            %              _ -> %lager:warning("First is ~w, different from LP ~w", [LastTime, LT])
-                            %end,
-                             %lager:warning("Last time is ~w, Now is ~w", [LastTime, os:timestamp()]),
                              ets:insert(Cdf, {PendingTxId, get_time_diff(LastTime, os:timestamp())})
             end,
             {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN,
@@ -753,15 +749,10 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     %lager:warning("Commit local txn"),
                     CurCommitTime = max(NewMaxPT+1, OldCurPrepTime),
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
-                    %true = ets:delete(PendingTxs, CurrentTxId),
                     {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
                     dict:erase(CurrentTxId, DepDict2), RepDict),
                     case Cdf of false -> ok;
                                 _ -> LastTime = delete_first(Cdf),
-                                    %case LastTime of LT -> ok; %lager:warning("First is ~w same as LP", [LastTime]);
-                                    %              _ -> %lager:warning("First is ~w, different from LP ~w", [LastTime, LT])
-                                    %end,
-                                    %lager:warning("Last time is ~w, Now is ~w", [LastTime, os:timestamp()]),
                                     ets:insert(Cdf, {CurrentTxId, get_time_diff(LastTime, os:timestamp())})
                     end,
                     gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
@@ -771,20 +762,35 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     {ok, {Prep, Read, OldCurPrepTime, ReturnParts}} = dict:find(CurrentTxId, DepDict2),
                     SpeculaPrepTime = max(NewMaxPT+1, OldCurPrepTime),
                     {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
-                    DepDict3=dict:store(CurrentTxId, {Prep-AvoidNum, Read, max(SpeculaPrepTime, ProposeTS), ReturnParts}, DepDict2),
-                    lager:warning("Specula current txn ~w, got propose time ~w, avoided ~w, still need ~w", [CurrentTxId, ProposeTS, AvoidNum, Prep-AvoidNum]),
-                    gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime}}),
-                    PendingList1 = NewPendingList ++ [CurrentTxId],
-                    RemoteParts = [P||{P, _} <-RemoteUpdates],
-                    ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, LT, os:timestamp(), waited}}),
-                    {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict3, 
-                            pending_list=PendingList1, min_commit_ts=NewMaxPT, min_snapshot_ts=SpeculaPrepTime,
-                                      committed=NewCommitted}}
+                    case AvoidNum of
+                        Prep -> lager:warn("Can already commit!!!"),
+                            CurCommitTime = max(SpeculaPrepTime, ProposeTS), 
+                            RemoteParts = [P||{P, _} <-RemoteUpdates],
+                            {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
+                            dict:erase(CurrentTxId, DepDict2), RepDict),
+                            case Cdf of false -> ok;
+                                        _ -> LastTime = delete_first(Cdf),
+                                            ets:insert(Cdf, {CurrentTxId, get_time_diff(LastTime, os:timestamp())})
+                            end,
+                            gen_server:reply(Sender, {ok, {committed, CurCommitTime}}),
+                            {noreply, SD0#state{min_commit_ts=CurCommitTime, tx_id=?NO_TXN, 
+                                  pending_list=[], committed=NewCommitted+1, dep_dict=DepDict3}};
+                        _ ->
+                            DepDict3=dict:store(CurrentTxId, {Prep-AvoidNum, Read, max(SpeculaPrepTime, ProposeTS), ReturnParts}, DepDict2),
+                            lager:warning("Specula current txn ~w, got propose time ~w, avoided ~w, still need ~w", [CurrentTxId, ProposeTS, AvoidNum, Prep-AvoidNum]),
+                            gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime}}),
+                            PendingList1 = NewPendingList ++ [CurrentTxId],
+                            RemoteParts = [P||{P, _} <-RemoteUpdates],
+                            ets:insert(PendingTxs, {CurrentTxId, {LocalParts, RemoteParts, LT, os:timestamp(), waited}}),
+                            {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict3, 
+                                pending_list=PendingList1, min_commit_ts=NewMaxPT, min_snapshot_ts=SpeculaPrepTime,
+                                        committed=NewCommitted}}
+                    end
             end;
         _ ->
             DepDict1 = dict:update(PendingTxId, fun({_, _, _, PL}) ->
                                         {0, [], NowPrepTime, PL} end, DepDict),
-             %lager:warning("got all replies, but I am not the first! PendingList is ~w", [PendingList]),
+             lager:warning("got all replies, but I am not the first! PendingList is ~w", [PendingList]),
             {noreply, SD0#state{dep_dict=DepDict1}}
     end.
 
