@@ -377,7 +377,7 @@ handle_cast({trace, PrevTxs, TxId, Sender, InfoList}, SD0=#state{dep_dict=DepDic
                             [{TxId, {LocalParts, RemoteParts, _, _}}] = ets:lookup(PendingTxs, TxId),
                             Info = io_lib:format("~p: blocked with ~w remaining prepare, local parts are ~w, remote parts are ~w, replied are ~w \n", [TxId, N, LocalParts, RemoteParts, PartL]),
                             gen_server:cast(Sender, {end_trace, PrevTxs++[TxId], InfoList++[Info]}); 
-        {ok, {N, ReadDeps, _}} -> lists:foreach(fun(BTxId) ->
+        {ok, {N, ReadDeps, _, _}} -> lists:foreach(fun(BTxId) ->
                     Info = io_lib:format("~p: blocked by ~p, N is ~p, read deps are ~p \n", [TxId, BTxId, N, ReadDeps]),
                     gen_server:cast(BTxId#tx_id.server_pid, {trace, PrevTxs++[TxId], BTxId, Sender, InfoList ++ [Info]}) end, ReadDeps)
     end,
@@ -1249,9 +1249,9 @@ load_config() ->
 
 send_prob(DepDict, TxId, InfoList, Sender) ->
     case dict:fetch(TxId, DepDict) of
-        {N, [], _} ->
+        {N, [], _, _} ->
             lager:info("PendTx ~w no pending reading!", [TxId, N]);
-        {N, ReadDep, _} ->
+        {N, ReadDep, _, _} ->
             lists:foreach(fun(BTxId) ->
                 Info = io_lib:format("~p: blocked by ~p, N is ~p, read deps are ~p \n", [TxId, BTxId, N, ReadDep]),
             gen_server:cast(BTxId#tx_id.server_pid, {trace, [TxId], BTxId, Sender, InfoList ++ [Info]}) end, ReadDep)
