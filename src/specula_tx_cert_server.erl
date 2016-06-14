@@ -374,7 +374,7 @@ handle_cast({trace, PrevTxs, TxId, Sender, InfoList}, SD0=#state{dep_dict=DepDic
                             [Head|_T] = PendingList,
                             send_prob(DepDict, Head, InfoList++[Info], Sender);
         {ok, {N, [], _, PartL}} -> 
-                            [{TxId, {LocalParts, RemoteParts, _, _}}] = ets:lookup(PendingTxs, TxId),
+                            [{TxId, {LocalParts, RemoteParts, _, _, _}}] = ets:lookup(PendingTxs, TxId),
                             Info = io_lib:format("~p: blocked with ~w remaining prepare, local parts are ~w, remote parts are ~w, replied are ~w \n", [TxId, N, LocalParts, RemoteParts, PartL]),
                             gen_server:cast(Sender, {end_trace, PrevTxs++[TxId], InfoList++[Info]}); 
         {ok, {N, ReadDeps, _, _}} -> lists:foreach(fun(BTxId) ->
