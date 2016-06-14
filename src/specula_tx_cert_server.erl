@@ -772,7 +772,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                             CurCommitTime = max(SpeculaPrepTime, ProposeTS), 
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
-                                dict:erase(CurrentTxId, DepDict2), RepDict, true),
+                                dict:erase(CurrentTxId, DepDict2), RepDict, waited),
                             case Cdf of false -> ok;
                                         _ -> LastTime = delete_first(Cdf),
                                             ets:insert(Cdf, {CurrentTxId, get_time_diff(LastTime, os:timestamp())})
@@ -942,7 +942,7 @@ try_to_abort(PendingList, ToAbortTxs, DepDict, RepDict, PendingTxs, ReadAborted)
 
 %% Same reason, no need for RemoteParts
 commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
-    commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict, false).
+    commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict, no_wait).
 
 commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict, IfWaited) ->
     DepList = ets:lookup(dependency, TxId),
@@ -951,7 +951,10 @@ commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict, IfWaited)
     ?CLOCKSI_VNODE:commit(LocalParts, TxId, CommitTime),
     ?REPL_FSM:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
     ?CLOCKSI_VNODE:commit(RemoteParts, TxId, CommitTime),
-    ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, IfWaited, RepDict),
+    case IfWaited of
+        no_wait -> ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, false, RepDict, no_wait);
+        watied -> ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, true, RepDict, waited)
+    end,
     {DepDict1, ToAbortTxs}.
 
 commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs, Cdf) ->
