@@ -490,7 +490,7 @@ handle_cast({prepared, TxId, PrepareTime},
                     {noreply, SD0#state{min_commit_ts=CommitTime, tx_id=?NO_TXN, pending_list=[], 
                         dep_dict=DepDict1, committed=Committed+1}};
                 false ->
-                    %lager:info("Pending list is ~w, pending prepares is ~w, ReadDepTxs is ~w", [PendingList, PendingPrepares, ReadDepTxs]),
+                    lager:info("Pending list is ~w, pending prepares is ~w, ReadDepTxs is ~w", [PendingList, PendingPrepares, ReadDepTxs]),
                     case length(PendingList) >= SpeculaLength of
                         true -> 
                             %%In wait stage, only prepare and doesn't add data to table
@@ -527,7 +527,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
             NowPrepTime =  max(OldPrepTime, PendingPT),
             try_commit_pending(NowPrepTime, PendingTxId, SD0);
         {ok, {PrepDeps, ReadDeps, OldPrepTime}} -> %% Maybe the transaction can commit 
-            %lager:warning("Not enough.. Prep ~w, Read ~w, PrepTime ~w", [PrepDeps, ReadDeps, OldPrepTime]),
+            lager:warning("Not enough.. Prep ~w, Read ~w, PrepTime ~w", [PrepDeps, ReadDeps, OldPrepTime]),
             DepDict1=dict:store(PendingTxId, {PrepDeps-1, ReadDeps, max(PendingPT, OldPrepTime)}, DepDict),
             {noreply, SD0#state{dep_dict=DepDict1}};
         error ->
