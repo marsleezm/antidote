@@ -169,10 +169,15 @@ get_oldest() ->
     lists:foldl(fun(N, OldT) ->
             case gen_server:call(generate_module_name(N), {get_oldest}) of 
                 nil ->  OldT;
-                T -> case (OldT == nil) or (T#tx_id.snapshot_time < OldT#tx_id.snapshot_time) of
-                        true -> T;
-                        false -> OldT
-                    end 
+                T -> case OldT of
+                        nil -> T;
+                        false -> case T of nil -> OldT; 
+                                            _ ->
+                                        case T#tx_id.snapshot_time < OldT#tx_id.snapshot_time of
+                                            true -> T;
+                                            false -> OldT
+                                        end
+                    end end 
             end end, nil, SPL).
 
 get_stat() ->
