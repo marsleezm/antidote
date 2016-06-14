@@ -953,7 +953,7 @@ commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict, IfWaited)
     ?CLOCKSI_VNODE:commit(RemoteParts, TxId, CommitTime),
     case IfWaited of
         no_wait -> ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, false, RepDict, no_wait);
-        watied -> ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, true, RepDict, waited)
+        waited -> ?REPL_FSM:repl_commit(RemoteParts, TxId, CommitTime, true, RepDict, waited)
     end,
     {DepDict1, ToAbortTxs}.
 
