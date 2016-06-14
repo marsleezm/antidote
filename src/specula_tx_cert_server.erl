@@ -496,11 +496,11 @@ handle_cast({prepared, TxId, PrepareTime, Partition},
                             DepDict1 = dict:store(TxId, {TotalReplFactor*RemoteToAck+PendingPrepares, ReadDepTxs, NewMaxPrep, [Partition|ReturnParts]}, DepDict),
                             {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert}};
                         false ->
-                              lager:warning("Speculate current tx with ~w, remote parts are ~w, Num is ~w", [TxId, RemoteParts, length(RemoteParts)]),
+                             %lager:warning("Speculate current tx with ~w, remote parts are ~w, Num is ~w", [TxId, RemoteParts, length(RemoteParts)]),
                             %% Add dependent data into the table
                             ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, LT, os:timestamp(), no_wait}}),
                             {ProposeTS, NumAvoid} = add_to_table(RemoteUpdates, TxId, NewMaxPrep, RepDict),
-                            lager:warning("Specula txn ~w, got propose time ~w, avoided ~w, still need", [TxId, ProposeTS, NumAvoid, TotalReplFactor*RemoteToAck+PendingPrepares-NumAvoid]),
+                           %lager:warning("Specula txn ~w, got propose time ~w, avoided ~w, still need", [TxId, ProposeTS, NumAvoid, TotalReplFactor*RemoteToAck+PendingPrepares-NumAvoid]),
                              %lager:warning("Proposets for ~w is ~w", [ProposeTS, TxId]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, ProposeTS, TxId, {remote, node()}),
                             gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep}}),
@@ -509,7 +509,7 @@ handle_cast({prepared, TxId, PrepareTime, Partition},
                     end
                 end;
         {ok, {N, ReadDeps, OldPrepTime, ReturnParts}} ->
-           lager:warning("~w needs ~w local prep replies", [TxId, N-1]),
+          %lager:warning("~w needs ~w local prep replies", [TxId, N-1]),
             DepDict1 = dict:store(TxId, {N-1, ReadDeps, max(PrepareTime, OldPrepTime), [Partition|ReturnParts]}, DepDict),
             {noreply, SD0#state{dep_dict=DepDict1}};
         error ->
@@ -518,13 +518,13 @@ handle_cast({prepared, TxId, PrepareTime, Partition},
 
 handle_cast({prepared, PendingTxId, PendingPT, Partition}, 
 	    SD0=#state{dep_dict=DepDict}) ->
-    lager:warning("Got remote prepare for ~w, pt is ~w", [PendingTxId, PendingPT]),
+   %lager:warning("Got remote prepare for ~w, pt is ~w", [PendingTxId, PendingPT]),
     case dict:find(PendingTxId, DepDict) of
         {ok, {1, [], OldPrepTime, _ReturnParts}} -> %% Maybe the transaction can commit 
             NowPrepTime =  max(OldPrepTime, PendingPT),
             try_commit_pending(NowPrepTime, PendingTxId, SD0);
         {ok, {PrepDeps, ReadDeps, OldPrepTime, ReturnParts}} -> %% Maybe the transaction can commit 
-            lager:warning("Not enough.. Prep ~w, Read ~w, PrepTime ~w", [PrepDeps, ReadDeps, OldPrepTime]),
+           %lager:warning("Not enough.. Prep ~w, Read ~w, PrepTime ~w", [PrepDeps, ReadDeps, OldPrepTime]),
             DepDict1=dict:store(PendingTxId, {PrepDeps-1, ReadDeps, max(PendingPT, OldPrepTime), [Partition|ReturnParts]}, DepDict),
             {noreply, SD0#state{dep_dict=DepDict1}};
         error ->
@@ -569,7 +569,7 @@ handle_cast({aborted, TxId, FromNode}, SD0=#state{tx_id=TxId, local_updates=Loca
         sender=Sender, dep_dict=DepDict, stage=local_cert, cert_aborted=CertAborted, rep_dict=RepDict}) ->
     abort_tx(TxId, lists:delete(FromNode, LocalParts), [], RepDict),
     DepDict1 = dict:erase(TxId, DepDict),
-    lager:warning("~w local abort! Cert aborted is now ~w", [TxId, CertAborted+1]),
+   %lager:warning("~w local abort! Cert aborted is now ~w", [TxId, CertAborted+1]),
     %lager:warning("~w aborted!", [TxId]),
     gen_server:reply(Sender, {aborted, local}),
     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_aborted=CertAborted+1}};
@@ -763,7 +763,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     SpeculaPrepTime = max(NewMaxPT+1, OldCurPrepTime),
                     {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
                     case AvoidNum of
-                        Prep -> lager:warn("Can already commit!!!"),
+                        Prep ->%lager:warn("Can already commit!!!"),
                             CurCommitTime = max(SpeculaPrepTime, ProposeTS), 
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
@@ -777,7 +777,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                                   pending_list=[], committed=NewCommitted+1, dep_dict=DepDict3}};
                         _ ->
                             DepDict3=dict:store(CurrentTxId, {Prep-AvoidNum, Read, max(SpeculaPrepTime, ProposeTS), ReturnParts}, DepDict2),
-                            lager:warning("Specula current txn ~w, got propose time ~w, avoided ~w, still need ~w", [CurrentTxId, ProposeTS, AvoidNum, Prep-AvoidNum]),
+                           %lager:warning("Specula current txn ~w, got propose time ~w, avoided ~w, still need ~w", [CurrentTxId, ProposeTS, AvoidNum, Prep-AvoidNum]),
                             gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime}}),
                             PendingList1 = NewPendingList ++ [CurrentTxId],
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
@@ -790,7 +790,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
         _ ->
             DepDict1 = dict:update(PendingTxId, fun({_, _, _, PL}) ->
                                         {0, [], NowPrepTime, PL} end, DepDict),
-             lager:warning("got all replies, but I am not the first! PendingList is ~w", [PendingList]),
+            %lager:warning("got all replies, but I am not the first! PendingList is ~w", [PendingList]),
             {noreply, SD0#state{dep_dict=DepDict1}}
     end.
 
