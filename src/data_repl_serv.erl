@@ -425,7 +425,7 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 
 handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited}, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, specula_read=SpeculaRead, current_dict=CurrentDict}) ->
-    lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
+   %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
     lists:foreach(fun(Partition) ->
                     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
                     %case ets:lookup(PendingLog, {TxId, Partition}) of [] -> ok; 
@@ -749,7 +749,7 @@ read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sende
     read_or_block(Rest, [{PTxId, PrepTime, Value, Reader}|Prev], SnapshotTime, Sender).
 
 add_read_dep(ReaderTx, WriterTx, _Key) ->
-    lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
+   %lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 

@@ -413,8 +413,9 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, c
 %% Receiving local prepare. Can only receive local prepare for two kinds of transaction
 %%  Current transaction that has not finished local cert phase
 %%  Transaction that has already cert_aborted.
+%% Has to add local_cert here, because may receive pending_prepared, prepared from the same guy.
 handle_cast({pending_prepared, TxId, PrepareTime}, 
-	    SD0=#state{tx_id=TxId, local_updates=LocalParts, remote_updates=RemoteUpdates, sender=Sender, 
+	    SD0=#state{tx_id=TxId, local_updates=LocalParts, remote_updates=RemoteUpdates, sender=Sender, stage=local_cert,  
                dep_dict=DepDict, pending_list=PendingList, specula_length=SpeculaLength, total_repl_factor=TotalReplFactor, pending_prepares=PendingPrepares, pending_txs=PendingTxs, rep_dict=RepDict, lp_start=LT}) ->  
     lager:warning("Speculative receive pending_prepared for ~w, current pp is ~w", [TxId, PendingPrepares+1]),
     case dict:find(TxId, DepDict) of
@@ -425,7 +426,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
             RemoteToAck = length(RemoteParts),
             case length(PendingList) >= SpeculaLength of
                 true ->
-                    lager:warning("Pedning prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
+                    lager:warning("Pending prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                     DepDict1 = dict:store(TxId, {RemoteToAck*TotalReplFactor+PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
                     {noreply, SD0#state{dep_dict=DepDict1, stage=remote_cert}};
