@@ -129,7 +129,7 @@ init([Name]) ->
                 _ -> false
             end,
     {ok, #state{pending_txs=PendingTxs, dep_dict=dict:new(), total_repl_factor=TotalReplFactor, cdf=Cdf, name=Name, 
-            specula_length=SpeculaLength, specula_read=SpeculaRead, rep_dict=RepDict}}.
+            tx_id=?NO_TXN, specula_length=SpeculaLength, specula_read=SpeculaRead, rep_dict=RepDict}}.
 
 handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
     clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
@@ -414,7 +414,7 @@ handle_cast({clean_data, Sender}, #state{pending_txs=OldPendingTxs, name=Name, c
     TotalReplFactor = length(Replicas)+1,
     %SpeculaData = tx_utilities:open_private_table(specula_data),
     Sender ! cleaned,
-    {noreply, #state{pending_txs=PendingTxs, dep_dict=dict:new(), cdf=Cdf, name=Name, 
+    {noreply, #state{pending_txs=PendingTxs, dep_dict=dict:new(), cdf=Cdf, name=Name, tx_id=?NO_TXN, 
             specula_length=SpeculaLength, specula_read=SpeculaRead, rep_dict=RepDict, total_repl_factor=TotalReplFactor}};
 
 %% Receiving local prepare. Can only receive local prepare for two kinds of transaction
