@@ -740,12 +740,12 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                         min_commit_ts=NewMaxPT,  read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
                               cascade_aborted=CascadAborted+max(NumAborted-1,0)+CFlowAbort, committed=NewCommitted}};
                 wait -> 
-                    lager:warning("Local txn waits"),
+                    %lager:warning("Local txn waits"),
                     {noreply, SD0#state{pending_list=NewPendingList, dep_dict=DepDict2, 
                             read_invalid=ReadInvalid+min(NumAborted, 1), min_commit_ts=NewMaxPT,
                               cascade_aborted=CascadAborted+max(0, NumAborted-1), committed=NewCommitted}};
                 {commit, OldCurPrepTime} ->
-                   lager:warning("Commit local txn"),
+                   %lager:warning("Commit local txn"),
                     CurCommitTime = max(NewMaxPT+1, OldCurPrepTime),
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
                     {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
