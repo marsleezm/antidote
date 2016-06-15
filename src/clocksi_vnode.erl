@@ -452,7 +452,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     end, 
             {noreply, State#state{dep_dict=NewDepDict}};
         {error, write_conflict} ->
-           %lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
+            lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
             case Debug of
                 false ->
                     case RepMode of 
