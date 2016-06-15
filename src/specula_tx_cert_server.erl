@@ -105,7 +105,7 @@
 %%%===================================================================
 
 start_link(Name) ->
-     lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
+    lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
     gen_server:start_link({local,Name},
              ?MODULE, [Name], []).
 
@@ -121,7 +121,7 @@ init([Name]) ->
     {SpeculaLength, SpeculaRead} = load_config(), 
     [{_, Replicas}] = ets:lookup(meta_info, node()),
     TotalReplFactor = length(Replicas)+1,
-     lager:warning("TotalReplFactor is ~w", [TotalReplFactor]),
+    lager:warning("TotalReplFactor is ~w", [TotalReplFactor]),
     %SpeculaData = tx_utilities:open_private_table(specula_data),
     Cdf = case antidote_config:get(cdf, false) of
                 true -> Tab = ets:new(Name, [private, set]),
@@ -134,7 +134,6 @@ init([Name]) ->
 handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
     clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
     {noreply, SD0};
-
 
 handle_call({get_pid}, _Sender, SD0) ->
     {reply, self(), SD0};
@@ -577,11 +576,11 @@ handle_cast({aborted, TxId, FromNode}, SD0=#state{tx_id=TxId, local_updates=Loca
     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_aborted=CertAborted+1}};
 %% Aborting the current transaction
 handle_cast({aborted, TxId, FromNode}, 
-	    SD0=#state{tx_id=TxId, pending_txs=PendingTxs,  local_updates=LocalParts, rep_dict=RepDict, 
+	    SD0=#state{tx_id=TxId, local_updates=LocalParts, rep_dict=RepDict, 
             remote_updates=RemoteUpdates, dep_dict=DepDict, sender=Sender, cert_aborted=CertAborted, stage=remote_cert}) ->
     RemoteParts = [P || {P, _} <- RemoteUpdates],
     abort_tx(TxId, LocalParts, lists:delete(FromNode, RemoteParts), RepDict),
-    DepDict1 = dict:erase(PendingTxs, DepDict),
+    DepDict1 = dict:erase(TxId, DepDict),
     lager:warning("~w remote abort! Cert aborted is now ~w", [TxId, CertAborted+1]),
     gen_server:reply(Sender, {aborted, remote}),
     {noreply, SD0#state{tx_id=?NO_TXN, dep_dict=DepDict1, cert_aborted=CertAborted+1}};
@@ -590,7 +589,7 @@ handle_cast({aborted, PendingTxId, FromNode},
 	    SD0=#state{pending_list=PendingList, rep_dict=RepDict, tx_id=CurrentTxId, sender=Sender,
             dep_dict=DepDict, pending_txs=PendingTxs, stage=Stage, cascade_aborted=CascadeAborted,
             cert_aborted=CertAborted, local_updates=LocalParts, remote_updates=RemoteUpdates}) ->
-    %lager:warning("Aborting ~w remote, not current transaction", [PendingTxId]),
+    lager:warning("Aborting ~w remote, not current transaction", [PendingTxId]),
     case start_from_list(PendingTxId, PendingList) of
         [] ->
             %lager:warning("Not aborting anything"),
@@ -605,7 +604,7 @@ handle_cast({aborted, PendingTxId, FromNode},
                         pending_list=Prev,
                         cert_aborted=CertAborted+1, cascade_aborted=CascadeAborted+Length-1}};
                 _ ->
-                    lager:warning("Trying to abort local txn ~w", [CurrentTxId]),
+                    %lager:warning("Trying to abort local txn ~w", [CurrentTxId]),
                     RemoteParts = [P || {P, _} <- RemoteUpdates],
                     case Stage of
                         read ->
@@ -801,7 +800,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
         dep_dict=DepDict, pending_list=PendingList, cascade_aborted=CascadAborted, stage=Stage,
         rep_dict=RepDict, local_updates=LocalParts, remote_updates=RemoteUpdates, pending_txs=PendingTxs,
         invalid_ts=InvalidTS, read_invalid=ReadInvalid}) ->
-     %lager:warning("Got read invalid for ~w", [TxId]),
+    lager:warning("Got read invalid for ~w", [TxId]),
     {RAD1, RID1} = case Type of read_aborted -> {ReadAborted+1, ReadInvalid};
                                 read_invalid -> {ReadAborted, ReadInvalid+1}
                    end,
@@ -945,7 +944,7 @@ commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict) ->
 commit_tx(TxId, CommitTime, LocalParts, RemoteParts, DepDict, RepDict, IfWaited) ->
     DepList = ets:lookup(dependency, TxId),
     {DepDict1, ToAbortTxs} = solve_read_dependency(CommitTime, DepDict, DepList),
-    lager:warning("Commit ~w to ~w, ~w", [TxId, LocalParts, RemoteParts]),
+    lager:warning("Commit ~w", [TxId]),
     ?CLOCKSI_VNODE:commit(LocalParts, TxId, CommitTime),
     ?REPL_FSM:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
     ?CLOCKSI_VNODE:commit(RemoteParts, TxId, CommitTime),
