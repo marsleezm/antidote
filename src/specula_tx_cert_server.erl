@@ -1063,7 +1063,7 @@ abort_tx(TxId, LocalParts, RemoteParts, RepDict) ->
                                 Self ->
                                     ok;
                                 _ ->
-                                   %lager:warning("~w is not my own, read invalid", [DepTxId]),
+                                    lager:warning("~w is not my own, read invalid", [DepTxId]),
                                     ?READ_ABORTED(TxServer, -1, DepTxId)
                             end
                     end, DepList),
