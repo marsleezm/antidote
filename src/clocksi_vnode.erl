@@ -1082,8 +1082,8 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
             ready
     end.
 
-add_read_dep(ReaderTx, WriterTx, _Key) ->
-    %lager:warning("Inserting anti_dep from ~w to ~w for ~p", [ReaderTx, WriterTx, Key]),
+add_read_dep(ReaderTx, WriterTx, Key) ->
+    lager:warning("Inserting anti_dep from ~w to ~w for ~p", [ReaderTx, WriterTx, Key]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 

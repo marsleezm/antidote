@@ -749,7 +749,7 @@ read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sende
     read_or_block(Rest, [{PTxId, PrepTime, Value, Reader}|Prev], SnapshotTime, Sender).
 
 add_read_dep(ReaderTx, WriterTx, _Key) ->
-     %lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
+    lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
