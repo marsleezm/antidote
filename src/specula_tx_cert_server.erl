@@ -802,7 +802,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
         dep_dict=DepDict, pending_list=PendingList, cascade_aborted=CascadAborted, stage=Stage,
         rep_dict=RepDict, local_updates=LocalParts, remote_updates=RemoteUpdates, pending_txs=PendingTxs,
         invalid_ts=InvalidTS, read_invalid=ReadInvalid}) ->
-    %lager:warning("Got read invalid for ~w", [TxId]),
+    lager:warning("Got read abort for ~w", [TxId]),
     {RAD1, RID1} = case Type of read_aborted -> {ReadAborted+1, ReadInvalid};
                                 read_invalid -> {ReadAborted, ReadInvalid+1}
                    end,
@@ -1009,7 +1009,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
                                     Self ->
                                         ok;
                                     _ ->
-                                          %lager:warning("~w is not my own, read invalid", [DepTxId]),
+                                        lager:warning("~w is not my own, read invalid", [DepTxId]),
                                         ?READ_ABORTED(TxServer, -1, DepTxId)
                                 end
                        end, DepList),
@@ -1033,7 +1033,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
                                   Self ->
                                       ok;
                                   _ ->
-                                        %lager:warning("~w is not my own, read invalid", [DepTxId]),
+                                      lager:warning("~w is not my own, read invalid", [DepTxId]),
                                       ?READ_ABORTED(TxServer, -1, DepTxId)
                               end
                      end, DepList),
