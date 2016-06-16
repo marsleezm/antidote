@@ -144,7 +144,7 @@ handle_call({start_read_tx}, _Sender, SD0) ->
 
 handle_call({start_tx, _, _}, Sender, SD0) ->
     handle_call({start_tx}, Sender, SD0); 
-handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS, tx_id=OldTxId, pending_list=PendingList, local_updates=LocalParts, remote_updates=RemoteUpdates, lp_start=LT, pending_txs=PendingTxs}) ->
+handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS, tx_id=OldTxId, pending_list=PendingList, local_updates=LocalParts, remote_updates=RemoteUpdates, lp_start=LT, pending_txs=PendingTxs, stage=Stage}) ->
     NewSnapshotTS = max(MinSnapshotTS, MinCommitTS) + 1, 
     TxId = tx_utilities:create_tx_id(NewSnapshotTS),
    %lager:warning("Starting txid ~w, MinSnapshotTS is ~w", [TxId, MinSnapshotTS+1]),
@@ -154,10 +154,16 @@ handle_call({start_tx}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnaps
             {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, dep_dict=D1, stage=read, 
                 min_snapshot_ts=NewSnapshotTS, pending_prepares=0}};
         _ ->
-            RemoteParts = [P||{P, _} <-RemoteUpdates],
-            ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, LT, os:timestamp(), waited}}),
-            {reply, TxId, SD0#state{tx_id=TxId, pending_list=PendingList++[OldTxId], invalid_ts=0, dep_dict=D1, stage=read, 
-                min_snapshot_ts=NewSnapshotTS, pending_prepares=0}}
+            case Stage of 
+                read ->
+                    {reply, TxId, SD0#state{tx_id=TxId, invalid_ts=0, stage=read,
+                        min_snapshot_ts=NewSnapshotTS, pending_prepares=0, dep_dict=dict:erase(OldTxId, D1)}}; 
+                _ ->
+                    RemoteParts = [P||{P, _} <-RemoteUpdates],
+                    ets:insert(PendingTxs, {TxId, {LocalParts, RemoteParts, LT, os:timestamp(), waited}}),
+                    {reply, TxId, SD0#state{tx_id=TxId, pending_list=PendingList++[OldTxId], invalid_ts=0, dep_dict=D1, stage=read, 
+                        min_snapshot_ts=NewSnapshotTS, pending_prepares=0}}
+            end
     end;
 
 handle_call({get_cdf}, _Sender, SD0=#state{name=Name, cdf=Cdf}) ->
