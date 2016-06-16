@@ -334,7 +334,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
                     NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
                                                         _ -> NumSpeculaRead+1
                                       end,
-                    lager:warning("Total repl fact is ~w, to ack is ~w", [TotalReplFactor, (TotalReplFactor-1)*NumToAck]),
+                    %lager:warning("Total repl fact is ~w, to ack is ~w", [TotalReplFactor, (TotalReplFactor-1)*NumToAck]),
                     {noreply, SD0#state{tx_id=TxId, dep_dict=DepDict1, sender=Sender, local_updates=LocalPartitions, 
                         remote_updates=RemoteUpdates, lp_start=StartTime, pending_prepares=(TotalReplFactor-1)*NumToAck, stage=local_cert, num_specula_read=NumSpeculaRead1}}
             end;
@@ -501,7 +501,7 @@ handle_cast({prepared, TxId, PrepareTime},
                     {noreply, SD0#state{min_commit_ts=CommitTime, tx_id=?NO_TXN, pending_list=[], 
                         dep_dict=DepDict1, committed=Committed+1}};
                 false ->
-                   lager:warning("Pending list is ~w, pending prepares is ~w, ReadDepTxs is ~w", [PendingList, PendingPrepares, ReadDepTxs]),
+                   %lager:warning("Pending list is ~w, pending prepares is ~w, ReadDepTxs is ~w", [PendingList, PendingPrepares, ReadDepTxs]),
                     case length(PendingList) >= SpeculaLength of
                         true -> 
                             %%In wait stage, only prepare and doesn't add data to table
@@ -999,7 +999,7 @@ commit_specula_tx(TxId, CommitTime, DepDict, RepDict, PendingTxs, Cdf) ->
     {DepDict1, ToAbortTxs}.
 
 abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
-   lager:warning("Trying to abort specula ~w", [TxId]),
+   %lager:warning("Trying to abort specula ~w", [TxId]),
     [{TxId, {LocalParts, RemoteParts, _LP, _RP, IfWaited}}] = ets:lookup(PendingTxs, TxId),
     ets:delete(PendingTxs, TxId),
       %%%%%%%%% Time stat %%%%%%%%%%%
@@ -1008,7 +1008,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
       %ets:update_counter(PendingTxs, {TxnType, abort}, [{2, LPDiff}, {3, RPDiff}, {4, 1}]),
       %%%%%%%%% Time stat %%%%%%%%%%%
       DepList = ets:lookup(dependency, TxId),
-        %lager:warning("~w: My read dependncy are ~w", [TxId, DepList]),
+    lager:warning("Abort specula ~w: My read dependncy are ~w", [TxId, DepList]),
       Self = self(),
       lists:foreach(fun({_, DepTxId}) ->
                                 TxServer = DepTxId#tx_id.server_pid,
@@ -1028,11 +1028,10 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
       dict:erase(TxId, DepDict).
 
 abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
-   lager:warning("Trying to abort specula ~w", [TxId]),
     [{TxId, {LocalParts, RemoteParts, _LP, _RP, IfWaited}}] = ets:lookup(PendingTxs, TxId), 
     ets:delete(PendingTxs, TxId),
     DepList = ets:lookup(dependency, TxId),
-    %lager:warning("~w: My read dependncy are ~w", [TxId, DepList]),
+    lager:warning("Specula abort ~w: My read dependncy are ~w", [TxId, DepList]),
     Self = self(),
     lists:foreach(fun({_, DepTxId}) ->
                               TxServer = DepTxId#tx_id.server_pid,
@@ -1059,10 +1058,9 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
     dict:erase(TxId, DepDict).
 
 abort_tx(TxId, LocalParts, RemoteParts, RepDict) ->
-   lager:warning("Trying to abort ~w", [TxId]),
     %true = ets:delete(PendingTxs, TxId),
     DepList = ets:lookup(dependency, TxId),
-    %lager:warning("~w: My read dependncy are ~w", [TxId, DepList]),
+    lager:warning("Abort ~w: My read dependncy are ~w", [TxId, DepList]),
     Self = self(),
     lists:foreach(fun({_, DepTxId}) ->
                             TxServer = DepTxId#tx_id.server_pid,
