@@ -275,7 +275,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
     %OldReadDeps = dict:find(TxId, DepDict),
-    lager:warning("Start certifying ~w, readDepTxs is ~w", [TxId, ReadDepTxs]),
+    %lager:warning("Start certifying ~w, readDepTxs is ~w", [TxId, ReadDepTxs]),
     case InvalidTs  of
         0 ->
             case LocalUpdates of
@@ -536,7 +536,7 @@ handle_cast({prepared, PendingTxId, PendingPT},
             NowPrepTime =  max(OldPrepTime, PendingPT),
             try_commit_pending(NowPrepTime, PendingTxId, SD0);
         {ok, {PrepDeps, ReadDeps, OldPrepTime}} -> %% Maybe the transaction can commit 
-            lager:warning("~w not enough.. Prep ~w, Read ~w", [PendingTxId, PrepDeps, ReadDeps]),
+            %lager:warning("~w not enough.. Prep ~w, Read ~w", [PendingTxId, PrepDeps, ReadDeps]),
             DepDict1=dict:store(PendingTxId, {PrepDeps-1, ReadDeps, max(PendingPT, OldPrepTime)}, DepDict),
             {noreply, SD0#state{dep_dict=DepDict1}};
         error ->
@@ -1008,7 +1008,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
       %ets:update_counter(PendingTxs, {TxnType, abort}, [{2, LPDiff}, {3, RPDiff}, {4, 1}]),
       %%%%%%%%% Time stat %%%%%%%%%%%
       DepList = ets:lookup(dependency, TxId),
-    lager:warning("Abort specula ~w: My read dependncy are ~w", [TxId, DepList]),
+        %lager:warning("Abort specula ~w: My read dependncy are ~w", [TxId, DepList]),
       Self = self(),
       lists:foreach(fun({_, DepTxId}) ->
                                 TxServer = DepTxId#tx_id.server_pid,
@@ -1031,7 +1031,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
     [{TxId, {LocalParts, RemoteParts, _LP, _RP, IfWaited}}] = ets:lookup(PendingTxs, TxId), 
     ets:delete(PendingTxs, TxId),
     DepList = ets:lookup(dependency, TxId),
-    lager:warning("Specula abort ~w: My read dependncy are ~w", [TxId, DepList]),
+    %lager:warning("Specula abort ~w: My read dependncy are ~w", [TxId, DepList]),
     Self = self(),
     lists:foreach(fun({_, DepTxId}) ->
                               TxServer = DepTxId#tx_id.server_pid,
@@ -1060,7 +1060,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
 abort_tx(TxId, LocalParts, RemoteParts, RepDict) ->
     %true = ets:delete(PendingTxs, TxId),
     DepList = ets:lookup(dependency, TxId),
-    lager:warning("Abort ~w: My read dependncy are ~w", [TxId, DepList]),
+    %lager:warning("Abort ~w: My read dependncy are ~w", [TxId, DepList]),
     Self = self(),
     lists:foreach(fun({_, DepTxId}) ->
                             TxServer = DepTxId#tx_id.server_pid,
