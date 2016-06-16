@@ -597,7 +597,7 @@ handle_command({abort, TxId}, _Sender,
                     end,
             {noreply, State#state{dep_dict=DepDict1}};
         [] ->
-               %lager:warning("No key set at all for ~w", [TxId]),
+            lager:error("No key set at all for ~w", [TxId]),
             {noreply, State}
     end;
 
@@ -1082,8 +1082,8 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
             ready
     end.
 
-add_read_dep(ReaderTx, WriterTx, _Key) ->
-    %lager:warning("Inserting anti_dep from ~w to ~w", [ReaderTx, WriterTx]),
+add_read_dep(ReaderTx, WriterTx, Key) ->
+    lager:warning("Inserting anti_dep from ~w to ~w, key is ~p", [ReaderTx, WriterTx, Key]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 

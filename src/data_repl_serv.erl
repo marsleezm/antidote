@@ -394,12 +394,12 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
         prepared ->
             case dict:find(TxId, CurrentDict) of
                 {ok, finished} ->
-                    %lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                    lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
                 error ->
                     case dict:find(TxId, BackupDict) of
                         {ok, finished} ->
-                            %lager:warning("~w, ~w aborted already", [TxId, Partition]),
+                            lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         error ->
                             %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
@@ -455,12 +455,12 @@ handle_cast({repl_abort, TxId, Partitions, IfWaited},
     CurrentDict1 = lists:foldl(fun(Partition, S) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
-                         %lager:warning("Found ~p for ~w, ~w", [KeySet, TxId, Partition]),
+                         lager:warning("Found for ~w, ~w", [TxId, Partition]),
                         ets:delete(PendingLog, {TxId, Partition}),
                         _MaxTs = clean_abort_prepared(PendingLog, KeySet, TxId, ReplicatedLog, 0),
                         S;
                     [] ->
-                       %lager:warning("Repl abort arrived early! ~w", [TxId]),
+                        lager:warning("Repl abort arrived early! ~w", [TxId]),
                         dict:store(TxId, finished, S)
                 end
         end, CurrentDict, Partitions),
@@ -748,8 +748,8 @@ read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sende
 read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sender) ->
     read_or_block(Rest, [{PTxId, PrepTime, Value, Reader}|Prev], SnapshotTime, Sender).
 
-add_read_dep(ReaderTx, WriterTx, _Key) ->
-    %lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
+add_read_dep(ReaderTx, WriterTx, Key) ->
+    lager:warning("Add read dep from ~w to ~w, key is ~p", [ReaderTx, WriterTx, Key]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
