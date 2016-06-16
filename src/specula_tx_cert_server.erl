@@ -733,7 +733,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                           min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1),
                               cascade_aborted=CascadAborted+max(0, NumAborted-1), committed=NewCommitted}};
                 {abort_local, CFlowAbort, CReadInvalid} ->
-                    lager:warning("Abort local txn"),
+                    %lager:warning("Abort local txn"),
                     abort_tx(CurrentTxId, LocalParts, [], RepDict),
                     DepDict3 = dict:erase(CurrentTxId, DepDict2),
                     gen_server:reply(Sender, {aborted, CurrentTxId}),
@@ -743,7 +743,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                         min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1)+CReadInvalid,
                               cascade_aborted=CascadAborted+max(NumAborted-1, 0)+CFlowAbort,  committed=NewCommitted}};
                 {abort_remote, CFlowAbort, CReadInvalid} ->
-                    lager:warning("Abort remote txn"),
+                    %lager:warning("Abort remote txn"),
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
                     abort_tx(CurrentTxId, LocalParts, RemoteParts, RepDict),
                     DepDict3 = dict:erase(CurrentTxId, DepDict2),
@@ -776,7 +776,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                     SpeculaPrepTime = max(NewMaxPT+1, OldCurPrepTime),
                     {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, CurrentTxId, SpeculaPrepTime, RepDict),
                     case (AvoidNum == Prep) and (Read == []) and (NewPendingList == []) of
-                        true -> lager:warning("Can already commit ~w!!", [CurrentTxId]),
+                        true -> %lager:warning("Can already commit ~w!!", [CurrentTxId]),
                             CurCommitTime = max(SpeculaPrepTime, ProposeTS), 
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             {DepDict3, _} = commit_tx(CurrentTxId, CurCommitTime, LocalParts, RemoteParts, 
@@ -802,7 +802,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
         _ ->
             DepDict1 = dict:update(PendingTxId, fun({_, _, _}) ->
                                         {0, [], NowPrepTime} end, DepDict),
-           lager:warning("got all replies, but I am not the first! PendingList is ~w", [PendingList]),
+           %lager:warning("got all replies, but I am not the first! PendingList is ~w", [PendingList]),
             {noreply, SD0#state{dep_dict=DepDict1}}
     end.
 
@@ -825,13 +825,13 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
                 CurrentTxId ->
                     case Stage of
                         local_cert ->
-                           lager:warning("~w abort local!", [TxId]),
+                           %lager:warning("~w abort local!", [TxId]),
                             abort_tx(TxId, LocalParts, [], RepDict),
                             RD1 = dict:erase(TxId, DepDict),
                             gen_server:reply(Sender, {aborted, TxId}),
                             {noreply, SD0#state{dep_dict=RD1, tx_id=?NO_TXN, read_aborted=RAD1, read_invalid=RID1}};
                         remote_cert ->
-                            lager:warning("~w abort remote!", [TxId]),
+                            %lager:warning("~w abort remote!", [TxId]),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             abort_tx(TxId, LocalParts, RemoteParts, RepDict),
                             RD1 = dict:erase(TxId, DepDict),
@@ -863,7 +863,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
                     case Stage of
                         local_cert -> 
                             abort_tx(CurrentTxId, LocalParts, [], RepDict),
-                            lager:warning("~w abort local!", [CurrentTxId]),
+                            %lager:warning("~w abort local!", [CurrentTxId]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             RD1 = dict:erase(CurrentTxId, RD),
                             {noreply, SD0#state{dep_dict=RD1, tx_id=?NO_TXN, 
@@ -873,7 +873,7 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{tx_id=CurrentTxId, sender=Sender
                               %lager:warning("Has current txn remote, Pendinglist is ~w, NumAborted is ~w", [PendingList, Length]),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             abort_tx(CurrentTxId, LocalParts, RemoteParts, RepDict),
-                            lager:warning("~w abort remote!", [CurrentTxId]),
+                            %lager:warning("~w abort remote!", [CurrentTxId]),
                             gen_server:reply(Sender, {aborted, CurrentTxId}),
                             RD1 = dict:erase(CurrentTxId, RD),
                             {noreply, SD0#state{dep_dict=RD1, tx_id=?NO_TXN, 
