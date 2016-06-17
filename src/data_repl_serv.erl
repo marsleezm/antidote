@@ -163,12 +163,12 @@ init([Name, _Parts]) ->
     NumPartitions = length(hash_fun:get_partitions()),
     SpeculaRead = antidote_config:get(specula_read),
     Concurrent = antidote_config:get(concurrent),
-    SpeculaLength = antidote_config:get(specula_length),
+    SpeculaLength = max(antidote_config:get(specula_length),1),
     %TsDict = lists:foldl(fun(Part, Acc) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent*SpeculaLength, 150), specula_read=SpeculaRead,
+    {ok, #state{name=Name, set_size= max(NumPartitions*2*Concurrent*SpeculaLength, 200), specula_read=SpeculaRead,
                 pending_log = PendingLog, current_dict = dict:new(), 
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
