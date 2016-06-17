@@ -154,14 +154,16 @@ init([Name, _Parts]) ->
     lager:info("Data repl inited with name ~w", [Name]),
     ReplicatedLog = tx_utilities:open_public_table(repl_log),
     PendingLog = tx_utilities:open_private_table(pending_log),
-    NumPartitions = length(hash_fun:get_partitions()),
+    %NumPartitions = length(hash_fun:get_partitions()),
     Concurrent = antidote_config:get(concurrent),
     SpeculaLength = antidote_config:get(specula_length),
+    [{_, Replicas}] = ets:lookup(meta_info, node()),
+    ReplFactor = length(Replicas)+1,
     %TsDict = lists:foldl(fun(Part, Acc) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= max(NumPartitions*Concurrent*SpeculaLength, 200),
+    {ok, #state{name=Name, set_size= max(ReplFactor*8*Concurrent*SpeculaLength, 200),
                 pending_log = PendingLog, current_dict = dict:new(), 
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
