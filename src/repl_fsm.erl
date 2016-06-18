@@ -81,7 +81,6 @@
 
         mode :: atom(),
         repl_factor :: non_neg_integer(),
-        fast_reply :: boolean(),
         delay :: non_neg_integer(),
 		self :: atom()}).
 
@@ -148,12 +147,11 @@ init([_Name]) ->
     %PendingLog = tx_utilities:open_private_table(pending_log),
     NewDict = generate_except_replicas(Replicas),
     Lists = antidote_config:get(to_repl),
-    FastReply = antidote_config:get(fast_reply),
     [LocalRepList] = [LocalReps || {Node, LocalReps} <- Lists, Node == node()],
     LocalRepNames = [list_to_atom(atom_to_list(node())++"repl"++atom_to_list(L))  || L <- LocalRepList ],
     lager:info("NewDict is ~w, LocalRepNames is ~w", [NewDict, LocalRepNames]),
     {ok, #state{replicas=Replicas, mode=quorum, repl_factor=length(Replicas), local_rep_set=sets:from_list(LocalRepNames), 
-                except_replicas=NewDict, fast_reply=FastReply}}.
+                except_replicas=NewDict}}.
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0};
@@ -165,7 +163,7 @@ handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
 %% RepMode can only be prepared for now.
 handle_cast({repl_prepare, Partition, prepared, TxId, LogContent}, 
 	    SD0=#state{replicas=Replicas, except_replicas=ExceptReplicas, 
-            mode=Mode, fast_reply=_FastReply}) ->
+            mode=Mode}) ->
             {Sender, RepMode, WriteSet, PrepareTime} = LogContent,
             case Mode of
                 quorum ->
