@@ -80,7 +80,6 @@
                 if_certify :: boolean(),
                 if_replicate :: boolean(),
                 if_specula :: boolean(),
-                fast_reply :: boolean(),
                 inmemory_store :: cache_id(),
                 dep_dict :: dict(),
                 %l_abort_dict :: dict(),
@@ -221,7 +220,6 @@ init([Partition]) ->
     %DepDict4 = dict:store(fucked_by_badprep, {0,0}, DepDict3),
     IfReplicate = antidote_config:get(do_repl), 
     IfSpecula = antidote_config:get(do_specula), 
-    FastReply = antidote_config:get(fast_reply),
     _ = case IfReplicate of
                     true ->
                         repl_fsm_sup:start_fsm(Partition);
@@ -238,7 +236,6 @@ init([Partition]) ->
                 %r_abort_dict=RD,
                 if_replicate = IfReplicate,
                 if_specula = IfSpecula,
-                fast_reply = FastReply,
                 inmemory_store=InMemoryStore,
                 dep_dict = DepDict1
                 %total_time = 0, 
@@ -403,9 +400,9 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
 handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                State = #state{partition=Partition,
                               if_replicate=IfReplicate,
+                              if_specula=IfSpecula,
                               committed_txs=CommittedTxs,
                               prepared_txs=PreparedTxs,
-                              fast_reply=FastReply,
                               dep_dict=DepDict,
                               debug=Debug
                               }) ->
@@ -442,7 +439,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     end 
             end;
         {wait, NumDeps, PrepareTime} ->
-            NewDepDict = case (FastReply == true) and (RepMode == local) of
+            NewDepDict = case (IfSpecula == true) and (RepMode == local) of
                                 %% local_aggr
                         true ->  gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime}),
                                  PendingRecord = {Sender, pending_prepared, WriteSet, PrepareTime},
