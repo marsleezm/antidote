@@ -1,16 +1,22 @@
 #!/bin/bash
 
-if [ $# -eq 3 ]
+if [ $# -eq 4 ]
 then
     DoSpecula=$1
     FastReply=$2
     SpeculaLength=$3
+    SpeculaRead=$4
 else
     DoSpecula=true
-    FastReply=false
+    FastReply=true
     SpeculaLength=5
+    SpeculaRead=true
 fi
 
+sudo sed -i '' "s/{specula_read,.*/{specula_read, $SpeculaRead}./g" ./dev/dev1/antidote.config
+sudo sed -i '' "s/{specula_read,.*/{specula_read, $SpeculaRead}./g" ./dev/dev2/antidote.config
+sudo sed -i '' "s/{specula_read,.*/{specula_read, $SpeculaRead}./g" ./dev/dev3/antidote.config
+sudo sed -i '' "s/{specula_read,.*/{specula_read, $SpeculaRead}./g" ./dev/dev4/antidote.config
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev1/antidote.config
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev2/antidote.config
 sudo sed -i '' "s/{do_specula,.*/{do_specula, $DoSpecula}./g" ./dev/dev3/antidote.config
