@@ -709,7 +709,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                         _ -> LastTime = delete_first(Cdf),
                              ets:insert(Cdf, {PendingTxId, get_time_diff(LastTime, os:timestamp())})
             end,
-            {noreply, SD0#state{min_commit_ts=CurCommitTime, pending_list=[], dep_dict=DepDict3, 
+            {noreply, SD0#state{min_commit_ts=CurCommitTime, pending_list=[], dep_dict=DepDict3, tx_id=?NO_TXN, 
                 committed=Committed+1}};
         [PendingTxId|Rest] ->
             CommitTime = max(NowPrepTime, MinCommitTS+1),
