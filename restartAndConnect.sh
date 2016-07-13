@@ -1,14 +1,12 @@
 #!/bin/bash
 
-if [ $# -eq 4 ]
+if [ $# -eq 3 ]
 then
     DoSpecula=$1
-    FastReply=$2
-    SpeculaLength=$3
-    SpeculaRead=$4
+    SpeculaLength=$2
+    SpeculaRead=$3
 else
     DoSpecula=true
-    FastReply=true
     SpeculaLength=5
     SpeculaRead=true
 fi
@@ -25,10 +23,6 @@ sudo sed -i '' "s/{do_repl,.*/{do_repl, true}./g" ./dev/dev1/antidote.config
 sudo sed -i '' "s/{do_repl,.*/{do_repl, true}./g" ./dev/dev2/antidote.config
 sudo sed -i '' "s/{do_repl,.*/{do_repl, true}./g" ./dev/dev3/antidote.config
 sudo sed -i '' "s/{do_repl,.*/{do_repl, true}./g" ./dev/dev4/antidote.config
-sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev1/antidote.config
-sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev2/antidote.config
-sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev3/antidote.config
-sudo sed -i '' "s/{fast_reply,.*/{fast_reply, $FastReply}./g" ./dev/dev4/antidote.config
 sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/dev1/antidote.config
 sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/dev2/antidote.config
 sudo sed -i '' "s/{specula_length,.*/{specula_length, $SpeculaLength}./g" ./dev/dev3/antidote.config
