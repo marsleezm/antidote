@@ -91,7 +91,7 @@ handle_call({get_cdf}, _Sender, SD0=#state{name=Name, cdf=Cdf}) ->
                                 _ ->
                                     FinalFileName = atom_to_list(Name) ++ "final-latency",
                                     {ok, FinalFile} = file:open(FinalFileName, [raw, binary, write]),
-                                    lists:foreach(fun({_, Lat}) -> file:write(FinalFile,  io_lib:format("~w\n", [Lat]))
+                                    lists:foreach(fun(Lat) -> file:write(FinalFile,  io_lib:format("~w\n", [Lat]))
                                                   end, Cdf),
                                     file:close(FinalFile)
                     end
