@@ -128,7 +128,7 @@ init([Name]) ->
                         ets:insert(Tab, {time_list, []}), Tab;
                 _ -> false
             end,
-    {ok, #state{pending_txs=PendingTxs, dep_dict=dict:new(), total_repl_factor=TotalReplFactor, cdf=Cdf, name=Name, 
+    {ok, #state{pending_txs=PendingTxs, dep_dict=dict:new(), total_repl_factor=TotalReplFactor, cdf=Cdf, name=Name, remote_updates=[], 
             tx_id=?NO_TXN, specula_length=SpeculaLength, specula_read=SpeculaRead, rep_dict=RepDict}}.
 
 handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
