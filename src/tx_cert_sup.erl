@@ -28,7 +28,7 @@
 
 -export([init/1, certify/4, get_stat/0, get_cdf/0, get_int_data/3, start_tx/1, single_read/3, clean_all_data/0, clean_data/1, 
             load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, trace/1, get_oldest/0, 
-            get_pid/1, get_global_pid/1]).
+            get_pid/1, get_pids/1, get_global_pid/1]).
 
 -define(READ_TIMEOUT, 30000).
 
@@ -230,6 +230,13 @@ generate_supervisor_spec(N) ->
 
 get_pid(Name) ->
     gen_server:call(Name, {get_pid}).
+
+get_pids(Names) ->
+    AllPids = lists:foldl(fun(Name, Acc) ->
+                [whereis(Name)|Acc]
+                end, Names),
+    lists:reverse(AllPids).
+                
 
 get_global_pid(Name) ->
     gen_server:call({global, Name}, {get_pid}).
