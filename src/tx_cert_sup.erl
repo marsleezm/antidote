@@ -234,7 +234,7 @@ get_pid(Name) ->
 get_pids(Names) ->
     AllPids = lists:foldl(fun(Name, Acc) ->
                 [whereis(Name)|Acc]
-                end, Names),
+                end, [], Names),
     lists:reverse(AllPids).
                 
 
