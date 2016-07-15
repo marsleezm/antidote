@@ -41,6 +41,10 @@ sudo rm -r ./dev/dev1/log
 sudo rm -r ./dev/dev2/log
 sudo rm -r ./dev/dev3/log
 sudo rm -r ./dev/dev4/log
+sudo rm -r ./dev/dev1/*latency
+sudo rm -r ./dev/dev2/*latency
+sudo rm -r ./dev/dev3/*latency
+sudo rm -r ./dev/dev4/*latency
 
 sleep 2 
 sudo ./dev/dev1/bin/antidote start
