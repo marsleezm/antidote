@@ -46,7 +46,7 @@
         tx_id :: txid(),
         name :: atom(),
         rep_dict :: dict(),
-        cdf :: cache_id()|false,
+        cdf :: []|false,
         prepare_time = 0 :: non_neg_integer(),
         pend_txn_start=nil,
         stage :: read | local_cert | remote_cert,
@@ -79,7 +79,7 @@ init([Name]) ->
     [{_, Replicas}] = ets:lookup(meta_info, node()),
     TotalReplFactor = length(Replicas)+1,
     Cdf = case antidote_config:get(cdf, false) of
-                true -> ets:new(Name, [private, set]);
+                true -> [];
                 _ -> false
             end,
     {ok, #state{do_repl=antidote_config:get(do_repl), name=Name, total_repl_factor=TotalReplFactor, last_commit_ts=0, rep_dict=RepDict, cdf=Cdf}}.
@@ -87,14 +87,12 @@ init([Name]) ->
 handle_call({get_cdf}, _Sender, SD0=#state{name=Name, cdf=Cdf}) ->
     case Cdf of false -> ok;
                 _ ->
-                    OrgList = ets:tab2list(Cdf),
-                    List = lists:ukeysort(1, OrgList),
-                    case List of [] -> ok;
+                    case Cdf of [] -> ok;
                                 _ ->
                                     FinalFileName = atom_to_list(Name) ++ "final-latency",
                                     {ok, FinalFile} = file:open(FinalFileName, [raw, binary, write]),
                                     lists:foreach(fun({_, Lat}) -> file:write(FinalFile,  io_lib:format("~w\n", [Lat]))
-                                                  end, List),
+                                                  end, Cdf),
                                     file:close(FinalFile)
                     end
     end,
@@ -164,12 +162,9 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     Sup ! done,
     {noreply, SD0};
 
-handle_cast({clean_data, Sender}, SD0=#state{cdf=OldCdf, name=Name}) ->
-    case OldCdf of false -> ok;
-                    _ -> ets:delete(OldCdf)
-                end,
+handle_cast({clean_data, Sender}, SD0) ->
     Cdf = case antidote_config:get(cdf, false) of
-                true -> ets:new(Name, [private, set]);
+                true -> [];
                 _ -> false
             end,
     Sender ! cleaned,
@@ -190,10 +185,10 @@ handle_cast({prepared, TxId, PrepareTime},
                             repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
                             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
                             %ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
-                            case Cdf of false -> ok;
-                                        _ -> ets:insert(Cdf, {TxId#tx_id.snapshot_time, get_time_diff(PendStart, os:timestamp())})
-                            end, 
-                            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, pend_txn_start=nil}};
+                            Cdf1 =  case Cdf of false -> false;
+                                        _ -> [get_time_diff(PendStart, os:timestamp())]
+                                    end, 
+                            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, pend_txn_start=nil, cdf=Cdf1}};
                         _ ->
                             {noreply, SD0#state{to_ack=PN, pending_to_ack=0, prepare_time=max(PrepareTime, OldPrepTime), stage=remote_cert}}
                     end;
@@ -240,11 +235,11 @@ handle_cast({prepared, TxId, PrepareTime},
             repl_fsm:repl_commit(RemoteParts, TxId, CommitTime, false, RepDict),
             gen_server:reply(Sender, {ok, {committed, CommitTime}}),
             %ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
-            case Cdf of false -> ok;
-                        _ -> ets:insert(Cdf, {TxId#tx_id.snapshot_time, get_time_diff(PendStart, os:timestamp())})
+            Cdf1 = case Cdf of false -> false;
+                        _ -> [get_time_diff(PendStart, os:timestamp())|Cdf]
             end,
             %ets:insert(Cdf, {TxId, [os:timestamp()|PendStart]}),
-            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, pend_txn_start=nil}};
+            {noreply, SD0#state{prepare_time=CommitTime, tx_id={}, last_commit_ts=CommitTime, cdf=Cdf1, pend_txn_start=nil}};
         N ->
             {noreply, SD0#state{to_ack=N-1, prepare_time=max(MaxPrepTime, PrepareTime)}}
     end;
