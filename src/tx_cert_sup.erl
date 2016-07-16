@@ -133,7 +133,7 @@ clean_all_data() ->
                 sets:add_element(N, D)
                 end, sets:new(), Parts),
     AllNodes = sets:to_list(Set),
-    ets:delete(ets),
+    ets:delete(cdf),
     ets:new(cdf, [set,public,named_table,{read_concurrency,false},{write_concurrency,true}]),
     
     MySelf = self(),
