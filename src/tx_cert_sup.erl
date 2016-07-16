@@ -137,8 +137,6 @@ clean_all_data() ->
                 end, sets:new(), Parts),
     AllNodes = sets:to_list(Set),
     MySelf = self(),
-    ets:delete(cdf),
-    ets:new(cdf, [set,public,named_table,{read_concurrency,false},{write_concurrency,true}]),
     lager:info("Sending msg to ~w", [AllNodes]),
     lists:foreach(fun(Node) ->
                     spawn(rpc, call, [Node, tx_cert_sup, clean_data, [MySelf]])
@@ -151,7 +149,10 @@ clean_all_data() ->
 clean_data(Sender) ->
     SPL = lists:seq(1, ?NUM_SUP),
     MySelf = self(),
-    lager:info("~w received", [node()]),
+
+    true = ets:delete_all_objects(cdf),
+
+    lager:info("~w created", [node()]),
     lists:foreach(fun(N) -> gen_server:cast(generate_module_name(N), {clean_data, MySelf}) end, SPL),
     lists:foreach(fun(_) -> receive cleaned -> ok end  end, SPL),
     lager:info("Got reply from all tx servers"),
