@@ -142,15 +142,15 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0=#state{la
                 _ -> 
                     RemoteParts = [P || {P, _} <- RemoteUpdates],
                     clocksi_vnode:prepare(RemoteUpdates, TxId, {remote,ignore}),
-                    Now = os:timestamp(),
-                    {noreply, SD0#state{tx_id=TxId, pend_txn_start=Now, to_ack=length(RemoteUpdates)*TotalReplFactor, local_parts=[], remote_parts=RemoteParts, sender=Sender, stage=remote_cert}}
+                    %Now = os:timestamp(),
+                    {noreply, SD0#state{tx_id=TxId, to_ack=length(RemoteUpdates)*TotalReplFactor, local_parts=[], remote_parts=RemoteParts, sender=Sender, stage=remote_cert}}
             end;
         N ->
             LocalParts = [Part || {Part, _} <- LocalUpdates],
-            Now = os:timestamp(),
+            %Now = os:timestamp(),
             clocksi_vnode:prepare(LocalUpdates, TxId, local),
             {noreply, SD0#state{tx_id=TxId, to_ack=N, pending_to_ack=N*(TotalReplFactor-1), local_parts=LocalParts, remote_parts=
-                RemoteUpdates, sender=Sender, stage=local_cert, pend_txn_start=Now}}
+                RemoteUpdates, sender=Sender, stage=local_cert}}
     end;
 
 handle_call({go_down},_Sender,SD0) ->

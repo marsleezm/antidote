@@ -28,7 +28,7 @@
 
 -export([init/1, certify/4, get_stat/0, get_cdf/0, get_int_data/3, start_tx/1, single_read/3, clean_all_data/0, clean_data/1, 
             load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, 
-            get_pid/1, get_global_pid/1]).
+            get_pid/1, get_pids/1, get_global_pid/1]).
 
 -define(READ_TIMEOUT, 30000).
 
@@ -187,7 +187,8 @@ get_stat() ->
     %                    end, {0, 0}, LocalRepNames), 
 
 generate_module_name(N) ->
-    list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list(N)).
+    list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list((N-1) rem ?NUM_SUP +1)).
+
 
 generate_supervisor_spec(N) ->
     Module = generate_module_name(N),
@@ -203,7 +204,17 @@ generate_supervisor_spec(N) ->
     end.
 
 get_pid(Name) ->
-    gen_server:call(Name, {get_pid}).
+    case is_integer(Name)  of true -> whereis(generate_module_name(Name));
+                             false -> whereis(Name)
+    end.
+
+get_pids(Names) ->
+    AllPids = lists:foldl(fun(Name, Acc) ->
+                        case is_integer(Name)  of true -> [whereis(generate_module_name(Name))|Acc];
+                             false -> [whereis(Name)|Acc]
+                        end
+                end, [], Names),
+    lists:reverse(AllPids).
 
 get_global_pid(Name) ->
     gen_server:call({global, Name}, {get_pid}).
