@@ -218,8 +218,8 @@ handle_call({get_int_data, Type, Param}, _Sender, SD0=#state{specula_length=Spec
         pending_txs=PendingTxs, dep_dict=DepDict, min_commit_ts=LastCommitTs, read_invalid=ReadInvalid, cascade_aborted=CascadeAborted,
         committed=Committed, cert_aborted=CertAborted, read_aborted=ReadAborted})->
     case Type of
-        %pending_list ->
-        %    {reply, PendingList, SD0};
+        pending_list ->
+            {reply, dict:to_list(PendingTxs), SD0};
         pending_tab ->
             {reply, dict:to_list(PendingTxs), SD0};
         %time_list ->
@@ -661,7 +661,7 @@ handle_cast({aborted, TxId, FromNode}, SD0=#state{dep_dict=DepDict, cert_aborted
                     case CurrentTxId of
                         ?NO_TXN ->
                             PendingTxs2 = dict:store(Client, ClientState#client_state{
-                                pending_list=Prev, tx_id=?NO_TXN}, PendingTxs1),
+                                invalid_aborted=1, pending_list=Prev, tx_id=?NO_TXN}, PendingTxs1),
                              %lager:warning("No current txn, Pendinglist is ~w, NumAborted is ~w", [PendingTxId, Length-1]),
                             {noreply, SD0#state{dep_dict=DepDict1, pending_txs=PendingTxs2,
                                 cert_aborted=CertAborted+1, cascade_aborted=CascadeAborted+Length-1}};
