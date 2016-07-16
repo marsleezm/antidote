@@ -139,6 +139,8 @@ clean_all_data() ->
     ets:delete(cdf),
     ets:new(cdf, [set,public,named_table,{read_concurrency,false},{write_concurrency,true}]),
     MySelf = self(),
+    ets:delete(cdf),
+    ets:new(cdf, [set,public,named_table,{read_concurrency,false},{write_concurrency,true}]),
     lager:info("Sending msg to ~w", [AllNodes]),
     lists:foreach(fun(Node) ->
                     spawn(rpc, call, [Node, tx_cert_sup, clean_data, [MySelf]])
