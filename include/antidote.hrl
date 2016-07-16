@@ -29,7 +29,7 @@
 -define(OLD_SS_MICROSEC,0).
 %% The number of supervisors that are responsible for
 %% supervising transaction coorinator fsms
--define(NUM_SUP, 10000).
+-define(NUM_SUP, 100).
 %% Threads will sleep for this length when they have to wait
 %% for something that is not ready after which they
 %% wake up and retry. I.e. a read waiting for
@@ -65,7 +65,7 @@
 
 -define(CLOCKSI_TIMEOUT, 1000).
 
--record(tx_id, {snapshot_time, server_pid :: pid()}).
+-record(tx_id, {snapshot_time, server_pid :: pid(), client_pid :: pid()}).
 -record(clocksi_payload, {key :: key(),
                           type :: type(),
                           op_param :: op(),

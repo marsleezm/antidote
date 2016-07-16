@@ -210,10 +210,27 @@ get_cdf() ->
     SPL = lists:seq(1, ?NUM_SUP),
     lists:foreach(fun(N) ->
                     gen_server:call(generate_module_name(N), {get_cdf})
-                    end, SPL).
+                    end, SPL),
+    PercvFileName = "total-percv-latency",
+    FinalFileName = "total-final-latency",
+    {ok, PercvFile} = file:open(PercvFileName, [raw, binary, write]),
+    {ok, FinalFile} = file:open(FinalFileName, [raw, binary, write]),
+    Cdf = ets:tab2list(cdf),
+    lists:foreach(fun({_Key, LatencyList}) ->
+                %lager:info("Key is ~p, latency is ~p", [Key, LatencyList]),
+                lists:foreach(fun(Latency) ->
+                                case Latency of {percv, Lat} -> file:write(PercvFile,  io_lib:format("~w\n", [Lat]));
+                                                {final, Lat} -> file:write(FinalFile,  io_lib:format("~w\n", [Lat]));
+                                              _ ->
+                                                  file:write(PercvFile,  io_lib:format("~w\n", [Latency])),
+                                                  file:write(FinalFile,  io_lib:format("~w\n", [Latency]))
+                            end end, LatencyList)
+                end, Cdf),
+    file:close(PercvFile),
+    file:close(FinalFile).
 
 generate_module_name(N) ->
-    list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list(N)).
+    list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list((N-1) rem ?NUM_SUP + 1)).
 
 generate_supervisor_spec(N) ->
     Module = generate_module_name(N),
@@ -228,12 +245,18 @@ generate_supervisor_spec(N) ->
               permanent, 5000, worker, [i_tx_cert_server]}
     end.
 
-get_pid(Name) ->
-    gen_server:call(Name, {get_pid}).
+get_pid(WorkerId) ->
+    case is_integer(WorkerId) of
+        true -> whereis(generate_module_name(WorkerId));
+        false -> whereis(WorkerId)
+    end.
 
 get_pids(Names) ->
-    AllPids = lists:foldl(fun(Name, Acc) ->
-                [whereis(Name)|Acc]
+    AllPids = lists:foldl(fun(WorkerId, Acc) ->
+                case is_integer(WorkerId) of
+                    true -> [whereis(generate_module_name(WorkerId))|Acc];
+                    false -> [whereis(WorkerId)|Acc]
+                end
                 end, [], Names),
     lists:reverse(AllPids).
                 
