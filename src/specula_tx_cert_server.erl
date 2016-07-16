@@ -341,11 +341,19 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime},  Sender, SD
         ?FLOW_ABORT -> 
             %% Some read is invalid even before the txn starts.. If invalid_ts is larger than 0, it can possibly be saved.
             %lager:warning("~w aborted!", [TxId]),
-            add_to_ets(StartTime, Cdf, PendingList),
+            %add_to_ets(StartTime, Cdf, PendingList),
+            case {LocalUpdates, RemoteUpdates} of
+                        {[], []} -> ok;
+                        {_, _} -> add_to_ets(StartTime, Cdf, PendingList)
+            end,    
             {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict), cascade_aborted=CascadeAborted+1}};
         _ ->
             %lager:warning("~w aborted!", [TxId]),
-            add_to_ets(StartTime, Cdf, PendingList),
+            case {LocalUpdates, RemoteUpdates} of
+                        {[], []} -> ok;
+                        {_, _} -> add_to_ets(StartTime, Cdf, PendingList)
+            end,    
+            %add_to_ets(StartTime, Cdf, PendingList),
             {reply, {aborted, TxId}, SD0#state{tx_id=?NO_TXN, dep_dict=dict:erase(TxId, DepDict), read_invalid=ReadInvalid+1}}
     end;
 
