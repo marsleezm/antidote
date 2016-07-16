@@ -1,4 +1,3 @@
-%% -------------------------------------------------------------------
 %%
 %% Copyright (c) 2014 SyncFree Consortium.  All Rights Reserved.
 %%
@@ -24,7 +23,6 @@
 -include("antidote.hrl").
 
 -define(NO_TXN, nil).
--define(FLOW_ABORT, -1).
 -define(MAX, 9999).
 
 -ifdef(TEST).
@@ -75,8 +73,6 @@
         min_commit_ts = 0 :: non_neg_integer(),
         min_snapshot_ts = 0 :: non_neg_integer(),
 
-
-        invalid_ts=0 :: non_neg_integer(),
         num_specula_read=0 :: non_neg_integer(),
         committed=0 :: non_neg_integer(),
         start_prepare=0 :: non_neg_integer(),
@@ -90,6 +86,8 @@
 
 -record(client_state, {
         tx_id =?NO_TXN :: txid(),
+        invalid_aborted=0 :: non_neg_integer(),
+        specula_abort_count=0 :: non_neg_integer(),
         time_list = [] :: [],
         local_updates = []:: [],
         remote_updates =[] :: [],
@@ -165,20 +163,20 @@ handle_call({start_tx}, Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapsh
     RemoteUpdates = ClientState#client_state.remote_updates, 
     case OldTxId of
         ?NO_TXN ->
-            ClientState1 = ClientState#client_state{tx_id=TxId, stage=read, pending_prepares=0},
-            {reply, TxId, SD0#state{pending_txs=dict:store(Client, ClientState1, PendingTxs), invalid_ts=0, dep_dict=D1, 
+            ClientState1 = ClientState#client_state{tx_id=TxId, stage=read, pending_prepares=0, invalid_aborted=0},
+            {reply, TxId, SD0#state{pending_txs=dict:store(Client, ClientState1, PendingTxs), dep_dict=D1, 
                 min_snapshot_ts=NewSnapshotTS}};
         _ ->
             case Stage of 
                 read ->
-                    ClientState1 = ClientState#client_state{tx_id=TxId, stage=read, pending_prepares=0},
-                    {reply, TxId, SD0#state{invalid_ts=0, pending_txs=dict:store(Client, ClientState1, PendingTxs),
+                    ClientState1 = ClientState#client_state{tx_id=TxId, stage=read, pending_prepares=0, invalid_aborted=0},
+                    {reply, TxId, SD0#state{pending_txs=dict:store(Client, ClientState1, PendingTxs),
                         min_snapshot_ts=NewSnapshotTS, dep_dict=dict:erase(OldTxId, D1)}}; 
                 _ ->
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
                     PendingTxs1 = dict:store(TxId, {LocalParts, RemoteParts, LT, os:timestamp(), waited}, PendingTxs),
-                    ClientState1 = ClientState#client_state{tx_id=TxId, stage=read, pending_list=PendingList++[OldTxId], pending_prepares=0},
-                    {reply, TxId, SD0#state{invalid_ts=0, dep_dict=D1, 
+                    ClientState1 = ClientState#client_state{tx_id=TxId, stage=read, pending_list=PendingList++[OldTxId], pending_prepares=0, invalid_aborted=0},
+                    {reply, TxId, SD0#state{dep_dict=D1, 
                         min_snapshot_ts=NewSnapshotTS, pending_txs=dict:store(Client, ClientState1, PendingTxs1)}}
             end
     end;
@@ -280,7 +278,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates},  Sender, SD0) ->
     handle_call({certify, TxId, LocalUpdates, RemoteUpdates, os:timestamp()},  Sender, SD0);
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates, {count_time, Time}},  Sender, SD0) ->
     handle_call({certify, TxId, LocalUpdates, RemoteUpdates, Time}, Sender, SD0);
-handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime}, Sender, SD0=#state{rep_dict=RepDict, cascade_aborted=CascadeAborted, read_invalid=ReadInvalid, pending_txs=PendingTxs, total_repl_factor=TotalReplFactor, committed=Committed, min_commit_ts=LastCommitTs, invalid_ts=InvalidTs, specula_length=SpeculaLength, dep_dict=DepDict, num_specula_read=NumSpeculaRead, cdf=Cdf}) ->
+handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime}, Sender, SD0=#state{rep_dict=RepDict, cascade_aborted=CascadeAborted, pending_txs=PendingTxs, total_repl_factor=TotalReplFactor, committed=Committed, min_commit_ts=LastCommitTs, specula_length=SpeculaLength, dep_dict=DepDict, num_specula_read=NumSpeculaRead, cdf=Cdf}) ->
     %% If there was a legacy ongoing transaction.
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
@@ -290,9 +288,10 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime}, Sender, SD0
     {Client, _} = Sender,
     ClientState = dict:fetch(Client, PendingTxs),
     PendingList = ClientState#client_state.pending_list, 
+    InvalidAborted = ClientState#client_state.invalid_aborted,
     TxId = ClientState#client_state.tx_id, 
     TimeList = ClientState#client_state.time_list, 
-    case InvalidTs  of
+    case InvalidAborted  of
         0 ->
             case LocalUpdates of
                 [] ->
@@ -363,24 +362,15 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime}, Sender, SD0
                     %lager:warning("Total repl fact is ~w, to ack is ~w", [TotalReplFactor, (TotalReplFactor-1)*NumToAck]),
                     {noreply, SD0#state{dep_dict=DepDict1, pending_txs=PendingTxs1, num_specula_read=NumSpeculaRead1}}
             end;
-        ?FLOW_ABORT -> 
-            %% Some read is invalid even before the txn starts.. If invalid_ts is larger than 0, it can possibly be saved.
+        _ -> 
+            %% Some read is invalid even before the txn starts.. If invalid_aborted is larger than 0, it can possibly be saved.
             %lager:warning("~w aborted!", [TxId]),
             NewTL = case {LocalUpdates, RemoteUpdates} of
                                 {[], []} -> TimeList;
                                 {_, _} -> add_to_ets(StartTime, Cdf, TimeList, PendingList)
                     end,
             PendingTxs1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, time_list=NewTL}, PendingTxs), 
-            {reply, {aborted, TxId}, SD0#state{dep_dict=dict:erase(TxId, DepDict), cascade_aborted=CascadeAborted+1, pending_txs=PendingTxs1}};
-        _ ->
-            %lager:warning("~w aborted!", [TxId]),
-            %NewTL = add_to_ets(StartTime, Cdf, TimeList, PendingList),
-            NewTL = case {LocalUpdates, RemoteUpdates} of
-                                {[], []} -> TimeList;
-                                {_, _} -> add_to_ets(StartTime, Cdf, TimeList, PendingList)
-                    end,
-            PendingTxs1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, time_list=NewTL}, PendingTxs), 
-            {reply, {aborted, TxId}, SD0#state{dep_dict=dict:erase(TxId, DepDict), read_invalid=ReadInvalid+1, pending_txs=PendingTxs1}}
+            {reply, {aborted, TxId}, SD0#state{dep_dict=dict:erase(TxId, DepDict), cascade_aborted=CascadeAborted+1, pending_txs=PendingTxs1}}
     end;
 
 
@@ -658,11 +648,6 @@ handle_cast({aborted, TxId, FromNode}, SD0=#state{dep_dict=DepDict, cert_aborted
             {noreply, SD0#state{pending_txs=PendingTxs1, dep_dict=DepDict1, cert_aborted=CertAborted+1}};
         _ ->
 %% Not aborting current transaction
-%handle_cast({aborted, PendingTxId, FromNode}, 
-%	    SD0=#state{pending_list=PendingList, rep_dict=RepDict, tx_id=CurrentTxId, sender=Sender,
-%            dep_dict=DepDict, pending_txs=PendingTxs, stage=Stage, cascade_aborted=CascadeAborted,
-%            cert_aborted=CertAborted, local_updates=LocalParts, remote_updates=RemoteUpdates}) ->
-    %lager:warning("Aborting ~w remote, not current transaction", [PendingTxId]),
             PendingList = ClientState#client_state.pending_list,
             LocalParts = ClientState#client_state.local_updates, 
             RemoteUpdates = ClientState#client_state.remote_updates, 
@@ -687,9 +672,8 @@ handle_cast({aborted, TxId, FromNode}, SD0=#state{dep_dict=DepDict, cert_aborted
                                 read ->
                                     %% The current transaction is cert_aborted! So replying to client.
                                     %lager:warning("~w txn is in reading !!", [CurrentTxId]),
-                                    PendingTxs2 = dict:store(Client, ClientState#client_state{pending_list=Prev}, PendingTxs1),
-                                    {noreply, SD0#state{dep_dict=DepDict1, invalid_ts=?FLOW_ABORT, 
-                                        pending_txs=PendingTxs2,
+                                    PendingTxs2 = dict:store(Client, ClientState#client_state{pending_list=Prev, invalid_aborted=1}, PendingTxs1),
+                                    {noreply, SD0#state{dep_dict=DepDict1, pending_txs=PendingTxs2,
                                         cert_aborted=CertAborted+1, cascade_aborted=CascadeAborted+Length-1}};
                                 _ ->
                                     abort_tx(CurrentTxId, LocalParts, RemoteParts, RepDict),
@@ -831,8 +815,8 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
                 invalid -> %% Should be cert_aborted later
                      %lager:warning("Current tx invalid"),
                     NewPendingTxs1 = dict:store(Client, ClientState#client_state{time_list=NewTL1, 
-                                pending_list=NewPendingList}, NewPendingTxs),
-                    {noreply, SD0#state{dep_dict=DepDict2, invalid_ts=?FLOW_ABORT, pending_txs=NewPendingTxs1,
+                                pending_list=NewPendingList, invalid_aborted=1}, NewPendingTxs),
+                    {noreply, SD0#state{dep_dict=DepDict2, pending_txs=NewPendingTxs1,
                           min_commit_ts=NewMaxPT, read_invalid=ReadInvalid+min(NumAborted, 1), cdf=NewCdf1,
                               cascade_aborted=CascadAborted+max(0, NumAborted-1), committed=NewCommitted}};
                 {abort_local, CFlowAbort, CReadInvalid} ->
@@ -913,8 +897,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
     end.
 
 read_abort(Type, MyCommitTime, TxId, SD0=#state{read_aborted=ReadAborted,
-        dep_dict=DepDict, cascade_aborted=CascadAborted, rep_dict=RepDict, pending_txs=PendingTxs,
-        invalid_ts=InvalidTS, read_invalid=ReadInvalid}) ->
+        dep_dict=DepDict, cascade_aborted=CascadAborted, rep_dict=RepDict, pending_txs=PendingTxs, read_invalid=ReadInvalid}) ->
     %lager:warning("Got read abort for ~w", [TxId]),
     Client = TxId#tx_id.client_pid,
     ClientState = dict:fetch(Client, PendingTxs),
@@ -953,12 +936,8 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{read_aborted=ReadAborted,
                             PendingTxs1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN}, PendingTxs), 
                             {noreply, SD0#state{dep_dict=RD1, pending_txs=PendingTxs1, read_aborted=RAD1, read_invalid=RID1}};
                         read ->
-                            case (MyCommitTime == -1) or (InvalidTS == -1) of
-                                true ->
-                                    {noreply, SD0#state{invalid_ts=-1}};
-                                _ ->
-                                    {noreply, SD0#state{invalid_ts=max(MyCommitTime, InvalidTS)}}
-                            end
+                            PendingTxs1 = dict:store(Client, ClientState#client_state{invalid_aborted=1}, PendingTxs), 
+                            {noreply, SD0#state{pending_txs=PendingTxs1}}
                     end;
                 _ ->
                     {noreply, SD0}
@@ -996,17 +975,9 @@ read_abort(Type, MyCommitTime, TxId, SD0=#state{read_aborted=ReadAborted,
                                 read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length}};
                         read ->
                               %lager:warning("Has current txn read, Pendinglist is ~w, NumAborted is ~w", [PendingList, Length-1]),
-                            case (MyCommitTime == -1) or (InvalidTS == -1) of
-                                true ->
-                                    PendingTxs2 = dict:store(Client, ClientState#client_state{pending_list=Prev}, PendingTxs1), 
-                                    {noreply, SD0#state{dep_dict=RD, invalid_ts=-1, pending_txs=PendingTxs2,
-                                        read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length-1}};
-                                _ -> 
-                                    PendingTxs2 = dict:store(Client, ClientState#client_state{
-                                        pending_list=lists:sublist(PendingList, length(PendingList)-Length)}, PendingTxs1), 
-                                    {noreply, SD0#state{dep_dict=RD, invalid_ts=max(MyCommitTime, InvalidTS), pending_txs=PendingTxs2, 
-                                        read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length-1}}
-                            end
+                            PendingTxs2 = dict:store(Client, ClientState#client_state{pending_list=Prev, invalid_aborted=1}, PendingTxs1), 
+                            {noreply, SD0#state{dep_dict=RD, pending_txs=PendingTxs2,
+                                read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length-1}}
                     end
             end
         end
@@ -1024,7 +995,7 @@ decide_after_cascade(PendingList, DepDict, NumAborted, TxId, Stage) ->
                                      remote_cert -> {abort_remote, 1, 0}
                         end;
                 false ->
-                    case dict:find(TxId, DepDict) of %% TODO: should give a invalid_ts 
+                    case dict:find(TxId, DepDict) of %% TODO: should give a invalid_aborted 
                         error ->   %lager:warning("Abort due to read dep"),
                                  case Stage of read -> invalid;
                                              local_cert -> {abort_local, 0, 1};
