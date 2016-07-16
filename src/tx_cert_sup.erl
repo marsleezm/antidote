@@ -133,6 +133,9 @@ clean_all_data() ->
                 sets:add_element(N, D)
                 end, sets:new(), Parts),
     AllNodes = sets:to_list(Set),
+    ets:delete(ets),
+    ets:new(cdf, [set,public,named_table,{read_concurrency,false},{write_concurrency,true}]),
+    
     MySelf = self(),
     lager:info("Sending msg to ~w", [AllNodes]),
     lists:foreach(fun(Node) ->
@@ -165,7 +168,24 @@ get_cdf() ->
     SPL = lists:seq(1, ?NUM_SUP),
     lists:foreach(fun(N) ->
                     gen_server:call(generate_module_name(N), {get_cdf})
-                  end, SPL).
+                    end, SPL),
+    PercvFileName = "total-percv-latency",
+    FinalFileName = "total-final-latency",
+    {ok, PercvFile} = file:open(PercvFileName, [raw, binary, write]),
+    {ok, FinalFile} = file:open(FinalFileName, [raw, binary, write]),
+    Cdf = ets:tab2list(cdf),
+    lists:foreach(fun({_Key, LatencyList}) ->
+                %lager:info("Key is ~p, latency is ~p", [Key, LatencyList]),
+                lists:foreach(fun(Latency) ->
+                                case Latency of {percv, Lat} -> file:write(PercvFile,  io_lib:format("~w\n", [Lat]));
+                                                {final, Lat} -> file:write(FinalFile,  io_lib:format("~w\n", [Lat]));
+                                              _ ->
+                                                  file:write(PercvFile,  io_lib:format("~w\n", [Latency])),
+                                                  file:write(FinalFile,  io_lib:format("~w\n", [Latency]))
+                            end end, LatencyList)
+                end, Cdf),
+    file:close(PercvFile),
+    file:close(FinalFile).
 
 get_stat() ->
     SPL = lists:seq(1, ?NUM_SUP),
@@ -187,7 +207,7 @@ get_stat() ->
     %                    end, {0, 0}, LocalRepNames), 
 
 generate_module_name(N) ->
-    list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list(N)).
+    list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list((N-1) rem ?NUM_SUP +1)).
 
 generate_supervisor_spec(N) ->
     Module = generate_module_name(N),
@@ -203,11 +223,15 @@ generate_supervisor_spec(N) ->
     end.
 
 get_pid(Name) ->
-    gen_server:call(Name, {get_pid}).
+    case is_integer(Name)  of true -> whereis(generate_module_name(Name));
+                             false -> whereis(Name)
+    end.
 
 get_pids(Names) ->
     AllPids = lists:foldl(fun(Name, Acc) ->
-                [whereis(Name)|Acc]
+                        case is_integer(Name)  of true -> [whereis(generate_module_name(Name))|Acc];
+                             false -> [whereis(Name)|Acc]
+                        end
                 end, [], Names),
     lists:reverse(AllPids).
 

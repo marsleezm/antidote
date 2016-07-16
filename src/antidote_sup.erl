@@ -59,6 +59,8 @@ init(_Args) ->
     antidote_config:load("antidote.config"),
     ets:new(meta_info,
         [set,public,named_table,{read_concurrency,true},{write_concurrency,false}]),
+    ets:new(cdf,
+        [set,public,named_table,{read_concurrency,false},{write_concurrency,true}]),
     ets:new(dependency,
         [bag,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
     ets:new(anti_dep,
