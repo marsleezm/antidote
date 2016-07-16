@@ -896,7 +896,7 @@ try_commit_pending(NowPrepTime, PendingTxId, SD0=#state{pending_txs=PendingTxs, 
             {noreply, SD0#state{dep_dict=DepDict1}}
     end.
 
-read_abort(Type, MyCommitTime, TxId, SD0=#state{read_aborted=ReadAborted,
+read_abort(Type, _MyCommitTime, TxId, SD0=#state{read_aborted=ReadAborted,
         dep_dict=DepDict, cascade_aborted=CascadAborted, rep_dict=RepDict, pending_txs=PendingTxs, read_invalid=ReadInvalid}) ->
     %lager:warning("Got read abort for ~w", [TxId]),
     Client = TxId#tx_id.client_pid,
