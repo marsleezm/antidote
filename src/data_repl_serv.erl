@@ -170,7 +170,7 @@ init([Name, _Parts]) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= min(max(TotalReplFactor*8*Concurrent*SpeculaLength, 200), 20000), specula_read=SpeculaRead,
+    {ok, #state{name=Name, set_size= min(max(TotalReplFactor*8*Concurrent*SpeculaLength, 200), 10000), specula_read=SpeculaRead,
                 pending_log = PendingLog, current_dict = dict:new(), 
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
@@ -237,7 +237,7 @@ handle_call({read, Key, TxId, {_Part, _}}, Sender,
                     {reply, Result, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
-            %lager:warning("Doing specula read!!!"),
+             %lager:warning("Doing specula read!!!"),
             case specula_read(TxId, Key, PendingLog, Sender) of
                 not_ready->
                     {noreply, SD0};
@@ -277,7 +277,7 @@ handle_call({get_ts, TxId, Partition, WriteSet}, _Sender, SD0=#state{pending_log
                         end end, 0, WriteSet),
             %% Leave a tag here so that a prepare message arrive in-between will not reply more (which causes prepare to go negative)
             ets:insert(PendingLog, {{TxId, Partition}, ignore}),
-            %lager:warning("~w ~w got ts", [TxId, Partition]),
+             %lager:warning("~w ~w got ts", [TxId, Partition]),
             {reply, MaxTs, SD0};
         _ ->
            %lager:warning("~w ~w prepared already", [TxId, Partition]),
@@ -751,7 +751,7 @@ read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sende
     read_or_block(Rest, [{PTxId, PrepTime, Value, Reader}|Prev], SnapshotTime, Sender).
 
 add_read_dep(ReaderTx, WriterTx, _Key) ->
-   %lager:warning("Add read dep from ~w to ~w, key is ~p", [ReaderTx, WriterTx, Key]),
+   %lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
