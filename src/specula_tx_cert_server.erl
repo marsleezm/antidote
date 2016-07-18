@@ -1321,8 +1321,8 @@ solve_read_dependency(CommitTime, ReadDep, DepList) ->
                             end;
                         false ->
                             %% Read is not valid
-                            case TxServer of
-                                Self ->
+                            case (TxServer == Self) and (DepTxId#tx_id.client_pid == TxId#tx_id.client_pid) of
+                                true ->
                                       %lager:warning("~w is my own, read invalid", [DepTxId]),
                                     {RD, [DepTxId|ToAbort]};
                                 _ ->
