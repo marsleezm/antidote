@@ -1115,13 +1115,9 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
                                 TxServer = DepTxId#tx_id.server_pid,
                                 ets:delete_object(dependency, {TxId, DepTxId}),
                                 %% TODO: inefficient work around. Need to fix it.
-                                case TxServer of 
-                                    Self ->
-                                        MyClient = TxId#tx_id.client_pid, 
-                                        case DepTxId#tx_id.client_pid of 
-                                            MyClient -> ?READ_ABORTED(TxServer, -1, DepTxId);
-                                            _ -> ok 
-                                        end;
+                                case (TxServer == Self) and (DepTxId#tx_id.client_pid == TxId#tx_id.client_pid) of
+                                    true ->
+                                        ok;
                                     _ ->
                                         %lager:warning("~w is not my own, read invalid", [DepTxId]),
                                         ?READ_ABORTED(TxServer, -1, DepTxId)
@@ -1145,13 +1141,9 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
                               TxServer = DepTxId#tx_id.server_pid,
                               ets:delete_object(dependency, {TxId, DepTxId}),
                                 %% TODO: inefficient work around. Need to fix it.
-                                case TxServer of 
-                                    Self ->
-                                        MyClient = TxId#tx_id.client_pid, 
-                                        case DepTxId#tx_id.client_pid of
-                                              MyClient -> ?READ_ABORTED(TxServer, -1, DepTxId);
-                                              _ -> ok
-                                        end;
+                                case (TxServer == Self) and (DepTxId#tx_id.client_pid == TxId#tx_id.client_pid) of
+                                    true ->
+                                        ok;
                                     _ ->
                                         %lager:warning("~w is not my own, read invalid", [DepTxId]),
                                         ?READ_ABORTED(TxServer, -1, DepTxId)
