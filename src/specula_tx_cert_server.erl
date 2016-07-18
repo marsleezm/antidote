@@ -186,7 +186,9 @@ handle_call({start_tx}, Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapsh
 
 handle_call({get_cdf}, _Sender, SD0=#state{cdf=Cdf}) ->
     case Cdf of {0, 0, false} -> ok;
+                %{0, 0, []} -> ok;
                 {Times, _Len, CList} ->
+                    %lager:info("CList is ~w", [CList]),
                     true = ets:insert(cdf, {{self(), Times}, CList})
                     %PercvFileName = atom_to_list(Name) ++ "percv-latency",
                     %FinalFileName = atom_to_list(Name) ++ "final-latency",
@@ -1113,14 +1115,18 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
                                 TxServer = DepTxId#tx_id.server_pid,
                                 ets:delete_object(dependency, {TxId, DepTxId}),
                                 %% TODO: inefficient work around. Need to fix it.
-                                case (TxServer == Self) and (DepTxId#tx_id.client_pid == TxId#tx_id.client_pid) of
-                                    true ->
-                                        ok;
+                                case TxServer of 
+                                    Self ->
+                                        MyClient = TxId#tx_id.client_pid, 
+                                        case DepTxId#tx_id.client_pid of 
+                                            MyClient -> ?READ_ABORTED(TxServer, -1, DepTxId);
+                                            _ -> ok 
+                                        end;
                                     _ ->
                                         %lager:warning("~w is not my own, read invalid", [DepTxId]),
                                         ?READ_ABORTED(TxServer, -1, DepTxId)
                                 end
-                       end, DepList),
+                      end, DepList),
       ?CLOCKSI_VNODE:abort(LocalParts, TxId),
       ?REPL_FSM:repl_abort(LocalParts, TxId, false, RepDict),
       ?CLOCKSI_VNODE:abort(lists:delete(ExceptNode, RemoteParts), TxId),
@@ -1139,13 +1145,17 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
                               TxServer = DepTxId#tx_id.server_pid,
                               ets:delete_object(dependency, {TxId, DepTxId}),
                                 %% TODO: inefficient work around. Need to fix it.
-                              case (TxServer == Self) and (DepTxId#tx_id.client_pid == TxId#tx_id.client_pid) of
-                                  true ->
-                                      ok;
-                                  _ ->
-                                      %lager:warning("~w is not my own, read invalid", [DepTxId]),
-                                      ?READ_ABORTED(TxServer, -1, DepTxId)
-                              end
+                                case TxServer of 
+                                    Self ->
+                                        MyClient = TxId#tx_id.client_pid, 
+                                        case DepTxId#tx_id.client_pid of
+                                              MyClient -> ?READ_ABORTED(TxServer, -1, DepTxId);
+                                              _ -> ok
+                                        end;
+                                    _ ->
+                                        %lager:warning("~w is not my own, read invalid", [DepTxId]),
+                                        ?READ_ABORTED(TxServer, -1, DepTxId)
+                                end
                      end, DepList),
     %%%%%%%%% Time stat %%%%%%%%%%%
     %LPDiff = get_time_diff(LP, RP),
@@ -1275,8 +1285,8 @@ try_to_commit(LastCommitTime, [H|Rest]=PendingList, RepDict, DepDict,
 
 abort_specula_list([H|T], RepDict, DepDict, PendingTxs, ExceptNode) ->
        %lager:warning("Trying to abort ~w", [H]),
-    {PendingTxs1, DepDict1} = abort_specula_tx(H, PendingTxs, RepDict, DepDict, ExceptNode),
-    abort_specula_list(T, RepDict, DepDict1, PendingTxs1). 
+    {PendingTxs1, DepDict1, ToAbort} = abort_specula_tx(H, PendingTxs, RepDict, DepDict, ExceptNode),
+    abort_specula_list(T++ToAbort, RepDict, DepDict1, PendingTxs1). 
 
 abort_specula_list([], _RepDict, DepDict, PendingTxs) ->
     {PendingTxs, DepDict};
