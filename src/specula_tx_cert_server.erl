@@ -344,7 +344,7 @@ handle_call({certify, TxId, LocalUpdates, RemoteUpdates, StartTime}, Sender, SD0
                                     DepDict1 = dict:store(TxId, 
                                             {TotalReplFactor*length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1}, DepDict),
                                     PendingTxs1 = dict:store(Client, ClientState#client_state{tx_id=TxId, time_list=NewTL, local_updates=[], lp_start=StartTime, 
-                                        remote_updates=RemoteUpdates, stage=remote_cert}, PendingTxs),
+                                        remote_updates=RemoteUpdates, stage=remote_cert, sender=Sender}, PendingTxs),
                                     {noreply, SD0#state{dep_dict=DepDict1, pending_txs=PendingTxs1, 
                                         num_specula_read=NumSpeculaRead1}};
                                 false -> %% Can speculate. After replying, removing TxId
@@ -758,7 +758,7 @@ add_to_cdf(Cdf, TimeList) ->
                                                 true = ets:insert(cdf, {{self(), Times}, CList}),
                                                 {{Times+1, 0, [get_time_diff(LastTime, os:timestamp())]}, Rest};
                                             false ->
-                                                {{Times, Len+1, [get_time_diff(LastTime, os:timestamp())|Cdf]}, Rest}
+                                                {{Times, Len+1, [get_time_diff(LastTime, os:timestamp())|CList]}, Rest}
                                         end
     end.
 
