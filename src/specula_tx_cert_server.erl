@@ -1285,8 +1285,8 @@ try_to_commit(LastCommitTime, [H|Rest]=PendingList, RepDict, DepDict,
 
 abort_specula_list([H|T], RepDict, DepDict, PendingTxs, ExceptNode) ->
        %lager:warning("Trying to abort ~w", [H]),
-    {PendingTxs1, DepDict1, ToAbort} = abort_specula_tx(H, PendingTxs, RepDict, DepDict, ExceptNode),
-    abort_specula_list(T++ToAbort, RepDict, DepDict1, PendingTxs1). 
+    {PendingTxs1, DepDict1} = abort_specula_tx(H, PendingTxs, RepDict, DepDict, ExceptNode),
+    abort_specula_list(T, RepDict, DepDict1, PendingTxs1). 
 
 abort_specula_list([], _RepDict, DepDict, PendingTxs) ->
     {PendingTxs, DepDict};
