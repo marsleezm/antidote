@@ -83,8 +83,8 @@
         num_specula_read=0 :: non_neg_integer(),
         num_read=0 :: non_neg_integer(),
         set_size :: non_neg_integer(),
-        current_dict :: set(),
-        backup_dict :: set(),
+        current_dict :: cache_id(), %set(),
+        backup_dict :: cache_id(), %set(),
         %ts_dict :: dict(),
         specula_read :: boolean(),
         name :: atom(),
@@ -174,8 +174,8 @@ init([Name, _Parts]) ->
                 set_size= min(max(TotalReplFactor*8*Concurrent*max(SpeculaLength,2), 400), 40000), 
                 %set_size= 50000, 
                 specula_read=SpeculaRead,
-                pending_log = PendingLog, current_dict = sets:new(), 
-                backup_dict = sets:new(), replicated_log = ReplicatedLog}}.
+                pending_log = PendingLog, current_dict ={0, tx_utilities:open_private_table(current_dict)}, %sets:new(), 
+                backup_dict = tx_utilities:open_private_table(backup_dict), replicated_log = ReplicatedLog}}.
 
 handle_call({get_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
     {reply, ReplicatedLog, SD0};
@@ -356,15 +356,20 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, ToPrepTS},
    %lager:warning("Specula prepared for [~w, ~w]", [TxId, Partition]),
     {noreply, SD0};
 
-handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pending_log=OldPendingLog}) ->
+handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pending_log=OldPendingLog,
+        current_dict=CurrentDict, backup_dict=BackupDict}) ->
     %lager:info("Got request!"),
     ets:delete(OldPendingLog),
     ets:delete(OldReplicatedLog),
     ReplicatedLog = tx_utilities:open_public_table(repl_log),
     PendingLog = tx_utilities:open_private_table(pending_log), 
+    {_, CD} = CurrentDict,
+    ets:delete_all_objects(CD),
+    ets:delete_all_objects(BackupDict),
     lager:info("Data repl replying!"),
     Sender ! cleaned,
-    {noreply, SD0#state{pending_log = PendingLog, current_dict = sets:new(), backup_dict = sets:new(), 
+    {noreply, SD0#state{pending_log = PendingLog, current_dict = {0, CD}, 
+                backup_dict = BackupDict, 
                 num_specula_read=0, num_read=0, replicated_log = ReplicatedLog}};
 
 %% Where shall I put the speculative version?
@@ -397,16 +402,17 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, current_dict=CurrentDict, backup_dict=BackupDict}) ->
     case Type of
         prepared ->
-            case sets:is_element(TxId, CurrentDict) of
-                true ->
+            {_, CD} = CurrentDict,
+            case ets:lookup(CD, TxId) of
+                [{TxId, _}] ->
                    %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
-                false ->
-                    case sets:is_element(TxId, BackupDict) of
-                        true ->
+                [] ->
+                    case ets:lookup(BackupDict, TxId) of
+                        [{TxId, _}] ->
                            %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
-                        false ->
+                        [] ->
                             %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
                             insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender),
                             {noreply, SD0}
@@ -444,7 +450,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
         _ -> ok
     end,
     case IfWaited of
-        waited -> {noreply, SD0#state{current_dict=sets:add_element(TxId, CurrentDict)}};
+        waited -> {noreply, SD0#state{current_dict=ets:insert(CurrentDict, {TxId, finished})}};
         no_wait -> {noreply, SD0}
     end;
     %case dict:size(CurrentD1) > SetSize of
@@ -455,9 +461,10 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
     %end;
 
 handle_cast({repl_abort, TxId, Partitions, IfWaited}, 
-	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, specula_read=SpeculaRead, current_dict=CurrentDict, set_size=SetSize}) ->
+	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, specula_read=SpeculaRead, backup_dict=BackupDict, current_dict=CurrentDict, set_size=SetSize}) ->
    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
-    CurrentDict1 = lists:foldl(fun(Partition, S) ->
+    {Size, CD} = CurrentDict,
+    Size1 = lists:foldl(fun(Partition, S) ->
                case ets:lookup(PendingLog, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
                         %lager:warning("Found for ~w, ~w", [TxId, Partition]),
@@ -467,24 +474,27 @@ handle_cast({repl_abort, TxId, Partitions, IfWaited},
                     [] ->
                        %lager:warning("Repl abort arrived early! ~w", [TxId]),
                         %dict:store(TxId, finished, S)
-                        sets:add_element(TxId, S)
+                        %sets:add_element(TxId, S)
+                        ets:insert(CD, {TxId, finished}),
+                        S+1
                 end
-        end, CurrentDict, Partitions),
+        end, Size, Partitions),
     %%% This needs to be stored because a prepare request may come twice: once from specula_prep and once 
     %%  from tx coord
-    CurrentDict2 = case IfWaited of waited -> sets:add_element(TxId, CurrentDict1);
-                                    no_wait -> CurrentDict1 
-                   end,
+    case IfWaited of waited -> ets:insert(CD, {TxId, finished}); %sets:add_element(TxId, CurrentDict1);
+                    no_wait -> ok 
+    end,
     case SpeculaRead of
         true -> specula_utilities:deal_abort_deps(TxId);
         _ -> ok
     end,
-    case sets:size(CurrentDict2) > SetSize of
+    case Size1 > SetSize of
         true ->
             %lager:warning("Current set is too large!"),
-            {noreply, SD0#state{current_dict=sets:new(), backup_dict=CurrentDict2}};
+            ets:delete_all_objects(BackupDict),
+            {noreply, SD0#state{current_dict={0, BackupDict}, backup_dict=CD}};
         false ->
-            {noreply, SD0#state{current_dict=CurrentDict2}}
+            {noreply, SD0#state{current_dict={Size1, CD}}}
     end;
 
 handle_cast(_Info, StateData) ->
