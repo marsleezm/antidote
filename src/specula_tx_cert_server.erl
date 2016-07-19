@@ -392,8 +392,7 @@ handle_call({get_oldest}, _Sender, SD0=#state{pending_txs=PendingTxs}) ->
     Result = lists:foldl(fun({Key, Value}, Oldest) ->
                 case is_pid(Key) of
                     true -> case Value#client_state.pending_list of [] -> Oldest;
-                            [H|_T] -> lager:info("Pending tx list is ~w", [Value#client_state.pending_list]), 
-                                     case Oldest of nil -> H;
+                            [H|_T] -> case Oldest of nil -> H;
                                     _ -> case H#tx_id.snapshot_time < Oldest#tx_id.snapshot_time of
                                               true -> H;  false -> Oldest
                                          end 
