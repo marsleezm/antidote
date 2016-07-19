@@ -594,7 +594,7 @@ handle_command({abort, TxId}, _Sender,
                     end,
             {noreply, State#state{dep_dict=DepDict1}};
         [] ->
-            %lager:error("No key set at all for ~w", [TxId]),
+            lager:error("No key set at all for ~w", [TxId]),
             {noreply, State}
     end;
 
