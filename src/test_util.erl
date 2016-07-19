@@ -6,8 +6,8 @@
 -endif.
 
 -export([delete_1/2, delete_2/2, check_length1/2, check_time/1, check_length2/2,
-         lookup_1/2, lookup_2/2, get_my_range/4,
-         check_node/1, check_list/1, test_hash/2,
+         lookup_1/2, lookup_2/2, get_my_range/4, dict2/2,
+         check_node/1, check_list/1, test_hash/2, ets2/2,
          pass1/1, pass2/1, set1/2, set2/2, set3/2]).
 
 check_time(N) ->
@@ -54,13 +54,39 @@ set1(N, S) ->
 set2(N, S) ->
     Seq = lists:seq(1, S),
     SeqN = lists:seq(1, N),
+    Start = os:timestamp(),
     Set1 = lists:foldl(fun(M,Set) -> sets:add_element(M,Set) end, sets:new(), Seq),
     T = os:timestamp(),
     lists:foreach(fun(_) ->
             sets:is_element(10, Set1)
             end, SeqN),
     Diff = timer:now_diff(os:timestamp(), T),
-    io:format("Diff is ~w ~n", [Diff]).
+    io:format("Creation is ~w, Diff is ~w ~n", [timer:now_diff(T, Start),  Diff]).
+
+dict2(N, S) ->
+    Seq = lists:seq(1, S),
+    SeqN = lists:seq(1, N),
+    Start = os:timestamp(),
+    Set1 = lists:foldl(fun(M,Set) -> dict:store(M, h, Set) end, dict:new(), Seq),
+    T = os:timestamp(),
+    lists:foreach(fun(_) ->
+            dict:find(10, Set1)
+            end, SeqN),
+    Diff = timer:now_diff(os:timestamp(), T),
+    io:format("Creation is ~w, Diff is ~w ~n", [timer:now_diff(T, Start), Diff]).
+
+ets2(N, S) ->
+    ETS = ets:new(haha, [set]),
+    Seq = lists:seq(1, S),
+    SeqN = lists:seq(1, N),
+    Start = os:timestamp(),
+    lists:foreach(fun(M) -> ets:insert(ETS, {M, h}) end, Seq),
+    T = os:timestamp(),
+    lists:foreach(fun(_) ->
+            ets:lookup(ETS, haha)
+            end, SeqN),
+    Diff = timer:now_diff(os:timestamp(), T),
+    io:format("Creation is ~w, Diff is ~w ~n", [timer:now_diff(T, Start), Diff]).
 
 set3(N, S) ->
     Seq = lists:seq(1, S),
