@@ -170,7 +170,7 @@ init([Name, _Parts]) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= min(max(TotalReplFactor*8*Concurrent*max(SpeculaLength,2), 400), 30000), specula_read=SpeculaRead,
+    {ok, #state{name=Name, set_size= min(max(TotalReplFactor*8*Concurrent*max(SpeculaLength,1), 400), 25000), specula_read=SpeculaRead,
                 pending_log = PendingLog, current_dict = dict:new(), 
                 backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
 
