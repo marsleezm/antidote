@@ -403,15 +403,13 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
     case Type of
         prepared ->
             {_, CD} = CurrentDict,
-            case ets:lookup(CD, {TxId, Partition}) of
-                [{{TxId, Partition}, _}] ->
+            case ets:lookup(CD, TxId) of
+                [{TxId, _}] ->
                    %lager:warning("~w, ~w aborted already", [TxId, Partition]),
-                    %ets:delete(CD, {TxId, Partition}),
                     {noreply, SD0};
                 [] ->
                     case ets:lookup(BackupDict, TxId) of
-                        [{{TxId, Partition}, _}] ->
-                            %ets:delete(BackupDict, {TxId, Partition}),
+                        [{TxId, _}] ->
                            %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
                         [] ->
@@ -436,8 +434,8 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
     end;
 
 
-handle_cast({repl_commit, TxId, CommitTime, Partitions, _IfWaited}, 
-	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, specula_read=SpeculaRead}) ->
+handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited}, 
+	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog, specula_read=SpeculaRead, current_dict=CurrentDict}) ->
    %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
     lists:foreach(fun(Partition) ->
                     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
@@ -451,12 +449,10 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, _IfWaited},
         true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
         _ -> ok
     end,
-    %%% This is commented out for simplicity
-    %case IfWaited of
-    %    waited -> {noreply, SD0#state{current_dict=ets:insert(CurrentDict, {TxId, finished})}};
-    %    no_wait -> {noreply, SD0}
-    %end;
-    {noreply, SD0};
+    case IfWaited of
+        waited -> {noreply, SD0#state{current_dict=ets:insert(CurrentDict, {TxId, finished})}};
+        no_wait -> {noreply, SD0}
+    end;
     %case dict:size(CurrentD1) > SetSize of
     %      true ->
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentD1}};
@@ -464,7 +460,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, _IfWaited},
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
     %end;
 
-handle_cast({repl_abort, TxId, Partitions, _IfWaited}, 
+handle_cast({repl_abort, TxId, Partitions, IfWaited}, 
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, specula_read=SpeculaRead, backup_dict=BackupDict, current_dict=CurrentDict, set_size=SetSize}) ->
    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     {Size, CD} = CurrentDict,
@@ -479,15 +475,15 @@ handle_cast({repl_abort, TxId, Partitions, _IfWaited},
                        %lager:warning("Repl abort arrived early! ~w", [TxId]),
                         %dict:store(TxId, finished, S)
                         %sets:add_element(TxId, S)
-                        ets:insert(CD, {{TxId, Partition}, finished}),
+                        ets:insert(CD, {TxId, finished}),
                         S+1
                 end
         end, Size, Partitions),
     %%% This needs to be stored because a prepare request may come twice: once from specula_prep and once 
     %%  from tx coord
-    %case IfWaited of waited -> ets:insert(CD, {TxId, finished}); %sets:add_element(TxId, CurrentDict1);
-    %                no_wait -> ok 
-    %end,
+    case IfWaited of waited -> ets:insert(CD, {TxId, finished}); %sets:add_element(TxId, CurrentDict1);
+                    no_wait -> ok 
+    end,
     case SpeculaRead of
         true -> specula_utilities:deal_abort_deps(TxId);
         _ -> ok
@@ -769,7 +765,7 @@ read_or_block([{PTxId, PrepTime, Value, Reader}|Rest], Prev, SnapshotTime, Sende
     read_or_block(Rest, [{PTxId, PrepTime, Value, Reader}|Prev], SnapshotTime, Sender).
 
 add_read_dep(ReaderTx, WriterTx, _Key) ->
-   %lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
+   lager:warning("Add read dep from ~w to ~w", [ReaderTx, WriterTx]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
