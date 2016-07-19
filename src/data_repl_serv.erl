@@ -83,8 +83,8 @@
         num_specula_read=0 :: non_neg_integer(),
         num_read=0 :: non_neg_integer(),
         set_size :: non_neg_integer(),
-        current_dict :: dict(),
-        backup_dict :: dict(),
+        current_dict :: set(),
+        backup_dict :: set(),
         %ts_dict :: dict(),
         specula_read :: boolean(),
         name :: atom(),
@@ -170,9 +170,12 @@ init([Name, _Parts]) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= min(max(TotalReplFactor*8*Concurrent*max(SpeculaLength,2), 400), 30000), specula_read=SpeculaRead,
-                pending_log = PendingLog, current_dict = dict:new(), 
-                backup_dict = dict:new(), replicated_log = ReplicatedLog}}.
+    {ok, #state{name=Name, 
+                set_size= min(max(TotalReplFactor*8*Concurrent*max(SpeculaLength,2), 400), 40000), 
+                %set_size= 50000, 
+                specula_read=SpeculaRead,
+                pending_log = PendingLog, current_dict = sets:new(), 
+                backup_dict = sets:new(), replicated_log = ReplicatedLog}}.
 
 handle_call({get_table}, _Sender, SD0=#state{replicated_log=ReplicatedLog}) ->
     {reply, ReplicatedLog, SD0};
@@ -361,7 +364,7 @@ handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pe
     PendingLog = tx_utilities:open_private_table(pending_log), 
     lager:info("Data repl replying!"),
     Sender ! cleaned,
-    {noreply, SD0#state{pending_log = PendingLog, current_dict = dict:new(), backup_dict = dict:new(), 
+    {noreply, SD0#state{pending_log = PendingLog, current_dict = sets:new(), backup_dict = sets:new(), 
                 num_specula_read=0, num_read=0, replicated_log = ReplicatedLog}};
 
 %% Where shall I put the speculative version?
@@ -394,16 +397,16 @@ handle_cast({repl_prepare, Type, TxId, Partition, WriteSet, TimeStamp, Sender},
 	    SD0=#state{pending_log=PendingLog, replicated_log=ReplicatedLog, current_dict=CurrentDict, backup_dict=BackupDict}) ->
     case Type of
         prepared ->
-            case dict:find(TxId, CurrentDict) of
-                {ok, finished} ->
+            case sets:is_element(TxId, CurrentDict) of
+                true ->
                    %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                     {noreply, SD0};
-                error ->
-                    case dict:find(TxId, BackupDict) of
-                        {ok, finished} ->
+                false ->
+                    case sets:is_element(TxId, BackupDict) of
+                        true ->
                            %lager:warning("~w, ~w aborted already", [TxId, Partition]),
                             {noreply, SD0};
-                        error ->
+                        false ->
                             %lager:warning("Got repl prepare for ~w, ~w", [TxId, Partition]),
                             insert_prepare(PendingLog, TxId, Partition, WriteSet, TimeStamp, Sender),
                             {noreply, SD0}
@@ -441,7 +444,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
         _ -> ok
     end,
     case IfWaited of
-        waited -> {noreply, SD0#state{current_dict=dict:store(TxId, finished, CurrentDict)}};
+        waited -> {noreply, SD0#state{current_dict=sets:add_element(TxId, CurrentDict)}};
         no_wait -> {noreply, SD0}
     end;
     %case dict:size(CurrentD1) > SetSize of
@@ -463,22 +466,23 @@ handle_cast({repl_abort, TxId, Partitions, IfWaited},
                         S;
                     [] ->
                        %lager:warning("Repl abort arrived early! ~w", [TxId]),
-                        dict:store(TxId, finished, S)
+                        %dict:store(TxId, finished, S)
+                        sets:add_element(TxId, S)
                 end
         end, CurrentDict, Partitions),
     %%% This needs to be stored because a prepare request may come twice: once from specula_prep and once 
     %%  from tx coord
-    CurrentDict2 = case IfWaited of waited -> dict:store(TxId, finished, CurrentDict1);
+    CurrentDict2 = case IfWaited of waited -> sets:add_element(TxId, CurrentDict1);
                                     no_wait -> CurrentDict1 
                    end,
     case SpeculaRead of
         true -> specula_utilities:deal_abort_deps(TxId);
         _ -> ok
     end,
-    case dict:size(CurrentDict2) > SetSize of
+    case sets:size(CurrentDict2) > SetSize of
         true ->
             %lager:warning("Current set is too large!"),
-            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict2}};
+            {noreply, SD0#state{current_dict=sets:new(), backup_dict=CurrentDict2}};
         false ->
             {noreply, SD0#state{current_dict=CurrentDict2}}
     end;
