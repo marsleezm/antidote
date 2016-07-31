@@ -364,23 +364,26 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBlocked,
 handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
     %{NumRR, AccRR} = RelayRead,
-  %lager:error("~w relay read ~p", [TxId, Key]),
+    %lager:warning("~w relay read ~p", [TxId, Key]),
     %T1 = os:timestamp(),
     case SpeculaRead of
         false ->
             case ready_or_block(TxId, Key, PreparedTxs, {relay, Reader}) of
                 not_ready->
+                    %lager:warning("Read blocked!"),
                     {noreply, SD0};
                 ready ->
+                    %lager:warning("Read finished!"),
                     Result = read_value(Key, TxId, InMemoryStore),
                     gen_server:reply(Reader, Result), 
     		        %T2 = os:timestamp(),
                     {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
-               %lager:warning("Specula read!!"),
+            %lager:warning("Specula read!!"),
             case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
                 not_ready->
+                    %lager:warning("Read blocked!"),
                     {noreply, SD0};
                 {specula, Value} ->
                     gen_server:reply(Reader, {ok, Value}), 
@@ -389,6 +392,7 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
                     {noreply, SD0};
 				        %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
                 ready ->
+                    %lager:warning("Read finished!"),
                     Result = read_value(Key, TxId, InMemoryStore),
                     gen_server:reply(Reader, Result), 
     		        %T2 = os:timestamp(),
@@ -1080,7 +1084,7 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
     end.
 
 add_read_dep(ReaderTx, WriterTx, _Key) ->
-   %lager:warning("Inserting anti_dep from ~w to ~w, key is ~p", [ReaderTx, WriterTx, Key]),
+   %lager:warning("Inserting anti_dep from ~w to ~w", [ReaderTx, WriterTx]),
     ets:insert(dependency, {WriterTx, ReaderTx}),
     ets:insert(anti_dep, {ReaderTx, WriterTx}).
 

@@ -203,7 +203,7 @@ handle_call({check_key, Key}, _Sender, SD0=#state{replicated_log=ReplicatedLog})
 
 handle_call({debug_read, Key, TxId}, _Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog}) ->
-    lager:info("Got debug read for ~w", [Key]),
+    lager:info("Got debug read for ~w from ~p", [Key, TxId]),
     case ets:lookup(ReplicatedLog, Key) of
         [] ->
             lager:info("Debug reading ~w, there is nothing", [Key]),

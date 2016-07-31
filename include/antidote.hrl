@@ -65,7 +65,7 @@
 
 -define(CLOCKSI_TIMEOUT, 1000).
 
--record(tx_id, {snapshot_time, server_pid :: pid(), client_pid :: pid()}).
+-record(tx_id, {snapshot_time, server_pid :: pid(), client_pid :: pid(), txn_seq :: non_neg_integer()}).
 -record(clocksi_payload, {key :: key(),
                           type :: type(),
                           op_param :: op(),

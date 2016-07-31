@@ -27,7 +27,8 @@
 -export([start_link/0]).
 
 -export([init/1, certify/4, get_stat/0, get_cdf/0, get_int_data/3, start_tx/1, single_read/3, clean_all_data/0, clean_data/1, 
-            load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, trace/1, get_oldest/0, 
+            load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, trace/1, get_oldest/0,
+            get_oldest/1, 
             get_all_oldest/0,  get_pid/1, get_pids/1, get_global_pid/1]).
 
 -define(READ_TIMEOUT, 30000).
@@ -168,16 +169,21 @@ clean_data(Sender) ->
     Sender ! cleaned.
 
 get_all_oldest() ->
+    lager:info("1"),
     Parts = hash_fun:get_partitions(),
+    lager:info("2"),
     Set = lists:foldl(fun({_, N}, D) ->
                 sets:add_element(N, D)
                 end, sets:new(), Parts),
     AllNodes = sets:to_list(Set),
+    lager:info("3"),
     lists:foreach(fun(Node) ->
-                    spawn(rpc, call, [Node, tx_cert_sup, get_oldest, []])
+                    spawn(rpc, call, [Node, tx_cert_sup, get_oldest, [self()]])
     end, AllNodes),
+    lager:info("4"),
     lists:foldl(fun(_, OldT) ->
                    receive T -> 
+                        lager:info("Got reply of T", [T]),
                         case OldT of
                          nil -> T;
                           _ -> case T of nil -> OldT;
@@ -191,8 +197,12 @@ get_all_oldest() ->
                    end end, nil, AllNodes).
 
 get_oldest() ->
+    get_oldest(self()).
+
+get_oldest(Sender) ->
+    lager:info("Received T"),
     SPL = lists:seq(1, ?NUM_SUP),
-    lists:foldl(fun(N, OldT) ->
+    R = lists:foldl(fun(N, OldT) ->
             case gen_server:call(generate_module_name(N), {get_oldest}) of 
                 nil ->  OldT;
                 T -> case OldT of
@@ -204,7 +214,9 @@ get_oldest() ->
                                             false -> OldT
                                         end
                     end end 
-            end end, nil, SPL).
+            end end, nil, SPL),
+    lager:info("~w has replied!", [self()]),
+    Sender ! R.
 
 get_stat() ->
     SPL = lists:seq(1, ?NUM_SUP),
