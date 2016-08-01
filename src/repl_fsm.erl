@@ -58,10 +58,8 @@
 %% States
 -export([repl_prepare/4,
 	    check_table/0,
-         repl_abort/4,
-         repl_abort/5,
-         repl_commit/5,
-         repl_commit/6,
+         repl_abort/3,
+         repl_commit/4,
          %repl_abort/4,
          %repl_commit/5,
          quorum_replicate/7,
@@ -77,7 +75,6 @@
         log_size :: non_neg_integer(),
         replicas :: [atom()],
         local_rep_set :: set(),
-        except_replicas :: dict(),
 
         mode :: atom(),
         repl_factor :: non_neg_integer(),
@@ -145,13 +142,10 @@ init([_Name]) ->
     [{_, Replicas}] = ets:lookup(meta_info, node()), 
    %lager:warning("Replicas are ~w", [Replicas]),
     %PendingLog = tx_utilities:open_private_table(pending_log),
-    NewDict = generate_except_replicas(Replicas),
     Lists = antidote_config:get(to_repl),
     [LocalRepList] = [LocalReps || {Node, LocalReps} <- Lists, Node == node()],
     LocalRepNames = [list_to_atom(atom_to_list(node())++"repl"++atom_to_list(L))  || L <- LocalRepList ],
-    lager:info("NewDict is ~w, LocalRepNames is ~w", [NewDict, LocalRepNames]),
-    {ok, #state{replicas=Replicas, mode=quorum, repl_factor=length(Replicas), local_rep_set=sets:from_list(LocalRepNames), 
-                except_replicas=NewDict}}.
+    {ok, #state{replicas=Replicas, mode=quorum, repl_factor=length(Replicas), local_rep_set=sets:from_list(LocalRepNames)}}.
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0};
@@ -162,9 +156,7 @@ handle_call({check_table}, _Sender, SD0=#state{pending_log=PendingLog}) ->
 
 %% RepMode can only be prepared for now.
 handle_cast({repl_prepare, Partition, prepared, TxId, LogContent}, 
-	    SD0=#state{replicas=Replicas, except_replicas=ExceptReplicas, 
-            mode=Mode}) ->
-    %lager:info("Send preparing of Tx ~w", [TxId]),
+	    SD0=#state{replicas=Replicas, mode=Mode}) ->
             {Sender, RepMode, WriteSet, PrepareTime} = LogContent,
             case Mode of
                 quorum ->
@@ -177,21 +169,8 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, Sender);
                         %% This is for specula.. So no need to replicate the msg to the partition that sent the prepare(because due to specula,
                         %% the msg is replicated already).
-                        {remote, SenderName} ->
-                            case dict:find(SenderName, ExceptReplicas) of
-                                {ok, []} ->
-                                    ok;
-                                {ok, R} -> 
-                                   %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
-                                    %ets:insert(PendingLog, {{TxId, Partition}, Sender, 
-                                    %        PrepareTime, remote, ReplFactor-1}),
-                                    quorum_replicate(R, prepared, TxId, Partition, WriteSet, PrepareTime, Sender);
-                                error ->
-                                   %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
-                                    %ets:insert(PendingLog, {{TxId, Partition}, Sender, 
-                                    %        PrepareTime, remote, ReplFactor}),
-                                    quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, Sender)
-                            end;
+                        {remote, _SenderName} ->
+                            quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, Sender);
                         _ ->
                             %lager:warning("Local prepared request for {~w, ~w}, Sending to ~w, ReplFactor is ~w", [TxId, Partition, Replicas, ReplFactor]),
                             %case RepMode of
@@ -274,62 +253,41 @@ build_node_parts(Parts) ->
                     dict:new(), Parts),
     dict:to_list(D).
 
-
-generate_except_replicas(Replicas) ->
-    lists:foldl(fun(Rep, D) ->
-            Except = lists:delete(Rep, Replicas),
-            NodeName = get_name(atom_to_list(Rep), 1),
-            dict:store(list_to_atom(NodeName), Except, D)
-        end, dict:new(), Replicas).
-
-get_name(ReplName, N) ->
-    case lists:sublist(ReplName, N, 4) of
-        "repl" ->  lists:sublist(ReplName, 1, N-1);
-         _ -> get_name(ReplName, N+1)
-    end.
+%get_name(ReplName, N) ->
+%    case lists:sublist(ReplName, N, 4) of
+%        "repl" ->  lists:sublist(ReplName, 1, N-1);
+%         _ -> get_name(ReplName, N+1)
+%    end.
     
 %% No replication
-repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict) ->
-    repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, no_wait).
-
-repl_commit([], _, _, _, _, _) ->
+repl_commit([], _, _, _) ->
     ok;
-repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, IfWaited) ->
+repl_commit(UpdatedParts, TxId, CommitTime, RepDict) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
         %lager:info("repl commit of ~w for node ~w to replicas ~w for partitions ~w", [TxId, Node, Replicas, Partitions]),
         lists:foreach(fun(R) ->
             case R of
-                cache -> 
-                    case ToCache of false -> ok;
-                                      true -> ?CACHE_SERV:commit_specula(TxId, Partitions, CommitTime)
-                    end; 
                 {rep, S} ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, IfWaited});
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions});
                 S ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, no_wait})
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions})
             end end,  Replicas) end,
             NodeParts).
 
-repl_abort(UpdatedParts, TxId, ToCache, RepDict) -> 
-    repl_abort(UpdatedParts, TxId, ToCache, RepDict, no_wait). 
-
-repl_abort([], _, _, _, _) ->
+repl_abort([], _, _) ->
     ok;
-repl_abort(UpdatedParts, TxId, ToCache, RepDict, IfWaited) ->
+repl_abort(UpdatedParts, TxId, RepDict) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
         %lager:info("repl abort of ~w for node ~w to replicas ~w for partitions ~w", [TxId, Node, Replicas, Partitions]),
         lists:foreach(fun(R) ->
             case R of
-                cache -> case ToCache of false -> ok;
-                                        true -> ?CACHE_SERV:abort_specula(TxId, Partitions) 
-                         end;
                 {rep, S} ->
-                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, IfWaited});
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions});
                 S ->
-                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, no_wait})
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions})
             end end,  Replicas) end,
             NodeParts).

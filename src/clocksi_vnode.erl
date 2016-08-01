@@ -86,6 +86,7 @@
                 %r_abort_dict :: dict(),
                 %Statistics
                 %max_ts :: non_neg_integer(),
+                dependency :: cache_id(),
                 debug = false :: boolean()
                 %total_time :: non_neg_integer(),
                 %prepare_count :: non_neg_integer(),
@@ -136,29 +137,19 @@ clean_data(Node, From) ->
                                    {clean_data, From}, self(),
                                    ?CLOCKSI_MASTER).
 
-relay_read(Node, Key, TxId, Reader, From) ->
+relay_read(Node, Key, TxId, Reader, SpeculaRead) ->
     riak_core_vnode_master:command(Node,
-                                   {relay_read, Key, TxId, Reader, From}, self(),
+                                   {relay_read, Key, TxId, Reader, SpeculaRead}, self(),
                                    ?CLOCKSI_MASTER).
 
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
 prepare(Updates, TxId, Type) ->
-    ProposeTime = TxId#tx_id.snapshot_time+1,
     lists:foreach(fun({Node, WriteSet}) ->
         riak_core_vnode_master:command(Node,
-                           {prepare, TxId, WriteSet, Type, ProposeTime},
+                           {prepare, TxId, WriteSet, Type},
                            self(),
                            ?CLOCKSI_MASTER)
     end, Updates).
-
-prepare(Updates, CollectedTS, TxId, Type) ->
-    ProposeTS = max(TxId#tx_id.snapshot_time+1, CollectedTS),
-    lists:foreach(fun({Node, WriteSet}) ->
-			riak_core_vnode_master:command(Node,
-						       {prepare, TxId, WriteSet, Type, ProposeTS},
-                               self(),
-						       ?CLOCKSI_MASTER)
-		end, Updates).
 
 debug_prepare(Updates, TxId, Type, Sender) ->
     ProposeTime = TxId#tx_id.snapshot_time+1,
@@ -211,6 +202,7 @@ abort(UpdatedParts, TxId) ->
 init([Partition]) ->
     lager:info("Initing partition ~w", [Partition]),
     PreparedTxs = tx_utilities:open_table(Partition, prepared),
+    Dependency = tx_utilities:open_table(Partition, dependency),
     CommittedTxs = tx_utilities:open_table(Partition, committed),
     InMemoryStore = tx_utilities:open_table(Partition, inmemory_store),
     DepDict = dict:new(),
@@ -234,6 +226,7 @@ init([Partition]) ->
 		        %relay_read={0,0},
                 %l_abort_dict=LD,
                 %r_abort_dict=RD,
+                dependency=Dependency,
                 if_replicate = IfReplicate,
                 if_specula = IfSpecula,
                 inmemory_store=InMemoryStore,
@@ -362,10 +355,8 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBlocked,
     end;
 
 handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state{
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
-    %{NumRR, AccRR} = RelayRead,
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, dependency=Dependency}) ->
     %lager:warning("~w relay read ~p", [TxId, Key]),
-    %T1 = os:timestamp(),
     case SpeculaRead of
         false ->
             case ready_or_block(TxId, Key, PreparedTxs, {relay, Reader}) of
@@ -376,21 +367,16 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
                     %lager:warning("Read finished!"),
                     Result = read_value(Key, TxId, InMemoryStore),
                     gen_server:reply(Reader, Result), 
-    		        %T2 = os:timestamp(),
                     {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
             %lager:warning("Specula read!!"),
-            case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
+            case specula_read(TxId, Key, PreparedTxs, Dependency, {relay, Reader}) of
                 not_ready->
                     %lager:warning("Read blocked!"),
                     {noreply, SD0};
-                {specula, Value} ->
-                    gen_server:reply(Reader, {ok, Value}), 
-    		        %T2 = os:timestamp(),
-                    %lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
-                    {noreply, SD0};
-				        %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
+                {specula, Value, DependTxId} ->
+                    {reply, {ok, Value, TxId, DependTxId, Reader}, SD0};
                 ready ->
                     %lager:warning("Read finished!"),
                     Result = read_value(Key, TxId, InMemoryStore),
@@ -401,7 +387,7 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
             end
     end;
 
-handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
+handle_command({prepare, TxId, WriteSet, RepMode}, RawSender,
                State = #state{partition=Partition,
                               if_replicate=IfReplicate,
                               if_specula=IfSpecula,
@@ -411,7 +397,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                               debug=Debug
                               }) ->
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
-    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs, ProposedTs),
+    Result = prepare(TxId, WriteSet, CommittedTxs, PreparedTxs),
     case Result of
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
@@ -544,6 +530,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
                       prepared_txs=PreparedTxs,
                       inmemory_store=InMemoryStore,
                       dep_dict = DepDict,
+                      dependency = Dependency,
                       %num_committed=NumCommitted,
                       if_specula=IfSpecula
                       } = State) ->
@@ -551,9 +538,9 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
     Result = 
         case IfReplicate of
             true ->
-                commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula);
+                commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, Dependency, IfSpecula);
             false -> 
-                commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, ignore, IfSpecula)
+                commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, ignore, Dependency, IfSpecula)
         end,
     case Result of
         {ok, committed, DepDict1} ->
@@ -564,13 +551,13 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
 
 handle_command({abort, TxId}, _Sender,
                State = #state{partition=Partition, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore,
-                dep_dict=DepDict, if_replicate=IfReplicate, if_specula=IfSpecula}) ->
+                dep_dict=DepDict, if_replicate=IfReplicate, if_specula=IfSpecula, dependency=Dependency}) ->
    %lager:warning("~w: Aborting ~w", [Partition, TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, {waiting, WriteSet}}] ->
             Keys = [Key || {Key, _} <- WriteSet],
             case IfSpecula of
-                true -> specula_utilities:deal_abort_deps(TxId);
+                true -> specula_utilities:deal_abort_deps(TxId, Dependency);
                 false -> ok 
             end,
              %lager:warning("Found write set"),
@@ -585,7 +572,7 @@ handle_command({abort, TxId}, _Sender,
             {noreply, State#state{dep_dict=DepDict2}};
         [{TxId, Keys}] ->
             case IfSpecula of
-                true -> specula_utilities:deal_abort_deps(TxId);
+                true -> specula_utilities:deal_abort_deps(TxId, Dependency);
                 false -> ok
             end,
              %lager:warning("Found key set"),
@@ -651,7 +638,8 @@ async_send_msg(Delay, Msg, To) ->
     timer:sleep(Delay),
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
-prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTime)->
+prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs)->
+    InitPrepTime = TxId#tx_id.snapshot_time + 1,
     KeySet = [K || {K, _} <- TxWriteSet],
     case certification_check(InitPrepTime, TxId, KeySet, CommittedTxs, PreparedTxs, 0) of
         false ->
@@ -747,12 +735,12 @@ prepare_and_commit(TxId, [{Key, Value}], CommittedTxs, PreparedTxs, InMemoryStor
 %    true = ets:insert(PreparedTxs, {Key, {TxId, Time, Value, [], []}}),
 %    set_prepared(PreparedTxs,Rest,TxId,Time, [Key|KeySet]).
 
-commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula)->
+commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, Dependency, IfSpecula)->
    %lager:warning("Before commit ~w", [TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             case IfSpecula of
-                true -> specula_utilities:deal_commit_deps(TxId, TxCommitTime);
+                true -> specula_utilities:deal_commit_deps(TxId, TxCommitTime, Dependency);
                 false -> ok
             end,
             DepDict1 = update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, 0),
@@ -1020,7 +1008,7 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
     end.
 
 %% TODO: allowing all speculative read now! Maybe should not be so aggressive
-specula_read(TxId, Key, PreparedTxs, Sender) ->
+specula_read(TxId, Key, PreparedTxs, Dependency, Sender) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
@@ -1039,35 +1027,20 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
                     case Result of
                         first ->
                             %% There is more than one speculative version
-                            case prepared_by_local(PreparedTxId) of
-                                true ->
-                                    add_read_dep(TxId, PreparedTxId, Key),
-                                    case SnapshotTime > LastReaderTime of
-                                        true -> ets:insert(PreparedTxs, [{Key, [{PreparedTxId, PrepareTime, SnapshotTime, LastPPTime, Value, PendingReader}| PendingPrepare]}]);
-                                        false -> ok
-                                    end,
-                                    {specula, Value};
-                                false ->
-                                    ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, NextReaderTime, LastPPTime, Value,
-                                        [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
-                                 %lager:warning("~w specula reads ~p is blocked by ~w ! PrepareTime is ~w", [TxId, Key, PreparedTxId, PrepareTime]),
-                                    not_ready
-                            end;
+                            add_read_dep(TxId, PreparedTxId, Key, Dependency),
+                            case SnapshotTime > LastReaderTime of
+                                true -> ets:insert(PreparedTxs, [{Key, [{PreparedTxId, PrepareTime, SnapshotTime, LastPPTime, Value, PendingReader}| PendingPrepare]}]);
+                                false -> ok
+                            end,
+                            {specula, Value, PreparedTxId};
                         {ApprTxId, _, ApprPPValue} ->
                             %% There is more than one speculative version
-                            case prepared_by_local(ApprTxId) of
-                                true ->
-                                    add_read_dep(TxId, ApprTxId, Key),
-                                    case SnapshotTime > LastReaderTime of
-                                        true -> ets:insert(PreparedTxs, [{Key, [{PreparedTxId, PrepareTime, SnapshotTime, LastPPTime, Value, PendingReader}| PendingPrepare]}]);
-                                        false -> ok
-                                    end,
-                                    {specula, ApprPPValue};
-                                false ->
-                                    ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, NextReaderTime, LastPPTime, Value, [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
-                                    %lager:warning("~w specula reads ~p is blocked by ~w! PrepareTime is ~w", [TxId, Key, ApprTxId, PrepareTime]),
-                                    not_ready
-                            end;
+                            add_read_dep(TxId, ApprTxId, Key, Dependency),
+                            case SnapshotTime > LastReaderTime of
+                                true -> ets:insert(PreparedTxs, [{Key, [{PreparedTxId, PrepareTime, SnapshotTime, LastPPTime, Value, PendingReader}| PendingPrepare]}]);
+                                false -> ok
+                            end,
+                            {specula, ApprPPValue, ApprTxId};
                         not_ready ->
                              %lager:warning("Wait as pending reader"),
                             ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, NextReaderTime, LastPPTime, Value,
@@ -1083,10 +1056,12 @@ specula_read(TxId, Key, PreparedTxs, Sender) ->
             ready
     end.
 
-add_read_dep(ReaderTx, WriterTx, _Key) ->
+add_read_dep(Dependency, ReaderTx, WriterTx, _Key) ->
    %lager:warning("Inserting anti_dep from ~w to ~w", [ReaderTx, WriterTx]),
-    ets:insert(dependency, {WriterTx, ReaderTx}),
-    ets:insert(anti_dep, {ReaderTx, WriterTx}).
+    case ets:lookup(Dependency, WriterTx) of
+        [] -> ets:insert(Dependency, {WriterTx, [ReaderTx]});
+        [{WriterTx, Deps}] -> ets:insert(Dependency, {WriterTx, [ReaderTx|Deps]})
+    end.
 
 %% Abort all transactions that can not prepare and return the record that should be inserted
 deal_with_prepare_deps([], _, DepDict, _LastReaderTime, _LastPPTime, _) ->
@@ -1249,6 +1224,3 @@ find(SnapshotTime, [{TxId, Time, Value}|Rest], ToReturn) ->
 
 %get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->
 %    ((A2-A1)*1000000+ (B2-B1))*1000000+ C2-C1.
-
-prepared_by_local(TxId) ->
-    node(TxId#tx_id.server_pid) == node().

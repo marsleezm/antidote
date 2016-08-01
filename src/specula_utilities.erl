@@ -31,15 +31,15 @@
 
 -export([should_specula/3, make_prepared_specula/4, speculate_and_read/4, generate_snapshot/4, 
             coord_should_specula/1, finalize_version_and_reply/5, add_specula_meta/4,
-            finalize_dependency/5, deal_commit_deps/2, deal_abort_deps/1]).
+            finalize_dependency/5, deal_commit_deps/3, deal_abort_deps/2]).
 
-deal_commit_deps(TxId, CommitTime) ->
-    case ets:lookup(dependency, TxId) of
+deal_commit_deps(TxId, CommitTime, Dependency) ->
+    case ets:lookup(Dependency, TxId) of
         [] ->
             ok; %% No read dependency was created!
         List ->
+            ets:delete(Dependency, TxId),
             lists:foreach(fun({TId, DependTxId}) ->
-                            ets:delete_object(dependency, {TId, DependTxId}),
                             case DependTxId#tx_id.snapshot_time >= CommitTime of
                                 true ->
                                     %lager:info("Calling read valid by ts of ~w, from ~w", [DependTxId, TId]),
@@ -50,14 +50,14 @@ deal_commit_deps(TxId, CommitTime) ->
                           end end, List)
     end.
 
-deal_abort_deps(TxId) ->
-    case ets:lookup(dependency, TxId) of
+deal_abort_deps(TxId, Dependency) ->
+    case ets:lookup(Dependency, TxId) of
         [] ->
             ok; %% No read dependency was created!
         List ->
+            ets:delete(Dependency, TxId),
             lists:foreach(fun({TId, DependTxId}) ->
                             lager:info("Calling read invalid of ~w, from ~w", [DependTxId, TId]),
-                            ets:delete_object(dependency, {TId, DependTxId}),
                             gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, -1, DependTxId})
                           end, List)
     end.
