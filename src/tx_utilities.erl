@@ -21,7 +21,7 @@
 
 -include("antidote.hrl").
 
--export([create_tx_id/1, create_tx_id/2, now_microsec/0, open_table/2, open_private_table/1, get_table_name/2, open_public_table/1]).
+-export([create_tx_id/1, create_tx_id/2, create_tx_id/3, now_microsec/0, open_table/2, open_private_table/1, get_table_name/2, open_public_table/1]).
 
 -spec create_tx_id(snapshot_time() | ignore) -> txid().
 create_tx_id(ClientClock) ->
@@ -31,6 +31,11 @@ create_tx_id(ClientClock, ClientPid) ->
     _A = ClientClock,
     TransactionId = #tx_id{snapshot_time=max(ClientClock, now_microsec()), server_pid=self(), client_pid=ClientPid},
     TransactionId.
+create_tx_id(ClientClock, ClientPid, TxnSeq) ->
+    _A = ClientClock,
+    TransactionId = #tx_id{snapshot_time=max(ClientClock, now_microsec()), server_pid=self(), client_pid=ClientPid, txn_seq=TxnSeq},
+    TransactionId.
+
 
 %% @doc converts a tuple {MegaSecs,Secs,MicroSecs} into microseconds
 now_microsec() ->
