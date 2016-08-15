@@ -286,7 +286,7 @@ handle_call({certify_read, TxId, ClientMsgId}, Sender, SD0=#state{min_commit_ts=
             end
     end;
 
-handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Sender, SD0=#state{rep_dict=RepDict, pending_txs=PendingTxs, total_repl_factor=TotalReplFactor, min_commit_ts=LastCommitTs, specula_length=SpeculaLength, dep_dict=DepDict, num_specula_read=NumSpeculaRead, client_dict=ClientDict}) ->
+handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Sender, SD0=#state{rep_dict=RepDict, pending_txs=PendingTxs, total_repl_factor=TotalReplFactor, min_commit_ts=LastCommitTs, specula_length=SpeculaLength, dep_dict=DepDict, client_dict=ClientDict}) ->
     %% If there was a legacy ongoing transaction.
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
@@ -309,65 +309,52 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                     ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, committed_updates=[], committed_reads=[], aborted_reads=[], invalid_aborted=0}, ClientDict), 
                     {reply, {aborted, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=dict:erase(TxId, DepDict), client_dict=ClientDict1}};
                 {0, {ok, {_, B, _}}} ->
-                    case LocalUpdates of
-                        [] ->
-                            RemotePartitions = [P || {P, _} <- RemoteUpdates],
-                            case (RemotePartitions == []) and (ReadDepTxs == []) and (PendingList == []) of
-                                true -> 
+                    case (LocalUpdates == []) and (RemoteUpdates == []) of 
+                        true ->
+                            case (ReadDepTxs == []) and (PendingList == []) of
+                                true ->
                                    %lager:warning("Replying committed for ~w", [TxId]),
                                     gen_server:reply(Sender, {ok, {committed, LastCommitTs, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}}),
                                     DepDict1 = dict:erase(TxId, DepDict),
                                     ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_reads=
                                           [], committed_updates=[], committed_reads=[]}, ClientDict),
                                     {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}; 
-                                _ ->
-                                    NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
-                                                                        _ -> NumSpeculaRead+1
-                                                      end, 
-                                    %%% !!!!!!! Add to ets if is not read only
-                                    %NewTL = add_to_ets(StartTime, Cdf, TimeList, PendingList),
+                                false ->
                                     case length(PendingList) >= SpeculaLength of
                                         true -> %% Wait instead of speculate.
                                            %lager:warning("remote prepr for ~w", [TxId]),
-                                            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                                             DepDict1 = dict:store(TxId, 
-                                                    {TotalReplFactor*length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1}, DepDict),
+                                                    {0, ReadDepTxs--B, LastCommitTs+1}, DepDict),
                                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=TxId, local_updates=[], 
                                                 remote_updates=RemoteUpdates, stage=remote_cert, sender=Sender}, ClientDict),
-                                            {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1, 
-                                                num_specula_read=NumSpeculaRead1}};
+                                            {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                                         false -> %% Can speculate. After replying, removing TxId
                                             %% Update specula data structure, and clean the txid so we know current txn is already replied
-                                            {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, TxId, LastCommitTs, RepDict),
-                                           %lager:warning("Add to table: Specula txn ~w, avoided ~w, still need ~w", [TxId, AvoidNum, TotalReplFactor*length(RemotePartitions)-AvoidNum]),
-                                            ?CLOCKSI_VNODE:prepare(RemoteUpdates, ProposeTS, TxId, {remote, node()}),
-                                            gen_server:reply(Sender, {ok, {specula_commit, ProposeTS, {rev(AbortedReads),
+                                            gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs+1, {rev(AbortedReads),
                                                       rev(CommittedUpdates), rev(CommittedReads)}}}),
                                             DepDict1 = dict:store(TxId, 
-                                                    {TotalReplFactor*length(RemotePartitions)-AvoidNum, ReadDepTxs--B, LastCommitTs+1}, DepDict),
-                                            PendingTxs1 = dict:store(TxId, {[], RemotePartitions, no_wait}, PendingTxs),
+                                                    {0, ReadDepTxs--B, LastCommitTs+1}, DepDict),
+                                            PendingTxs1 = dict:store(TxId, {[], [], no_wait}, PendingTxs),
                                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN,
                                                             pending_list = PendingList ++ [TxId],  aborted_reads=
                                                     [], committed_updates=[], committed_reads=[]}, ClientDict),
                                             %ets:insert(ClientDict, {TxId, {[], RemotePartitions, StartTime, os:timestamp(), no_wait}}),
-                                            {noreply, SD0#state{dep_dict=DepDict1, min_snapshot_ts=ProposeTS, 
-                                                num_specula_read=NumSpeculaRead1, client_dict=ClientDict1, pending_txs=PendingTxs1}}
+                                            {noreply, SD0#state{dep_dict=DepDict1, min_snapshot_ts=LastCommitTs+1, 
+                                                client_dict=ClientDict1, pending_txs=PendingTxs1}}
                                     end
-                                end;
-                        _ ->
-                            LocalPartitions = [P || {P, _} <- LocalUpdates],
-                            NumToAck = length(LocalUpdates),
-                            DepDict1 = dict:store(TxId, {NumToAck, ReadDepTxs--B, LastCommitTs+1}, DepDict),
-                            ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local),
-                            NumSpeculaRead1 = case ReadDepTxs of [] -> NumSpeculaRead;
-                                                                _ -> NumSpeculaRead+1
-                                              end,
-                            ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=TxId, 
-                                                local_updates=LocalPartitions, pending_prepares=(TotalReplFactor-1)*NumToAck, 
-                                                sender=Sender, remote_updates=RemoteUpdates, stage=local_cert}, ClientDict),
-                           %lager:warning("Prepare ~w to ~w, NumToAck is ~w", [TxId, LocalPartitions, NumToAck]),
-                           %lager:warning("Total repl fact is ~w, replica to ack is ~w", [TotalReplFactor, (TotalReplFactor-1)*NumToAck]),
-                            {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1, num_specula_read=NumSpeculaRead1}}
+                            end;
+                        false ->
+                            %% Certify local partitions that are updated:
+                            %% 1. Master partitions of upated kyes
+                            %% 2. Slave partitions of updated keys
+                            %% 3. Cache partition if the txn updated non-local keys
+                            RemotePartitions = [T|| {T, _} <- RemoteUpdates],
+                            ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
+                            DepDict1 = dict:store(TxId, 
+                                    {TotalReplFactor*length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1}, DepDict),
+                            ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=TxId, local_updates=[], 
+                                remote_updates=RemoteUpdates, stage=remote_cert, sender=Sender}, ClientDict),
+                            {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
                     end
             end;
         false ->
