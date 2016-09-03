@@ -372,7 +372,7 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
   %lager:error("~w relay read ~p", [TxId, Key]),
     %T1 = os:timestamp(),
     MaxTS1 = max(MaxTS, TxId#tx_id.snapshot_time),
-    %lager:warning("MaxTS is ~w", [MaxTS]),
+   %lager:warning("~w reading key ~w, MaxTS is ~w", [TxId, Key, MaxTS]),
     case SpeculaRead of
         false ->
             case ready_or_block(TxId, Key, PreparedTxs, {relay, Reader}) of
@@ -380,12 +380,13 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
                     {noreply, SD0#state{max_ts=MaxTS1}};
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
+                   %lager:warning("~w reading key ~w finished", [TxId, Key]),
                     gen_server:reply(Reader, Result), 
     		        %T2 = os:timestamp(),
                     {noreply, SD0#state{max_ts=MaxTS1}}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
-            %lager:warning("Specula read!!"),
+           %lager:warning("Specula read!!"),
             case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
                 not_ready->
                     {noreply, SD0#state{max_ts=MaxTS1}};
@@ -449,6 +450,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     end 
             end;
         {wait, NumDeps, PrepareTime} ->
+           %lager:warning("Txn waits"),
             NewDepDict = case (IfSpecula == true) and (RepMode == local) of
                                 %% local_aggr
                         true ->  gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime}),
@@ -659,10 +661,10 @@ async_send_msg(Delay, Msg, To) ->
     riak_core_vnode_master:command(To, Msg, To, ?CLOCKSI_MASTER).
 
 prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS)->
-    %lager:warning("MaxTS is ~w", [MaxTS]),
     PrepareTime = max(MaxTS+1, tx_utilities:now_microsec()),
     case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0) of
         {false, InsertedKeys, WaitingKeys} ->
+           %lager:warning("Check and insert failes: ~w", [TxId]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of
@@ -670,10 +672,12 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS)->
                 end end, WaitingKeys),
             {error, write_conflict};
         0 ->
+           %lager:warning("~w has no dependency", [TxId]),
             KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
             {ok, PrepareTime};
         N ->
+           %lager:warning("~w has ~w dependency", [TxId, N]),
             %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, {waiting, TxWriteSet}}),
             {wait, N, PrepareTime}

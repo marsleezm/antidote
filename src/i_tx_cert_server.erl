@@ -66,7 +66,7 @@
 %%%===================================================================
 
 start_link(Name) ->
-    lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
+   %lager:warning("Specula tx cert started wit name ~w, id is ~p", [Name, self()]),
     gen_server:start_link({local, Name},
              ?MODULE, [Name], []).
 
@@ -119,6 +119,7 @@ handle_call({start_tx, _}, Sender, SD0) ->
 handle_call({start_tx}, Sender, SD0=#state{last_commit_ts=LastCommitTS, client_dict=ClientDict}) ->
     {Client, _} = Sender,
     TxId = tx_utilities:create_tx_id(LastCommitTS+1, Client),
+   %lager:warning("Starting new txn ~w", [TxId]),
     ClientState = case dict:find(Client, ClientDict) of
                     error ->
                         #client_state{};
@@ -133,6 +134,7 @@ handle_call({start_read_tx}, _Sender, SD0) ->
     {reply, TxId, SD0};
 
 handle_call({read, Key, TxId, Node}, Sender, SD0) ->
+   %lager:warning("Trying to relay read ~w for key ~w", [TxId, Key]),
     clocksi_vnode:relay_read(Node, Key, TxId, Sender, false),
     {noreply, SD0};
 
@@ -141,6 +143,7 @@ handle_call({certify_read, TxId, 0},  Sender, SD0) ->
 handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, 0},  Sender, SD0) ->
     handle_call({certify, TxId, LocalUpdates, RemoteUpdates, ignore},  Sender, SD0);
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates, _},  Sender, SD0=#state{client_dict=ClientDict, last_commit_ts=LastCommitTs, total_repl_factor=TotalReplFactor}) ->
+   %lager:warning("Certifying txn ~w", [TxId]),
     {Client, _} = Sender,
     ClientState = dict:fetch(Client, ClientDict),
     case length(LocalUpdates) of
@@ -184,6 +187,7 @@ handle_cast({clean_data, Sender}, SD0) ->
 
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{total_repl_factor=TotalReplFactor, rep_dict=RepDict, client_dict=ClientDict}) ->
+   %lager:warning("Receive prepared for txn ~w", [TxId]),
     Client = TxId#tx_id.client_pid,
     ClientState = dict:fetch(Client, ClientDict),
     MyTxId = ClientState#client_state.tx_id,
@@ -205,6 +209,7 @@ handle_cast({prepared, TxId, PrepareTime},
                                     CommitTime = max(PrepareTime, OldPrepTime),
                                     clocksi_vnode:commit(LocalParts, TxId, CommitTime),
                                     repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
+                                   %lager:warning("~w committed", [TxId]),
                                     gen_server:reply(Sender, {ok, {committed, CommitTime, {[],[],[]}}}),
                                     %ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
                                     %Cdf1 =  case Cdf of false -> false;
@@ -243,6 +248,7 @@ handle_cast({prepared, TxId, PrepareTime},
                     clocksi_vnode:commit(RemoteUpdates, TxId, CommitTime),
                     repl_fsm:repl_commit(LocalParts, TxId, CommitTime, false, RepDict),
                     repl_fsm:repl_commit(RemoteUpdates, TxId, CommitTime, false, RepDict),
+                   %lager:warning("~w committed", [TxId]),
                     gen_server:reply(Sender, {ok, {committed, CommitTime, {[],[],[]}}}),
                     %ets:insert(Cdf, {TxId, get_time_diff(PendStart, os:timestamp())}),
                     %Cdf1 = case Cdf of false -> false;
@@ -266,6 +272,7 @@ handle_cast({prepared, TxId, PrepareTime},
 %    {noreply, SD0};
 
 handle_cast({aborted, TxId, FromNode}, SD0=#state{client_dict=ClientDict, rep_dict=RepDict}) ->
+   %lager:warning("Receive aborted for txn ~w", [TxId]),
     Client = TxId#tx_id.client_pid,
     ClientState = dict:fetch(Client, ClientDict),
     MyTxId = ClientState#client_state.tx_id,
