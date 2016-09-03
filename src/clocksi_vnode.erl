@@ -364,13 +364,13 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBlocked,
 handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
     %{NumRR, AccRR} = RelayRead,
-    %lager:warning("~w relay read ~p", [TxId, Key]),
+     %lager:warning("~w relay read ~p", [TxId, Key]),
     %T1 = os:timestamp(),
     case SpeculaRead of
         false ->
             case ready_or_block(TxId, Key, PreparedTxs, {relay, Reader}) of
                 not_ready->
-                    %lager:warning("Read blocked!"),
+                     %lager:warning("Read blocked!"),
                     {noreply, SD0};
                 ready ->
                     %lager:warning("Read finished!"),
@@ -380,7 +380,7 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
                     {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
-            %lager:warning("Specula read!!"),
+             %lager:warning("Specula read!!"),
             case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
                 not_ready->
                     %lager:warning("Read blocked!"),
