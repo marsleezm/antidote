@@ -124,10 +124,10 @@ handle_call({clean_data}, _Sender, SD0=#state{cache_log=OldCacheLog}) ->
     CacheLog = tx_utilities:open_private_table(cache_log),
     {reply, ok, SD0#state{cache_log = CacheLog}};
 
-handle_call({read, Key, TxId, {Part, _}=Node}, Sender, 
+handle_call({read, Key, TxId, Node}, Sender, 
 	    SD0=#state{cache_log=CacheLog, specula_read=true
             }) ->
-    PartKey = {Part, Key},
+    PartKey = Key,
     case ets:lookup(CacheLog, PartKey) of
         [] ->
             %lager:info("Relaying read to ~w", [Node]),
@@ -185,15 +185,15 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({prepare_specula, TxId, Part, WriteSet, TimeStamp}, 
 	    SD0=#state{cache_log=CacheLog}) ->
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
-                    case ets:lookup(CacheLog, {Part, Key}) of
+                    case ets:lookup(CacheLog, Key) of
                         [] ->
                             %% Putting TxId in the record to mark the transaction as speculative 
                             %% and for dependency tracking that will happen later
-                            true = ets:insert(CacheLog, {{Part, Key}, [{TimeStamp, Value, TxId}]}),
+                            true = ets:insert(CacheLog, {Key, [{TimeStamp, Value, TxId}]}),
                             [Key|KS];
-                        [{{Part, Key}, ValueList}] ->
+                        [{Key, ValueList}] ->
                             {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-                            true = ets:insert(CacheLog, {{Part, Key}, [{TimeStamp, Value, TxId}|RemainList]}),
+                            true = ets:insert(CacheLog, {Key, [{TimeStamp, Value, TxId}|RemainList]}),
                             [Key|KS]
                     end end, [], WriteSet),
     ets:insert(CacheLog, {{TxId, Part}, KeySet}),
@@ -206,7 +206,7 @@ handle_cast({abort_specula, TxId, Partitions},
     lists:foreach(fun(Partition) ->
             case ets:lookup(CacheLog, {TxId, Partition}) of 
                 [{{TxId, Partition}, KeySet}] -> 
-                    delete_keys(Partition, CacheLog, KeySet, TxId);
+                    delete_keys(CacheLog, KeySet, TxId);
                 _ -> ok
             end end, Partitions),
     specula_utilities:deal_abort_deps(TxId),
@@ -217,7 +217,7 @@ handle_cast({commit_specula, TxId, Partitions, CommitTime},
     lists:foreach(fun(Partition) ->
             case ets:lookup(CacheLog, {TxId, Partition}) of
                 [{{TxId, Partition}, KeySet}] ->
-                    delete_keys(Partition, CacheLog, KeySet, TxId);
+                    delete_keys(CacheLog, KeySet, TxId);
                 _ ->
                     ok
             end end, Partitions),
@@ -257,15 +257,15 @@ delete_version([{_, _, TxId}|Rest], TxId) ->
 delete_version([{TS, V, Tx}|Rest], TxId) -> 
     [{TS, V, Tx}|delete_version(Rest, TxId)].
 
-delete_keys(Part, Table, KeySet, TxId) ->
+delete_keys(Table, KeySet, TxId) ->
     lists:foreach(fun(Key) ->
-                    case ets:lookup(Table, {Part, Key}) of
+                    case ets:lookup(Table, Key) of
                         [] -> %% TODO: this can not happen 
                             ok;
-                        [{{Part, Key}, ValueList}] ->
+                        [{Key, ValueList}] ->
                             %lager:info("Delete version ~w, key is ~w, list is ~p", [TxId, Key, ValueList]),
                             NewValueList = delete_version(ValueList, TxId), 
                             %lager:info("after deletion list is ~p", [NewValueList]),
-                            ets:insert(Table, {{Part, Key}, NewValueList})
+                            ets:insert(Table, {Key, NewValueList})
                     end 
                   end, KeySet).
