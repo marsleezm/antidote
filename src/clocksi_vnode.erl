@@ -1151,7 +1151,7 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
     %lager:warning("Trying to unblocking transaction ~w", [TxId]),
     case dict:find(TxId, DepDict) of
         {ok, {1, PrepareTime, Sender, RepMode}} ->
-            gen_server:cast(Sender, {prepared, TxId, PrepareTime}), 
+            gen_server:cast(Sender, {solve_pending_prepared, TxId, PrepareTime}), 
             case Partition of
                 ignore ->
                     ok;

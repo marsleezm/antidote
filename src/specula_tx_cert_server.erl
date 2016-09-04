@@ -522,6 +522,34 @@ handle_cast({pending_prepared, TxId, PrepareTime},
             {noreply, SD0}
     end;
 
+handle_cast({solve_pending_prepared, TxId, PrepareTime}, 
+	    SD0=#state{dep_dict=DepDict, client_dict=ClientDict}) ->
+   %lager:warning("Got prepare for ~w", [TxId]),
+    Client = TxId#tx_id.client_pid,
+    ClientState = dict:fetch(Client, ClientDict),
+    Stage = ClientState#client_state.stage,
+    MyTxId = ClientState#client_state.tx_id, 
+
+    case (Stage == local_cert) and (MyTxId == TxId) of
+        true -> 
+            PendingPrepares = ClientState#client_state.pending_prepares, 
+            ClientDict1 = dict:store(Client, ClientState#client_state{pending_prepares=PendingPrepares-1}, ClientDict),
+            {noreply, SD0#state{client_dict=ClientDict1}};
+        false ->
+            case dict:find(TxId, DepDict) of
+                {ok, {1, [], OldPrepTime}} -> %% Maybe the transaction can commit 
+                    NowPrepTime =  max(OldPrepTime, PrepareTime),
+                    DepDict1 = dict:store(TxId, {0, [], NowPrepTime}, DepDict),
+                    {noreply, try_solve_pending([{NowPrepTime, TxId}], [], SD0#state{dep_dict=DepDict1}, [])};
+                {ok, {PrepDeps, ReadDeps, OldPrepTime}} -> %% Maybe the transaction can commit 
+                     %lager:warning("~w not enough.. Prep ~w, Read ~w", [TxId, PrepDeps, ReadDeps]),
+                    DepDict1=dict:store(TxId, {PrepDeps-1, ReadDeps, max(PrepareTime, OldPrepTime)}, DepDict),
+                    {noreply, SD0#state{dep_dict=DepDict1}};
+                error ->
+                    {noreply, SD0}
+            end
+    end;
+
 handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{total_repl_factor=TotalReplFactor, dep_dict=DepDict, specula_length=SpeculaLength, 
             client_dict=ClientDict, rep_dict=RepDict, pending_txs=PendingTxs}) ->
