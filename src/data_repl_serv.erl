@@ -224,27 +224,27 @@ handle_call({append_values, KeyValues, CommitTime}, _Sender, SD0=#state{replicat
                 end, KeyValues),
     {reply, ok, SD0};
 
-handle_call({read, Key, TxId, {Part, _}}, Sender, 
+handle_call({read, Key, TxId, _Node}, Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog,
                 specula_read=SpeculaRead}) ->
     case SpeculaRead of
         false ->
-            case ready_or_block(TxId, {Part,Key}, PendingLog, Sender) of
+            case ready_or_block(TxId, Key, PendingLog, Sender) of
                 not_ready->
                     {noreply, SD0};
                 ready ->
-                    Result = read_value({Part,Key}, TxId, ReplicatedLog),
+                    Result = read_value(Key, TxId, ReplicatedLog),
                     {reply, Result, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
              %lager:warning("Doing specula read!!!"),
-            case specula_read(TxId, {Part,Key}, PendingLog, Sender) of
+            case specula_read(TxId, Key, PendingLog, Sender) of
                 not_ready->
                     {noreply, SD0};
                 {specula, Value} ->
                     {reply, {ok, Value}, SD0};
                 ready ->
-                    Result = read_value({Part,Key}, TxId, ReplicatedLog),
+                    Result = read_value(Key, TxId, ReplicatedLog),
                     %MyClock = TxId#tx_id.snapshot_time,
                     %TsDict1 = dict:update(Part, fun(OldTs) -> max(MyClock, OldTs) end, TsDict),
                     {reply, Result, SD0}
@@ -338,15 +338,15 @@ handle_cast({relay_read, Key, TxId, Reader},
 handle_cast({prepare_specula, TxId, Part, WriteSet, ToPrepTS}, 
 	    SD0=#state{pending_log=PendingLog}) ->
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
-                      case ets:lookup(PendingLog, {Part, Key}) of
+                      case ets:lookup(PendingLog, Key) of
                           [] ->
-                              true = ets:insert(PendingLog, {{Part, Key}, [{TxId, ToPrepTS, ToPrepTS, Value, []}]}),
+                              true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]}),
                               [Key|KS];
-                          [{{Part,Key}, [{PrepTxId, PrepTS, _LastReaderTS, PrepValue, Reader}|RemainList]}] ->
-                              true = ets:insert(PendingLog, {{Part,Key}, [{TxId, ToPrepTS, ToPrepTS, Value, []}|[{PrepTxId, PrepTS, PrepValue, Reader}|RemainList]]}),
+                          [{Key, [{PrepTxId, PrepTS, _LastReaderTS, PrepValue, Reader}|RemainList]}] ->
+                              true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}|[{PrepTxId, PrepTS, PrepValue, Reader}|RemainList]]}),
                               [Key|KS];
-                          [{{Part,Key}, _}] ->
-                              true = ets:insert(PendingLog, {{Part,Key}, [{TxId, ToPrepTS, ToPrepTS, Value, []}]}),
+                          [{Key, _}] ->
+                              true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]}),
                               [Key|KS]
                       end end, [], WriteSet),
     ets:insert(PendingLog, {{TxId, Part}, KeySet}),
@@ -411,13 +411,13 @@ handle_cast({repl_prepare, Type, TxId, Part, WriteSet, TimeStamp, Sender},
             end;
         single_commit ->
             AppendFun = fun({Key, Value}) ->
-                case ets:lookup(ReplicatedLog, {Part,Key}) of
+                case ets:lookup(ReplicatedLog, Key) of
                     [] ->
                          %lager:warning("Data repl inserting ~p, ~p of ~w to table", [Key, Value, TimeStamp]),
-                        true = ets:insert(ReplicatedLog, {{Part,Key}, [{TimeStamp, Value}]});
-                    [{{Part,Key}, ValueList}] ->
+                        true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value}]});
+                    [{Key, ValueList}] ->
                         {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-                        true = ets:insert(ReplicatedLog, {{Part,Key}, [{TimeStamp, Value}|RemainList]})
+                        true = ets:insert(ReplicatedLog, {Key, [{TimeStamp, Value}|RemainList]})
                 end end,
             lists:foreach(AppendFun, WriteSet),
             gen_server:cast({global, Sender}, {ack, Part, TxId}), 
@@ -542,26 +542,26 @@ find_version([{TS, Value, TxId}|Rest], SnapshotTime) ->
 update_store(_Partition, [], _TxId, _TxCommitTime, _InMemoryStore, _PreparedTxs) ->
     ok;
 update_store(Part, [Key|Rest], TxId, TxCommitTime, InMemoryStore, PreparedTxs) ->
-    {PendingReaders, Value} = case ets:lookup(PreparedTxs, {Part, Key}) of
-        [{{Part,Key}, [{TxId, _PT, LastReaderTS, PrepValue, Readers}|PendingOthers]}] ->
+    {PendingReaders, Value} = case ets:lookup(PreparedTxs, Key) of
+        [{Key, [{TxId, _PT, LastReaderTS, PrepValue, Readers}|PendingOthers]}] ->
             case PendingOthers of
-                [] -> ets:insert(PreparedTxs, {{Part,Key}, max(TxCommitTime, LastReaderTS)});
-                [{NTxId, NPT, NV, NPendingReader}|Others] -> ets:insert(PreparedTxs, {{Part,Key}, [{NTxId, NPT, max(TxCommitTime, LastReaderTS), NV, NPendingReader}|Others]})
+                [] -> ets:insert(PreparedTxs, {Key, max(TxCommitTime, LastReaderTS)});
+                [{NTxId, NPT, NV, NPendingReader}|Others] -> ets:insert(PreparedTxs, {Key, [{NTxId, NPT, max(TxCommitTime, LastReaderTS), NV, NPendingReader}|Others]})
             end,
             {Readers, PrepValue};
-        [{{Part, Key}, [{OtherTxId, OtherPT, LastReaderTS, OtherValue, OtherPendingReaders}|PendingOthers]}] ->
+        [{Key, [{OtherTxId, OtherPT, LastReaderTS, OtherValue, OtherPendingReaders}|PendingOthers]}] ->
             {{TxId, _PrepTime, PrepValue, Readers}, RemainPending} = delete_item(PendingOthers, TxId, []),
-            ets:insert(PreparedTxs, {{Part, Key}, [{OtherTxId, OtherPT, max(LastReaderTS, TxCommitTime), OtherValue, OtherPendingReaders}|RemainPending]}),
+            ets:insert(PreparedTxs, {Key, [{OtherTxId, OtherPT, max(LastReaderTS, TxCommitTime), OtherValue, OtherPendingReaders}|RemainPending]}),
             {Readers, PrepValue} 
     end,
-    Values = case ets:lookup(InMemoryStore, {Part, Key}) of
+    Values = case ets:lookup(InMemoryStore, Key) of
                 [] ->
-                    true = ets:insert(InMemoryStore, {{Part,Key}, [{TxCommitTime, Value}]}),
+                    true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]}),
                     [[], Value];
-                [{{Part,Key}, ValueList}] ->
+                [{Key, ValueList}] ->
                     {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
                     [{_CommitTime, First}|_] = RemainList,
-                    true = ets:insert(InMemoryStore, {{Part,Key}, [{TxCommitTime, Value}|RemainList]}),
+                    true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}|RemainList]}),
                     [First, Value]
             end,
     lists:foreach(fun({SnapshotTime, Sender}) ->
@@ -577,24 +577,24 @@ clean_abort_prepared(_Part, _PreparedTxs, [], _TxId, _InMemoryStore, TS) ->
     TS;
 clean_abort_prepared(Part, PendingLog, [Key | Rest], TxId, ReplicatedLog, TS) ->
     %[{Key, List}] = ets:lookup(PendingLog, Key),
-    PendingReaders = case ets:lookup(PendingLog, {Part, Key}) of
-        [{{Part, Key}, [{TxId, _PT, LastReaderTS, _PrepValue, Readers}|PendingOthers]}] ->
+    PendingReaders = case ets:lookup(PendingLog, Key) of
+        [{Key, [{TxId, _PT, LastReaderTS, _PrepValue, Readers}|PendingOthers]}] ->
             case PendingOthers of
-                [] -> ets:delete(PendingLog, {Part, Key});
-                [{NTxId, NPT, NV, NPendingReader}|Others] -> ets:insert(PendingLog, {{Part,Key}, [{NTxId, NPT, LastReaderTS, NV, NPendingReader}|Others]})
+                [] -> ets:delete(PendingLog, Key);
+                [{NTxId, NPT, NV, NPendingReader}|Others] -> ets:insert(PendingLog, {Key, [{NTxId, NPT, LastReaderTS, NV, NPendingReader}|Others]})
             end,
             Readers;
-        [{{Part,Key}, [{OtherTxId, OtherPT, LastReaderTS, OtherValue, OtherPendingReaders}|PendingOthers]}] ->
+        [{Key, [{OtherTxId, OtherPT, LastReaderTS, OtherValue, OtherPendingReaders}|PendingOthers]}] ->
             {{TxId, _PrepTime, _PrepValue, Readers}, RemainPending} = delete_item(PendingOthers, TxId, []),
-            ets:insert(PendingLog, {{Part,Key}, [{OtherTxId, OtherPT, LastReaderTS, OtherValue, OtherPendingReaders}|RemainPending]}),
+            ets:insert(PendingLog, {Key, [{OtherTxId, OtherPT, LastReaderTS, OtherValue, OtherPendingReaders}|RemainPending]}),
             Readers
     end,
     case PendingReaders of
         [] ->
             clean_abort_prepared(Part, PendingLog, Rest, TxId, ReplicatedLog, TS);
         _ ->
-            Value = case ets:lookup(ReplicatedLog, {Part,Key}) of
-                        [{{Part,Key}, ValueList}] ->
+            Value = case ets:lookup(ReplicatedLog, Key) of
+                        [{Key, ValueList}] ->
                             {_, V} = hd(ValueList),
                             V;
                         [] ->
@@ -781,22 +781,22 @@ insert_prepare(PendingLog, TxId, Part, WriteSet, TimeStamp, Sender) ->
     case ets:lookup(PendingLog, {TxId, Part}) of
           [] ->
               {KeySet, ToPrepTS} =   lists:foldl(fun({Key, _Value}, {KS, Ts}) ->
-                                          case ets:lookup(PendingLog, {Part,Key}) of
+                                          case ets:lookup(PendingLog, Key) of
                                               [] -> {[Key|KS], Ts};
-                                              [{{Part,Key}, [{_PrepTxId, _, LastReaderTS, _, _}|_Rest]}] ->
+                                              [{Key, [{_PrepTxId, _, LastReaderTS, _, _}|_Rest]}] ->
                                                   {[Key|KS], max(Ts, LastReaderTS+1)};
-                                              [{{Part,Key}, LastReaderTS}] ->  %lager:warning("LastReaderTS is ~w, Ts is ~w", [  LastReaderTS, Ts]), 
+                                              [{Key, LastReaderTS}] ->  %lager:warning("LastReaderTS is ~w, Ts is ~w", [  LastReaderTS, Ts]), 
                                                     %lager:warning("For ~p, last reader ts is ~w", [Key, LastReaderTS]),
                                                   {[Key|KS], max(Ts, LastReaderTS+1)}
                                           end end, {[], TimeStamp}, WriteSet),
               lists:foreach(fun({Key, Value}) ->
-                          case ets:lookup(PendingLog, {Part,Key}) of
+                          case ets:lookup(PendingLog, Key) of
                               [] ->
-                                  true = ets:insert(PendingLog, {{Part,Key}, [{TxId, ToPrepTS, ToPrepTS, Value, []}]});
-                              [{{Part,Key}, [{PrepTxId, PrepTS, _LastReaderTS, PrepValue, Reader}|RemainList]}] ->
-                                  true = ets:insert(PendingLog, {{Part,Key}, [{TxId, ToPrepTS, ToPrepTS, Value, []}|[{PrepTxId  , PrepTS, PrepValue, Reader}|RemainList]]});
-                              [{{Part,Key}, _}] ->
-                                  true = ets:insert(PendingLog, {{Part,Key}, [{TxId, ToPrepTS, ToPrepTS, Value, []}]})
+                                  true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]});
+                              [{Key, [{PrepTxId, PrepTS, _LastReaderTS, PrepValue, Reader}|RemainList]}] ->
+                                  true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}|[{PrepTxId  , PrepTS, PrepValue, Reader}|RemainList]]});
+                              [{Key, _}] ->
+                                  true = ets:insert(PendingLog, {Key, [{TxId, ToPrepTS, ToPrepTS, Value, []}]})
               end end,  WriteSet),
 
                %lager:warning("Got repl prepare for ~w, propose ~p and replied", [TxId, ToPrepTS]),

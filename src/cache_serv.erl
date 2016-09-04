@@ -125,19 +125,18 @@ handle_call({clean_data}, _Sender, SD0=#state{cache_log=OldCacheLog}) ->
     CacheLog = tx_utilities:open_private_table(cache_log),
     {reply, ok, SD0#state{cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}};
 
-handle_call({read, Key, TxId, {Part, _}=Node}, Sender, 
+handle_call({read, Key, TxId, Node}, Sender, 
 	    SD0=#state{cache_log=CacheLog, specula_read=true
             }) ->
-    PartKey = {Part, Key},
     %lager:warning("Cache specula read ~w of ~w", [Key, TxId]), 
-    case ets:lookup(CacheLog, PartKey) of
+    case ets:lookup(CacheLog, Key) of
         [] ->
             %lager:info("Relaying read to ~w", [Node]),
             ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
             %lager:info("Well, from clocksi_vnode"),
             %lager:info("Nothing!"),
             {noreply, SD0};
-        [{PartKey, ValueList}] ->
+        [{Key, ValueList}] ->
             %lager:info("Value list is ~w", [ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
             case find_version(ValueList, MyClock) of
@@ -187,15 +186,15 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, 
 	    SD0=#state{cache_log=CacheLog}) ->
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
-                    case ets:lookup(CacheLog, {Partition,Key}) of
+                    case ets:lookup(CacheLog, Key) of
                         [] ->
                             %% Putting TxId in the record to mark the transaction as speculative 
                             %% and for dependency tracking that will happen later
                             true = ets:insert(CacheLog, {Key, [{TimeStamp, Value, TxId}]}),
                             [Key|KS];
-                        [{{Partition,Key}, ValueList}] ->
+                        [{Key, ValueList}] ->
                             {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-                            true = ets:insert(CacheLog, {{Partition,Key}, [{TimeStamp, Value, TxId}|RemainList]}),
+                            true = ets:insert(CacheLog, {Key, [{TimeStamp, Value, TxId}|RemainList]}),
                             [Key|KS]
                     end end, [], WriteSet),
     ets:insert(CacheLog, {{TxId, Partition}, KeySet}),
@@ -208,7 +207,7 @@ handle_cast({abort_specula, TxId, Partitions},
     lists:foreach(fun(Partition) ->
             case ets:lookup(CacheLog, {TxId, Partition}) of 
                 [{{TxId, Partition}, KeySet}] -> 
-                    delete_keys(Partition, CacheLog, KeySet, TxId);
+                    delete_keys(CacheLog, KeySet, TxId);
                 _ -> ok
             end end, Partitions),
     specula_utilities:deal_abort_deps(TxId),
@@ -219,7 +218,7 @@ handle_cast({commit_specula, TxId, Partitions, CommitTime},
     lists:foreach(fun(Partition) ->
             case ets:lookup(CacheLog, {TxId, Partition}) of
                 [{{TxId, Partition}, KeySet}] ->
-                    delete_keys(Partition, CacheLog, KeySet, TxId);
+                    delete_keys(CacheLog, KeySet, TxId);
                 _ ->
                     ok
             end end, Partitions),
@@ -259,15 +258,15 @@ delete_version([{_, _, TxId}|Rest], TxId) ->
 delete_version([{TS, V, Tx}|Rest], TxId) -> 
     [{TS, V, Tx}|delete_version(Rest, TxId)].
 
-delete_keys(Partition, Table, KeySet, TxId) ->
+delete_keys(Table, KeySet, TxId) ->
     lists:foreach(fun(Key) ->
-                    case ets:lookup(Table, {Partition,Key}) of
+                    case ets:lookup(Table, Key) of
                         [] -> %% TODO: this can not happen 
                             ok;
-                        [{{Partition,Key}, ValueList}] ->
+                        [{Key, ValueList}] ->
                             %lager:info("Delete version ~w, key is ~w, list is ~p", [TxId, Key, ValueList]),
                             NewValueList = delete_version(ValueList, TxId), 
                             %lager:info("after deletion list is ~p", [NewValueList]),
-                            ets:insert(Table, {{Partition,Key}, NewValueList})
+                            ets:insert(Table, {Key, NewValueList})
                     end 
                   end, KeySet).
