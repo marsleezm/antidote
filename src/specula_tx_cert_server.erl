@@ -705,56 +705,36 @@ try_solve_pending([], [], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, d
                                     LocalParts = CState#client_state.local_updates, 
                                     RemoteUpdates = CState#client_state.remote_updates,
                                     TxState = dict:fetch(TxId, DepDict),
-                                    case PendingList of
-                                        [] ->
-                                            case TxState of 
-                                                {0, [], 0} -> {CD, DD, PD, MayCommit, ToAbort, PCommitTime};
-                                                {0, [], PrepTime} ->
-                                                  %lager:warning("Commit local txn"),
-                                                    CommitTime = max(PCommitTime+1, PrepTime),
-                                                    RemoteParts = [P||{P, _} <- RemoteUpdates],
-                                                    {DD1, MayCommit1, ToAbort1, CD1} = commit_tx(TxId, CommitTime, LocalParts, 
-                                                        RemoteParts, dict:erase(TxId, DD), RepDict, CD),
-                                                    gen_server:reply(Sender, {ok, {committed, CommitTime, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}}),
-                                                    CD2 = dict:store(Client, CState#client_state{tx_id=?NO_TXN, aborted_reads=[], committed_updates=[], committed_reads=[],
-                                                            pending_list=[]}, CD1),
-                                                    {CD2, DD1, PD, MayCommit++MayCommit1, ToAbort++ToAbort1, CommitTime};
+                                    case TxState of {0, [], 0} -> {CD, DD, PD, MayCommit, ToAbort, PCommitTime}; %%Still reading 
+                                        {Prep, Read, OldCurPrepTime} -> %% Can not commit, but can specualte (due to the number of specula txns decreased)
+                                        case CState#client_state.stage of remote_cert ->
+                                            SpeculaPrepTime = max(PCommitTime+1, OldCurPrepTime),
+                                           %lager:warning("Add to table: ~p, remote updates are ~p", [TxId, RemoteUpdates]),
+                                            {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, TxId, SpeculaPrepTime, RepDict),
+                                            case (AvoidNum == Prep) and (Read == []) and (PendingList == []) of
+                                                true ->   
+                                                  %lager:warning("Can already commit ~w!!", [TxId]),
+                                                    CurCommitTime = max(SpeculaPrepTime, ProposeTS), 
+                                                    RemoteParts = [P||{P, _} <-RemoteUpdates],
+                                                    {DD1, NewMayCommit, NewToAbort, CD1} = commit_tx(TxId, CurCommitTime, 
+                                                        LocalParts, RemoteParts, dict:erase(TxId, DD), RepDict, CD, waited),
+                                                    gen_server:reply(Sender, {ok, {committed, CurCommitTime, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}}),
+                                                    CD2 = dict:store(Client, CState#client_state{committed_updates=[], committed_reads=[], aborted_reads=[],
+                                                        pending_list=[], tx_id=?NO_TXN}, CD1),
+                                                    {CD2, DD1, PD, MayCommit++NewMayCommit, ToAbort++NewToAbort, CurCommitTime};
                                                     %SD0#state{min_commit_ts=CurCommitTime, cdf=NewCdf2, 
                                                     %      committed=NewCommitted+1, dep_dict=DepDict3, client_dict=NewClientDict1};
-                                                _ -> {CD, DD, PD, MayCommit, ToAbort, PCommitTime}
+                                                _ ->
+                                                    DD1 = dict:store(TxId, {Prep-AvoidNum, Read, max(SpeculaPrepTime, ProposeTS)}, DD),
+                                                   %lager:warning("Specula current txn ~w, got propose time ~w, avoided ~w, still need ~w, replying specula commit", [TxId, ProposeTS, AvoidNum, Prep-AvoidNum]),
+                                                    gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}}),
+                                                    RemoteParts = [P||{P, _} <-RemoteUpdates],
+                                                    PD1 = dict:store(TxId, {LocalParts, RemoteParts, waited}, PD),
+                                                    CD1 = dict:store(Client, CState#client_state{committed_updates=[], committed_reads=[], aborted_reads=[], pending_list=PendingList ++ [TxId], tx_id=?NO_TXN}, CD),
+                                                    {CD1, DD1, PD1, MayCommit, ToAbort, PCommitTime}
                                             end;
-                                        _ ->
-                                            case TxState of {0, [], 0} -> {CD, DD, PD, MayCommit, ToAbort, PCommitTime}; %%Still reading 
-                                                {Prep, Read, OldCurPrepTime} -> %% Can not commit, but can specualte (due to the number of specula txns decreased)
-                                                case CState#client_state.stage of remote_cert ->
-                                                    SpeculaPrepTime = max(PCommitTime+1, OldCurPrepTime),
-                                                   %lager:warning("Add to table: ~p, remote updates are ~p", [TxId, RemoteUpdates]),
-                                                    {ProposeTS, AvoidNum} = add_to_table(RemoteUpdates, TxId, SpeculaPrepTime, RepDict),
-                                                    case (AvoidNum == Prep) and (Read == []) and (PendingList == []) of
-                                                        true ->   
-                                                          %lager:warning("Can already commit ~w!!", [TxId]),
-                                                            CurCommitTime = max(SpeculaPrepTime, ProposeTS), 
-                                                            RemoteParts = [P||{P, _} <-RemoteUpdates],
-                                                            {DD1, NewMayCommit, NewToAbort, CD1} = commit_tx(TxId, CurCommitTime, 
-                                                                LocalParts, RemoteParts, dict:erase(TxId, DD), RepDict, CD, waited),
-                                                            gen_server:reply(Sender, {ok, {committed, CurCommitTime, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}}),
-                                                            CD2 = dict:store(Client, CState#client_state{committed_updates=[], committed_reads=[], aborted_reads=[],
-                                                                pending_list=[], tx_id=?NO_TXN}, CD1),
-                                                            {CD2, DD1, PD, MayCommit++NewMayCommit, ToAbort++NewToAbort, CurCommitTime};
-                                                            %SD0#state{min_commit_ts=CurCommitTime, cdf=NewCdf2, 
-                                                            %      committed=NewCommitted+1, dep_dict=DepDict3, client_dict=NewClientDict1};
-                                                        _ ->
-                                                            DD1 = dict:store(TxId, {Prep-AvoidNum, Read, max(SpeculaPrepTime, ProposeTS)}, DD),
-                                                           %lager:warning("Specula current txn ~w, got propose time ~w, avoided ~w, still need ~w, replying specula commit", [TxId, ProposeTS, AvoidNum, Prep-AvoidNum]),
-                                                            gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}}),
-                                                            RemoteParts = [P||{P, _} <-RemoteUpdates],
-                                                            PD1 = dict:store(TxId, {LocalParts, RemoteParts, waited}, PD),
-                                                            CD1 = dict:store(Client, CState#client_state{committed_updates=[], committed_reads=[], aborted_reads=[], pending_list=PendingList ++ [TxId], tx_id=?NO_TXN}, CD),
-                                                            {CD1, DD1, PD1, MayCommit, ToAbort, PCommitTime}
-                                                    end;
-                                                _ -> {CD, DD, PD, MayCommit, ToAbort, PCommitTime}
-                                            end
-                                            end
+                                        _ -> {CD, DD, PD, MayCommit, ToAbort, PCommitTime}
+                                    end
                                     end
                             end
                     end end, {ClientDict, DepDict, PendingTxs, [], [], MinCommitTs}, ClientsOfCommTxns),
