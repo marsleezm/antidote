@@ -646,7 +646,8 @@ handle_cast({read_valid, PendingTxId, PendedTxId}, SD0=#state{dep_dict=DepDict, 
               %lager:warning("Inserting read valid for ~w, old deps are ~w",[PendingTxId, SolvedReadDeps]),
             {noreply, SD0#state{dep_dict=dict:store(PendingTxId, {0, [PendedTxId|SolvedReadDeps], 0}, DepDict)}};
         {ok, {0, [PendedTxId], OldPrepTime}} -> %% Maybe the transaction can commit 
-            {noreply, try_solve_pending([{OldPrepTime, PendingTxId}], [], SD0, [])};
+            SD1 = SD0#state{dep_dict=dict:store(PendingTxId, {0, [],OldPrepTime}, DepDict)},
+            {noreply, try_solve_pending([{OldPrepTime, PendingTxId}], [], SD1, [])};
         {ok, {PrepDeps, ReadDepTxs, OldPrepTime}} -> 
              %lager:warning("Can not commit... Remaining prepdep is ~w, read dep is ~w", [PrepDeps, lists:delete(PendedTxId, ReadDepTxs)]),
             {noreply, SD0#state{dep_dict=dict:store(PendingTxId, {PrepDeps, lists:delete(PendedTxId, ReadDepTxs), 
