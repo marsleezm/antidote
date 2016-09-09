@@ -394,11 +394,22 @@ handle_call({get_oldest}, _Sender, SD0=#state{client_dict=ClientDict}) ->
     PendList = dict:to_list(ClientDict),
     Result = lists:foldl(fun({Key, Value}, Oldest) ->
                 case is_pid(Key) of
-                    true -> case Value#client_state.pending_list of [] -> Oldest;
-                            [H|_T] -> case Oldest of nil -> H;
+                    true ->
+                            case Value#client_state.pending_list of [] ->
+                                case Value#client_state.tx_id of
+                                    ?NO_TXN -> Oldest;
+                                    TId ->
+                                        case (Oldest == ?NO_TXN) of
+                                            true -> TId;
+                                            false -> case TId#tx_id.snapshot_time < Oldest#tx_id.snapshot_time of
+                                                            true -> TId;  false -> Oldest
+                                                     end
+                                        end
+                                end;
+                            [H|_T] -> case Oldest of ?NO_TXN -> H;
                                     _ -> case H#tx_id.snapshot_time < Oldest#tx_id.snapshot_time of
                                               true -> H;  false -> Oldest
-                                         end 
+                                         end
                                      end
                             end;
                     false -> Oldest
