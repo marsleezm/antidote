@@ -754,8 +754,6 @@ try_solve_pending([], [], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, d
                                                             CD2 = dict:store(Client, CState#client_state{committed_updates=[], committed_reads=[], aborted_reads=[],
                                                                 pending_list=[], tx_id=?NO_TXN}, CD1),
                                                             {CD2, DD1, PD, MayCommit++NewMayCommit, ToAbort++NewToAbort, SpeculaPrepTime};
-                                                            %SD0#state{min_commit_ts=CurCommitTime, cdf=NewCdf2, 
-                                                            %      committed=NewCommitted+1, dep_dict=DepDict3, client_dict=NewClientDict1};
                                                         false ->
                                                             %lager:warning("Returning specula_commit for ~w", [TxId]),
                                                             gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}}),
@@ -913,8 +911,6 @@ try_solve_pending([{NowPrepTime, PendingTxId}|Rest], [], SD0=#state{client_dict=
                     committed_updates=[], committed_reads=[], aborted_update=?NO_TXN}, ClientDict1),
             try_solve_pending(Rest++MayCommTxs, ToAbortTxs, SD0#state{min_commit_ts=CurCommitTime, dep_dict=DepDict3, 
                           client_dict=ClientDict2}, ClientsOfCommTxns);
-            %SD0#state{min_commit_ts=CurCommitTime, dep_dict=DepDict3, 
-            %            client_dict=ClientDict1, committed=Committed+1+JustComm, cdf=NewCdf};
         [PendingTxId|ListRest] ->
            %lager:warning("Pending list contain me ~p!",[PendingTxId]),
             CommitTime = max(NowPrepTime, MinCommitTS+1),

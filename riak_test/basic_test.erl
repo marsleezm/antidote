@@ -38,24 +38,24 @@ basic_test1(Nodes) ->
     lager:info("Test1 started"),
     Node1 = hd(Nodes),
     %% Update only local partition
-    TxId1 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
+    TxId1 = rpc:call(Node1, tx_cert_sup, start_tx, [1, 0, self()]),
     [Part1] = rpc:call(Node1, hash_fun, get_preflist_from_key, [1]), 
     LUps = [{Part1, [{t1_k1, 1}, {t1_k2, 2}, {t1_k3, 3}]}],
-    {ok, Result1} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId1, LUps, []]),
+    {ok, Result1} = rpc:call(Node1, tx_cert_sup, certify_update, [1, TxId1, LUps, [], 0, self()]),
     ?assertMatch({committed, _}, Result1),
     timer:sleep(500),
-    TxId2 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
+    TxId2 = rpc:call(Node1, tx_cert_sup, start_tx, [1, 0, self()]),
     ReadResult1 = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, t1_k1, TxId2]), 
     ?assertEqual({ok, 1}, ReadResult1),
     
     %% Update only remote partition.
-    TxId3 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
+    TxId3 = rpc:call(Node1, tx_cert_sup, start_tx, [1, 0, self()]),
     RUps = [{Part1, [{t1_k1, 2}, {t1_k2, 4}, {t1_k3, 6}]}],
-    {ok, Result2} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId3, [], RUps]),
+    {ok, Result2} = rpc:call(Node1, tx_cert_sup, certify_update, [1, TxId3, [], RUps, 0, self()]),
     ?assertMatch({_, _}, Result2),
     timer:sleep(100),
 
-    TxId4 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
+    TxId4 = rpc:call(Node1, tx_cert_sup, start_tx, [1, 0, self()]),
     ReadResult2 = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, t1_k1, TxId4]), 
     ?assertEqual({ok, 2}, ReadResult2).
 
@@ -66,7 +66,7 @@ basic_test2(Nodes) ->
     TxId1 = rpc:call(Node1, tx_cert_sup, start_tx, [1]),
     [Part1] = rpc:call(Node1, hash_fun, get_preflist_from_key, [1]),
     LUps = [{Part1, [{t2_k1, 1}, {t2_k2, 2}, {t2_k3, 3}]}],
-    {ok, Result1} = rpc:call(Node1, tx_cert_sup, certify, [1, TxId1, LUps, []]),
+    {ok, Result1} = rpc:call(Node1, tx_cert_sup, certify_update, [1, TxId1, LUps, []]),
     ?assertMatch({committed, _}, Result1),
 
     ReadResult1 = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, t2_k1, TxId1]),

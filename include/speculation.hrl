@@ -10,3 +10,4 @@
         }).
 
 -type txn_metadata() :: #txn_metadata{}.
+-define(NUM_VERSION, 10).

@@ -26,7 +26,7 @@
 
 -export([start_link/0]).
 
--export([init/1, certify/4, certify_update/6, get_stat/0, get_cdf/0, get_int_data/3, start_tx/3, single_read/3, clean_all_data/0, clean_data/1, 
+-export([init/1, certify/4, certify_update/6, get_stat/0, get_int_data/3, start_tx/3, single_read/3, clean_all_data/0, clean_data/1, 
             load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, trace/1, get_oldest/0,
             get_oldest/1, 
             get_all_oldest/0,  get_pid/1, get_pids/1, get_global_pid/1]).
@@ -161,8 +161,6 @@ clean_data(Sender) ->
     SPL = lists:seq(1, ?NUM_SUP),
     MySelf = self(),
 
-    true = ets:delete_all_objects(cdf),
-
     lager:info("~w created", [node()]),
     lists:foreach(fun(N) -> gen_server:cast(generate_module_name(N), {clean_data, MySelf}) end, SPL),
     lists:foreach(fun(_) -> receive cleaned -> ok end  end, SPL),
@@ -253,29 +251,6 @@ get_stat() ->
     %L1 = ListA ++ [PRead, DSpeculaRead, DTotalRead, CacheSpeculaRead, CacheAttemptRead],
     %Avg = lists:map(fun(E) -> E div RealCnt end, ListB),
     %ListA ++ Avg.    
-
-get_cdf() ->
-    SPL = lists:seq(1, ?NUM_SUP),
-    lists:foreach(fun(N) ->
-                    gen_server:call(generate_module_name(N), {get_cdf})
-                    end, SPL),
-    PercvFileName = "total-percv-latency",
-    FinalFileName = "total-final-latency",
-    {ok, PercvFile} = file:open(PercvFileName, [raw, binary, write]),
-    {ok, FinalFile} = file:open(FinalFileName, [raw, binary, write]),
-    Cdf = ets:tab2list(cdf),
-    lists:foreach(fun({_Key, LatencyList}) ->
-                %lager:info("Key is ~p, latency is ~p", [Key, LatencyList]),
-                lists:foreach(fun(Latency) ->
-                                case Latency of {percv, Lat} -> file:write(PercvFile,  io_lib:format("~w\n", [Lat]));
-                                                {final, Lat} -> file:write(FinalFile,  io_lib:format("~w\n", [Lat]));
-                                              _ ->
-                                                  file:write(PercvFile,  io_lib:format("~w\n", [Latency])),
-                                                  file:write(FinalFile,  io_lib:format("~w\n", [Latency]))
-                            end end, LatencyList)
-                end, Cdf),
-    file:close(PercvFile),
-    file:close(FinalFile).
 
 generate_module_name(N) ->
     list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list((N-1) rem ?NUM_SUP + 1)).
