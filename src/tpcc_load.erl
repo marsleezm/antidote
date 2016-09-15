@@ -62,7 +62,8 @@ load(WPerDc) ->
     end,
     ets:new(tpcc_load, [named_table, public, set]),
     Part1 = get_partition("COMMIT_TIME", FullPartList, HashLength),
-    {ok, COMMIT_TIME} = clocksi_vnode:read_data_item(Part1, "COMMIT_TIME", tx_utilities:create_tx_id(0)),
+    lager:warning("Part1 is ~w!!!", [Part1]),
+    {ok, COMMIT_TIME} = clocksi_vnode:internal_read(Part1, "COMMIT_TIME", tx_utilities:create_tx_id(0)),
     %lager:info("Got commit, is ~w", [COMMIT_TIME]),
     ets:insert(tpcc_load, {"COMMIT_TIME", COMMIT_TIME}),
     

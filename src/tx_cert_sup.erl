@@ -26,7 +26,7 @@
 
 -export([start_link/0]).
 
--export([init/1, certify/4, get_stat/0, get_cdf/0, get_int_data/3, start_tx/1, single_read/3, clean_all_data/0, clean_data/1, 
+-export([init/1, certify/4, certify_update/6, get_stat/0, get_cdf/0, get_int_data/3, start_tx/3, single_read/3, clean_all_data/0, clean_data/1, 
             load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, trace/1, get_oldest/0,
             get_oldest/1, 
             get_all_oldest/0,  get_pid/1, get_pids/1, get_global_pid/1]).
@@ -76,12 +76,12 @@ trace(Num) ->
     CertServer = list_to_atom(atom_to_list(node()) ++ "-cert-" ++ integer_to_list(Num)),
     gen_server:cast(CertServer, {trace_pending}).
 
-start_tx(Name) ->
+start_tx(Name, Seq, Client) ->
     case is_integer(Name) of
         true ->
-            gen_server:call(generate_module_name((Name-1) rem ?NUM_SUP +1), {start_tx});
+            gen_server:call(generate_module_name((Name-1) rem ?NUM_SUP +1), {start_tx, Seq, Client});
         false ->
-            gen_server:call(Name, {start_tx})
+            gen_server:call(Name, {start_tx, Seq, Client})
     end.
 
 start_read_tx(Name) ->
@@ -100,6 +100,16 @@ certify(Name, TxId, LocalUpdates, RemoteUpdates) ->
         false ->
             gen_server:call(Name, 
                     {certify, TxId, LocalUpdates, RemoteUpdates})
+    end.
+
+certify_update(Name, TxId, LocalUpdates, RemoteUpdates, MsgId, Client) ->
+    case is_integer(Name) of
+        true ->
+            gen_server:call(generate_module_name((Name-1) rem ?NUM_SUP +1), 
+                    {certify_update, TxId, LocalUpdates, RemoteUpdates, MsgId, Client});
+        false ->
+            gen_server:call(Name, 
+                    {certify_update, TxId, LocalUpdates, RemoteUpdates, MsgId, Client})
     end.
 
 get_int_data(Name, Type, Param) ->

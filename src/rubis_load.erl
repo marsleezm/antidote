@@ -71,7 +71,7 @@ load(_) ->
 
     %% Add commit time 
     Part1 = get_partition("COMMIT_TIME", FullPartList, HashLength),
-    {ok, COMMIT_TIME} = clocksi_vnode:read_data_item(Part1, "COMMIT_TIME", tx_utilities:create_tx_id(0)),
+    {ok, COMMIT_TIME} = clocksi_vnode:internal_read(Part1, "COMMIT_TIME", tx_utilities:create_tx_id(0)),
     %lager:info("Got commit, is ~w", [COMMIT_TIME]),
     ets:insert(rubis_load, {"COMMIT_TIME", COMMIT_TIME}),
 
