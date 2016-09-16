@@ -908,7 +908,8 @@ find(ReaderTxId, SnapshotTime, [{Type, TxId, Time, Value, PendingReaders}|Rest]=
     end.
 
 sc_by_local(TxId) ->
-    node(TxId#tx_id.server_pid) == node().
+    [{dc_id, DcId}] = ets:lookup(meta_info, dc_id),
+    TxId#tx_id.dc_id == DcId.
 
 insert_prepare(PreparedTxs, TxId, Partition, WriteSet, TimeStamp, Sender) ->
     case ets:lookup(PreparedTxs, {TxId, Partition}) of

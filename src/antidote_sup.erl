@@ -57,26 +57,25 @@ stop_rep() ->
 
 init(_Args) ->
     antidote_config:load("antidote.config"),
+    DcId =  antidote_config:get(dc_id),
+    
     ets:new(meta_info,
         [set,public,named_table,{read_concurrency,true},{write_concurrency,false}]),
+    ets:insert(meta_info, {dc_id, DcId}),
     lager:info("Cdf started!"),
-    ets:new(dependency,
-        [bag,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
-    ets:new(anti_dep,
-        [bag,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
 
-         case antidote_config:get(do_specula) of
-            true -> 
-                ets:insert(meta_info, {do_specula, true});
-                   % { specula_general_tx_coord_sup,
-                   %         {specula_general_tx_coord_sup, start_link, []},
-                   %         permanent, 5000, supervisor, [specula_general_tx_coord_sup]}
-            false ->
-                ets:insert(meta_info, {do_specula, false})
-                  %{ clocksi_general_tx_coord_sup,
-                  %          {clocksi_general_tx_coord_sup, start_link, []},
-                  %          permanent, 5000, supervisor, [clockSI_general_tx_coord_sup]}
-          end,
+    case antidote_config:get(do_specula) of
+        true -> 
+            ets:insert(meta_info, {do_specula, true});
+           % { specula_general_tx_coord_sup,
+           %         {specula_general_tx_coord_sup, start_link, []},
+           %         permanent, 5000, supervisor, [specula_general_tx_coord_sup]}
+        false ->
+            ets:insert(meta_info, {do_specula, false})
+          %{ clocksi_general_tx_coord_sup,
+          %          {clocksi_general_tx_coord_sup, start_link, []},
+          %          permanent, 5000, supervisor, [clockSI_general_tx_coord_sup]}
+    end,
 
     VnodeMaster = { clocksi_vnode_master,
                         {riak_core_vnode_master, start_link, [clocksi_vnode]},
