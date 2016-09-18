@@ -262,7 +262,7 @@ handle_call({certify_read, TxId, ClientMsgId, Client}, Sender, SD0=#state{min_co
                 {1, _} ->
                     %% Some read is invalid even before the txn starts.. If invalid_aborted is larger than 0, it can possibly be saved.
                     %lager:warning("~w aborted!", [TxId]),
-                    ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, committed_updates=[], committed_reads=[], aborted_reads=[]}, ClientDict), 
+                    ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, committed_updates=[], committed_reads=[], aborted_reads=[], invalid_aborted=0}, ClientDict), 
                     %lager:warning("Returning specula_commit for ~w", [TxId]),
                     {reply, {ok, {specula_commit, LastCommitTs, {rev([TxId|AbortedReads]), rev(CommittedUpdates), rev(CommittedReads)}}}, SD0#state{dep_dict=dict:erase(TxId, DepDict), client_dict=ClientDict1}};
                 {0, {ok, {_, B, _}}} ->
@@ -286,12 +286,12 @@ handle_call({certify_read, TxId, ClientMsgId, Client}, Sender, SD0=#state{min_co
             case ClientState#client_state.aborted_update of
                 ?NO_TXN -> 
                     ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
-                            committed_updates=[], committed_reads=[]}, ClientDict),
+                            committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                     DepDict1 = dict:erase(TxId, DepDict),
                     {reply, {aborted, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                 AbortedTxId ->
                     ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
-                                    committed_updates=[], committed_reads=[]}, ClientDict),
+                                    committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                     DepDict1 = dict:erase(TxId, DepDict),
                     {reply, {cascade_abort, {AbortedTxId, rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
             end
@@ -320,12 +320,12 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, Cli
                     case ClientState#client_state.aborted_update of
                         ?NO_TXN -> 
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
-                                    committed_updates=[], committed_reads=[]}, ClientDict),
+                                    committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                             DepDict1 = dict:erase(TxId, DepDict),
                             {reply, {aborted, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                         AbortedTxId ->
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
-                                            committed_updates=[], committed_reads=[]}, ClientDict),
+                                            committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                             DepDict1 = dict:erase(TxId, DepDict),
                             {reply, {cascade_abort, {AbortedTxId, rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
                     end;
@@ -391,12 +391,12 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, Cli
             case ClientState#client_state.aborted_update of
                 ?NO_TXN -> 
                     ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
-                            committed_updates=[], committed_reads=[]}, ClientDict),
+                            committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                     DepDict1 = dict:erase(TxId, DepDict),
                     {reply, {aborted, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                 AbortedTxId ->
                     ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
-                                    committed_updates=[], committed_reads=[]}, ClientDict),
+                                    committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                     DepDict1 = dict:erase(TxId, DepDict),
                     {reply, {cascade_abort, {AbortedTxId, rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
             end
