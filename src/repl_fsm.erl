@@ -126,7 +126,7 @@ check_table() ->
 %    gen_server:cast({global, get_repl_name()}, {repl_commit, TxId, UpdatedParts, CommitTime}).
 
 quorum_replicate(Replicas, Type, TxId, Partition, WriteSet, TimeStamp, Sender) ->
-    %lager:warning("~w of part ~w send to ~w", [TxId, Partition, Replicas]),
+    lager:warning("~w of part ~w send repl_update to ~w", [TxId, Partition, Replicas]),
     lists:foreach(fun(Replica) ->
             gen_server:cast({global, Replica}, {repl_prepare, 
                 Type, TxId, Partition, WriteSet, TimeStamp, Sender})
@@ -173,33 +173,23 @@ handle_cast({repl_prepare, Partition, prepared, TxId, LogContent},
                         %% This is for non-specula version
                         {remote, ignore} ->
                            %lager:warning("Ignor Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
-                            %ets:insert(PendingLog, {{TxId, Partition}, Sender, 
-                            %        PrepareTime, remote, ReplFactor}),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, Sender);
                         %% This is for specula.. So no need to replicate the msg to the partition that sent the prepare(because due to specula,
                         %% the msg is replicated already).
-                        {remote, SenderName} ->
-                            case dict:find(SenderName, ExceptReplicas) of
+                        {remote, _SenderName} ->
+                            SenderDcId = TxId#tx_id.dc_id,
+                            case dict:find(SenderDcId, ExceptReplicas) of
                                 {ok, []} ->
                                     ok;
                                 {ok, R} -> 
                                    %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, R]),
-                                    %ets:insert(PendingLog, {{TxId, Partition}, Sender, 
-                                    %        PrepareTime, remote, ReplFactor-1}),
                                     quorum_replicate(R, prepared, TxId, Partition, WriteSet, PrepareTime, Sender);
                                 error ->
                                    %lager:warning("Remote prepared request for {~w, ~w}, Sending to ~w", [TxId, Partition, Replicas]),
-                                    %ets:insert(PendingLog, {{TxId, Partition}, Sender, 
-                                    %        PrepareTime, remote, ReplFactor}),
                                     quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, Sender)
                             end;
                         _ ->
                             %lager:warning("Local prepared request for {~w, ~w}, Sending to ~w, ReplFactor is ~w", [TxId, Partition, Replicas, ReplFactor]),
-                            %case RepMode of
-                            %    local_fast ->%lager:warning("Replicating local_fast txn! ~w", [TxId]);
-                            %    _ -> ok
-                            %end,
-                            %lager:warning("Repl request for ~w ~w", [TxId, Partition]),
                             quorum_replicate(Replicas, prepared, TxId, Partition, WriteSet, PrepareTime, Sender)
                     end;
                 chain ->
@@ -280,7 +270,8 @@ generate_except_replicas(Replicas) ->
     lists:foldl(fun(Rep, D) ->
             Except = lists:delete(Rep, Replicas),
             NodeName = get_name(atom_to_list(Rep), 1),
-            dict:store(list_to_atom(NodeName), Except, D)
+            NodeDcId = get_dc_id(list_to_atom(NodeName)),
+            dict:store(NodeDcId, Except, D)
         end, dict:new(), Replicas).
 
 get_name(ReplName, N) ->
@@ -288,6 +279,22 @@ get_name(ReplName, N) ->
         "repl" ->  lists:sublist(ReplName, 1, N-1);
          _ -> get_name(ReplName, N+1)
     end.
+
+get_dc_id(Node) ->
+    NumDcs = antidote_config:get(num_dcs),
+    ReplList = antidote_config:get(to_repl),
+    NumNodes = length(ReplList),  
+    NumNodesPerDc = NumNodes div NumDcs,
+    NodeIndex = index([N||{N, _} <- ReplList], Node),
+    (NodeIndex-1) div NumNodesPerDc + 1.
+    
+index([], _N) ->
+    -100;
+index([N|_], N) ->
+    1;
+index([_M|R], N) ->
+    1+index(R, N).    
+
     
 %% No replication
 repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict) ->
@@ -307,7 +314,7 @@ repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, IfWaited) ->
                     case ToCache of false -> ok;
                                       true -> ?CACHE_SERV:commit(TxId, Partitions, CommitTime)
                     end; 
-                {rep, S} ->
+                {local_dc, S} ->
                     gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, IfWaited});
                 S ->
                     gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, no_wait})
@@ -330,7 +337,7 @@ repl_abort(UpdatedParts, TxId, ToCache, RepDict, IfWaited) ->
                 cache -> case ToCache of false -> ok;
                                         true -> ?CACHE_SERV:abort(TxId, Partitions) 
                          end;
-                {rep, S} ->
+                {local_dc, S} ->
                     %lager:warning("Aborting to repl ~w, Parts are ~w", [S, Partitions]),
                     gen_server:cast({global, S}, {repl_abort, TxId, Partitions, IfWaited});
                 S ->

@@ -249,7 +249,7 @@ handle_call({read, Key, TxId, _Node}, Sender,
                     %lager:warning("Read blocked!"),
                     {noreply, SD0};
                 {specula, Value} ->
-                    {reply, {ok, Value}, SD0};
+                    {reply, {specula, Value}, SD0};
                         %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
                 ready ->
                     %lager:warning("Read finished!"),
@@ -358,15 +358,16 @@ handle_cast({prepare_specula, TxId, Part, WriteSet, ToPrepTS},
 %% Need to certify here
 handle_cast({local_certify, TxId, Partition, WriteSet, Sender}, 
 	    SD0=#state{prepared_txs=PreparedTxs, committed_txs=CommittedTxs, dep_dict=DepDict}) ->
-   %lager:warning("local certify for [~w, ~w]", [TxId, Partition]),
     Result = local_cert_util:prepare_for_other_part(TxId, Partition, WriteSet, CommittedTxs, PreparedTxs, TxId#tx_id.snapshot_time+1, slave),
     case Result of
         {ok, PrepareTime} ->
+            lager:warning("Locla certify passed for ~w of ~w", [TxId, Partition]),
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
             %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
             gen_server:cast(Sender, {prepared, TxId, PrepareTime, self()}),
             {noreply, SD0};
         {wait, PendPrepDep, _PrepDep, PrepareTime} ->
+            lager:warning("Locla certify pend for ~w of ~w", [TxId, Partition]),
             NewDepDict = 
                 case PendPrepDep of 
                     0 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime, self()}), DepDict;
@@ -374,6 +375,7 @@ handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
                 end,
             {noreply, SD0#state{dep_dict=NewDepDict}};
         {error, write_conflict} ->
+            lager:warning("Locla certify fail for ~w of ~w", [TxId, Partition]),
             gen_server:cast(Sender, {aborted, TxId}),
             {noreply, SD0}
     end;
@@ -441,7 +443,7 @@ handle_cast({repl_prepare, Type, TxId, Part, WriteSet, TimeStamp, Sender},
                            %lager:warning("~w, ~w aborted already", [TxId, Part]),
                             {noreply, SD0};
                         error ->
-                            %lager:warning("Got repl prepare for ~w, ~w", [TxId, Part]),
+                            lager:warning("Got repl prepare for ~w, ~w", [TxId, Part]),
                             local_cert_util:insert_prepare(PreparedTxs, TxId, Part, WriteSet, TimeStamp, Sender),
                             {noreply, SD0}
                     end
@@ -473,7 +475,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
                     %end
         end, DepDict, Partitions),
     case SpeculaRead of
-        true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
+        true -> specula_utilities:deal_commit_deps(PreparedTxs, TxId, CommitTime); 
         _ -> ok
     end,
     case IfWaited of
@@ -508,7 +510,7 @@ handle_cast({repl_abort, TxId, Partitions, IfWaited},
                                     no_wait -> CurrentDict1 
                    end,
     case SpeculaRead of
-        true -> specula_utilities:deal_abort_deps(TxId);
+        true -> specula_utilities:deal_abort_deps(PreparedTxs, TxId);
         _ -> ok
     end,
     case dict:size(CurrentDict2) > SetSize of

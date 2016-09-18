@@ -221,34 +221,48 @@ build_rep_dict(false)->
     dict:new();
 build_rep_dict(true) ->
     Lists = antidote_config:get(to_repl),
-    AllNodes = [Node  || {Node, _} <- Lists],
+    AllNodes = [Node || {Node, _} <- Lists],
+    NodesPerDc = length(AllNodes) div antidote_config:get(num_dcs), 
+    DcNodes = lists:sublist(AllNodes, (antidote_config:get(dc_id)-1)*NodesPerDc+1, NodesPerDc),
+    DcNodesSet = sets:from_list(DcNodes),
+    
     ReverseList = lists:foldl(fun(RepedNode, L) ->
             RepList = {RepedNode, [RepingNode
                             ||  {RepingNode, ToRepl} <- Lists, if_repl_myself(ToRepl, RepedNode)]},
             [RepList|L]
         end, [], AllNodes),
-    MyNode = node(),
-    [RepNodes] = [Reps || {Node, Reps} <- Lists, Node == node()],
-    RepDict = lists:foldl(fun(N, D) -> dict:store({rep, N},
-                    list_to_atom(atom_to_list(node())++"repl"++atom_to_list(N)), D) end, dict:new(), RepNodes),
-    Lists = antidote_config:get(to_repl),
-    RepDict1 = lists:foldl(fun(RepedNode, R) ->
+
+    LocalDcReps = [{Node, Reps} || {Node, Reps} <- Lists, sets:is_element(Node, DcNodesSet)],
+
+    RepDict = lists:foldl(fun({N, RepNs}, D) -> 
+                    lists:foldl(fun(RepN, DD) -> 
+                        dict:store({local_dc, RepN}, list_to_atom(atom_to_list(N)++"repl"++atom_to_list(RepN)), DD) 
+                    end, D, RepNs) 
+                    end, dict:new(), LocalDcReps),
+
+    RepDict1 = lists:foldl(fun({N, RepNs}, D) -> 
+                    lists:foldl(fun(RepN, DD) -> 
+                        dict:store(RepN, list_to_atom(atom_to_list(N)++"repl"++atom_to_list(RepN)), DD) 
+                    end, D, RepNs) 
+                    end, RepDict, Lists -- LocalDcReps),
+    %% Add reverse lists: NodeA, replicas
+    RepDict2 = lists:foldl(fun(RepedNode, R) ->
                      {RepedNode, NodeRepList} = lists:keyfind(RepedNode, 1, ReverseList),
                      RepList = lists:foldl(fun(RepingNode, L) ->
-                                        case RepingNode of
-                                            MyNode ->
-                                                [{rep, list_to_atom(atom_to_list(RepingNode)++"repl"++atom_to_list(RepedNode))}|L];
+                                        case sets:is_element(RepingNode, DcNodesSet) of
+                                            true ->
+                                                [{local_dc, list_to_atom(atom_to_list(RepingNode)++"repl"++atom_to_list(RepedNode))}|L];
                                                 %[list_to_atom(atom_to_list(RepingNode)++"repl"++atom_to_list(RepedNode))|L];
-                                            _ ->
+                                            false ->
                                                 [list_to_atom(atom_to_list(RepingNode)++"repl"++atom_to_list(RepedNode))|L]
                                         end end, [], NodeRepList),
                     dict:store(RepedNode, RepList, R)
-                 end,  RepDict, AllNodes),
-    AllButMe = AllNodes -- [MyNode],
-    CacheNode = AllButMe -- RepNodes,
+                 end, RepDict1, AllNodes),
+    AllButMe = AllNodes -- DcNodes,
+    CacheNode = AllButMe -- lists:flatten([Reps|| {_N, Reps} <- LocalDcReps]),
     lists:foldl(fun(N, D) ->
               dict:append(N, cache, D)
-            end, RepDict1, CacheNode).
+            end, RepDict2, CacheNode).
 
 if_repl_myself([], _) ->
     false;
@@ -256,6 +270,13 @@ if_repl_myself([N|_], N) ->
     true;
 if_repl_myself([_|Rest], N) ->
     if_repl_myself(Rest, N).
+
+%index([], _N) ->
+%    -100;
+%index([N|_], N) ->
+%    1;
+%index([_M|R], N) ->
+%    1+index(R, N).   
 
 -ifdef(TEST).
 %% @doc Testing remove_node_from_preflist

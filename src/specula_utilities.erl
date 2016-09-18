@@ -31,35 +31,55 @@
 
 -export([should_specula/3, make_prepared_specula/4, speculate_and_read/4, generate_snapshot/4, 
             coord_should_specula/1, finalize_version_and_reply/5, add_specula_meta/4,
-            finalize_dependency/5, deal_commit_deps/2, deal_abort_deps/1]).
+            finalize_dependency/5, deal_commit_deps/3, deal_abort_deps/2]).
 
-deal_commit_deps(TxId, CommitTime) ->
-    case ets:lookup(dependency, TxId) of
+deal_commit_deps(PreparedTxs, TxId, CommitTime) ->
+    case ets:lookup(PreparedTxs, {dep, TxId}) of
         [] ->
             ok; %% No read dependency was created!
-        List ->
-            lists:foreach(fun({TId, DependTxId}) ->
-                            ets:delete_object(dependency, {TId, DependTxId}),
-                            case DependTxId#tx_id.snapshot_time >= CommitTime of
-                                true ->
-                                    %lager:info("Calling read valid by ts of ~w, from ~w", [DependTxId, TId]),
-                                    gen_server:cast(DependTxId#tx_id.server_pid, {read_valid, DependTxId, TId});
-                                false ->
-                                    %lager:info("Calling read invalid by ts of ~w, from ~w", [DependTxId, TId]),
-                                    gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, CommitTime, DependTxId})
-                          end end, List)
+        [{_, List}] ->
+            SortList = lists:keysort(2, List),
+            {DepNum, LastTxId} = lists:foldl(fun(DependTxId, {Num, PrevTxId}) ->
+                            case PrevTxId of
+                                DependTxId ->
+                                    {Num+1, PrevTxId}; 
+                                _ ->
+                                    case PrevTxId of 
+                                        nil -> ok; 
+                                        _ -> 
+                                            case PrevTxId#tx_id.snapshot_time >= CommitTime of
+                                                true ->
+                                                    gen_server:cast(PrevTxId#tx_id.server_pid, {read_valid, PrevTxId, Num});
+                                                false ->
+                                                    gen_server:cast(PrevTxId#tx_id.server_pid, {read_invalid, CommitTime, PrevTxId})
+                                            end
+                                    end,
+                                    {1, DependTxId}
+                          end end, {0, nil}, SortList),
+            case LastTxId#tx_id.snapshot_time >= CommitTime of
+                true ->
+                    gen_server:cast(LastTxId#tx_id.server_pid, {read_valid, LastTxId, DepNum});
+                false ->
+                    gen_server:cast(LastTxId#tx_id.server_pid, {read_invalid, CommitTime, LastTxId})
+            end,
+            ets:delete_object(PreparedTxs, {dep, TxId})
     end.
 
-deal_abort_deps(TxId) ->
-    case ets:lookup(dependency, TxId) of
+deal_abort_deps(PreparedTxs, TxId) ->
+    case ets:lookup(PreparedTxs, {dep, TxId}) of
         [] ->
             ok; %% No read dependency was created!
-        List ->
-            lists:foreach(fun({TId, DependTxId}) ->
-                            lager:info("Calling read invalid of ~w, from ~w", [DependTxId, TId]),
-                            ets:delete_object(dependency, {TId, DependTxId}),
-                            gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, -1, DependTxId})
-                          end, List)
+        [{_, List}] ->
+            SortList = lists:keysort(2, List),
+            _ = lists:foldl(fun(DependTxId, PrevTxId) ->
+                            case PrevTxId of
+                                DependTxId ->
+                                    DependTxId; 
+                                _ ->
+                                    gen_server:cast(DependTxId#tx_id.server_pid, {read_aborted, -1, DependTxId}),
+                                    DependTxId
+                          end end, nil, SortList),
+            ets:delete_object(PreparedTxs, {dep, TxId})
     end.
 
 

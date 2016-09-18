@@ -50,6 +50,7 @@
         repl_abort/5,
         repl_abort/4,
         repl_abort/2,
+        add_dependency/3,
         abort/2,
         commit/3,
         read_valid/3,
@@ -57,10 +58,10 @@
         if_applied/2,
         specula_prepare/5,
         specula_prepare/4,
-        commit_specula/4,
-        commit_specula/3,
-        abort_specula/3,
-        abort_specula/2,
+        %commit_specula/4,
+        %commit_specula/3,
+        %abort_specula/3,
+        %abort_specula/2,
         go_down/0
         ]).
 
@@ -94,6 +95,9 @@ repl_commit(UpdatedParts, TxId, CommitTime, _, _) ->
 repl_abort(UpdatedParts, TxId) ->
     gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
 
+add_dependency(WriteTxId, ReadTxId, NumDeps) ->
+    gen_server:cast(test_fsm, {add_dependency, WriteTxId, ReadTxId, NumDeps}).
+
 repl_abort(UpdatedParts, TxId, _, _,_) ->
     gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
 
@@ -118,17 +122,17 @@ specula_prepare(DataReplServ, TxId, Partition, Updates, PrepareTime) ->
 specula_prepare(TxId, Partition, Updates, PrepareTime) ->
     gen_server:cast(test_fsm, {specula_prepare, cache_serv, TxId, Partition, Updates, PrepareTime}).
 
-commit_specula(DataReplServ, TxId, Partition, CommitTime) ->
-    gen_server:cast(test_fsm, {commit_specula, DataReplServ, TxId, Partition, CommitTime}).
+%commit_specula(DataReplServ, TxId, Partition, CommitTime) ->
+%    gen_server:cast(test_fsm, {commit_specula, DataReplServ, TxId, Partition, CommitTime}).
 
-commit_specula(TxId, Partition, CommitTime) ->
-    gen_server:cast(test_fsm, {commit_specula, cache_serv, TxId, Partition, CommitTime}).
+%commit_specula(TxId, Partition, CommitTime) ->
+%    gen_server:cast(test_fsm, {commit_specula, cache_serv, TxId, Partition, CommitTime}).
 
-abort_specula(DataReplServ, TxId, Partition) ->
-    gen_server:cast(test_fsm, {abort_specula, DataReplServ, TxId, Partition}).
+%abort_specula(DataReplServ, TxId, Partition) ->
+%    gen_server:cast(test_fsm, {abort_specula, DataReplServ, TxId, Partition}).
 
-abort_specula(TxId, Partition) ->
-    gen_server:cast(test_fsm, {abort_specula, cache_serv, TxId, Partition}).
+%abort_specula(TxId, Partition) ->
+%    gen_server:cast(test_fsm, {abort_specula, cache_serv, TxId, Partition}).
 
 go_down() ->
     gen_server:call(test_fsm, {go_down}).
@@ -160,20 +164,66 @@ handle_cast({read_valid, RTxId, WTxId}, State=#state{table=Table}) ->
 handle_cast({read_invalid, TxId}, State=#state{table=Table}) ->
     {noreply, State#state{table=dict:store({read_invalid, TxId}, nothing, Table)}};
 
+handle_cast({add_dependency, WriteTxId, ReadTxId, NumDep}, State=#state{table=Table}) ->
+    case dict:find({dep, WriteTxId}, Table) of
+        error -> {noreply, State#state{table=dict:store({dep, WriteTxId}, [{ReadTxId, NumDep}], Table)}};
+        {ok, List} ->  {noreply, State#state{table=dict:store({dep, WriteTxId}, [{ReadTxId, NumDep}|List], Table)}}
+    end;
+
 handle_cast({repl_commit, TxId, Parts, CommitTime}, State=#state{table=Table}) ->
     io:format(user, "repl_commit ~w ~w  ~w ~n", [TxId, Parts, CommitTime]),
-    {noreply, State#state{table=dict:store({repl_commit, TxId, Parts}, CommitTime, Table)}};
+    case dict:find({dep, TxId}, Table) of
+        error -> ok;
+        {ok, List} -> 
+            lists:foreach(fun({ReadTxId, DepNum}) ->
+                            case ReadTxId#tx_id.snapshot_time >= CommitTime of 
+                                true ->
+                                    gen_server:cast(ReadTxId#tx_id.server_pid, {read_valid, ReadTxId, DepNum});
+                                false ->
+                                    gen_server:cast(ReadTxId#tx_id.server_pid, {read_invalid, CommitTime, ReadTxId})
+                            end end, List)
+    end,
+    Table1 = dict:erase({dep, TxId}, Table),
+    {noreply, State#state{table=dict:store({repl_commit, TxId, Parts}, CommitTime, Table1)}};
 
 handle_cast({repl_abort, TxId, Parts}, State=#state{table=Table}) ->
     io:format(user, "rebar_abort ~w ~w ~n", [TxId, Parts]),
-    {noreply, State#state{table=dict:store({repl_abort, TxId, Parts}, nothing, Table)}};
+    case dict:find({dep, TxId}, Table) of
+        error -> ok;
+        {ok, List} -> 
+            lists:foreach(fun({ReadTxId, _DepNum}) ->
+                            gen_server:cast(ReadTxId#tx_id.server_pid, {read_aborted, -1, ReadTxId})
+                            end, List)
+    end,
+    Table1 = dict:erase({dep, TxId}, Table),
+    {noreply, State#state{table=dict:store({repl_abort, TxId, Parts}, nothing, Table1)}};
 
 handle_cast({abort, TxId, Parts}, State=#state{table=Table}) ->
     io:format(user, "abort ~w ~w ~n", [TxId, Parts]),
-    {noreply, State#state{table=dict:store({abort, TxId, Parts}, nothing, Table)}};
+    case dict:find({dep, TxId}, Table) of
+        error -> ok;
+        {ok, List} -> 
+            lists:foreach(fun({ReadTxId, _DepNum}) ->
+                            gen_server:cast(ReadTxId#tx_id.server_pid, {read_aborted, -1, ReadTxId})
+                            end, List)
+    end,
+    Table1 = dict:erase({dep, TxId}, Table),
+    {noreply, State#state{table=dict:store({abort, TxId, Parts}, nothing, Table1)}};
 
 handle_cast({commit, TxId, Parts, CommitTime}, State=#state{table=Table}) ->
-    {noreply, State#state{table=dict:store({commit, TxId, Parts}, CommitTime, Table)}};
+    case dict:find({dep, TxId}, Table) of
+        error -> ok;
+        {ok, List} -> 
+            lists:foreach(fun({ReadTxId, DepNum}) ->
+                            case ReadTxId#tx_id.snapshot_time >= CommitTime of 
+                                true ->
+                                    gen_server:cast(ReadTxId#tx_id.server_pid, {read_valid, ReadTxId, DepNum});
+                                false ->
+                                    gen_server:cast(ReadTxId#tx_id.server_pid, {read_invalid, CommitTime, ReadTxId})
+                            end end, List)
+    end,
+    Table1 = dict:erase({dep, TxId}, Table),
+    {noreply, State#state{table=dict:store({commit, TxId, Parts}, CommitTime, Table1)}};
 
 handle_cast(_Info, StateData) ->
     {noreply,StateData}.

@@ -141,7 +141,7 @@ handle_call({read, Key, TxId, {Partition, _}=Node}, Sender,
             %lager:warning("Read blocked!"),
             {noreply, SD0};
         {specula, Value} ->
-            {reply, {ok, Value}, SD0};
+            {reply, {specula, Value}, SD0};
         ready ->
             %lager:warning("Read finished!"),
             ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
@@ -238,7 +238,7 @@ handle_cast({abort, TxId, Partitions},
                     local_cert_util:clean_abort_prepared(PreparedTxs, KeySet, TxId, ignore, D, Partition, cache);
                 _ -> D 
             end end, DepDict, Partitions),
-    specula_utilities:deal_abort_deps(TxId),
+    specula_utilities:deal_abort_deps(PreparedTxs, TxId),
     {noreply, SD0#state{dep_dict=DepDict1}};
     
 handle_cast({commit, TxId, Partitions, CommitTime}, 
@@ -253,7 +253,7 @@ handle_cast({commit, TxId, Partitions, CommitTime},
                 _ ->
                     D
             end end, DepDict, Partitions),
-    specula_utilities:deal_commit_deps(TxId, CommitTime),
+    specula_utilities:deal_commit_deps(PreparedTxs, TxId, CommitTime),
     {noreply, SD0#state{dep_dict=DepDict1}};
 
 handle_cast(_Info, StateData) ->
