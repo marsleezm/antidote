@@ -575,6 +575,7 @@ find_version([{TS, Value, TxId}|Rest], SnapshotTime) ->
             find_version(Rest, SnapshotTime)
     end.
 
+
 %append_by_parts(_, _, _, _, []) ->
 %    ok;
 %append_by_parts(PreparedTxs, InMemoryStore, TxId, CommitTime, [Part|Rest]) ->
@@ -610,4 +611,45 @@ find_version([{TS, Value, TxId}|Rest], SnapshotTime) ->
  %           abort_by_parts(PreparedTxs, TxId, Rest, Set) 
  %   end.
 
-%% The first case should never happen
+
+%delete_version([{_, _, TxId}|Rest], TxId) -> 
+%    Rest;
+%delete_version([{C, V}|Rest], TxId) -> 
+%    [{C, V}|delete_version(Rest, TxId)];
+%delete_version([{TS, V, TId}|Rest], TxId) -> 
+%    [{TS, V, TId}|delete_version(Rest, TxId)].
+
+%replace_version([{_, Value, TxId}|Rest], TxId, CommitTime) -> 
+%    [{CommitTime, Value}|Rest];
+%replace_version([{C, V}|Rest], TxId, CommitTime) -> 
+%    [{C, V}|replace_version(Rest, TxId, CommitTime)];
+%replace_version([{TS, V, PrepTxId}|Rest], TxId, CommitTime) -> 
+%    [{TS, V, PrepTxId}|replace_version(Rest, TxId, CommitTime)].
+
+%%% A list that has timestamp in descending order
+%insert_version([], MyTxId, MyPrepTime, MyValue) -> 
+%    [{MyTxId, MyPrepTime, MyValue, []}];
+%insert_version([{_TxId, Timestamp, _Value, _Reader}|_Rest]=VList, MyTxId, MyPrepTime, MyValue) when MyPrepTime >= Timestamp -> 
+%    [{MyTxId, MyPrepTime, MyValue, []}| VList];
+%insert_version([{TxId, Timemstamp, Value, Reader}|Rest], MyTxId, MyPrepTime, MyValue) -> 
+%    [{TxId, Timemstamp, Value, Reader}|insert_version(Rest, MyTxId, MyPrepTime, MyValue)].
+
+
+%add_to_commit_tab(WriteSet, TxCommitTime, Tab) ->
+%    lists:foreach(fun({Key, Value}) ->
+%            case ets:lookup(Tab, Key) of
+%                [] ->
+%                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}]});
+%                [{Key, ValueList}] ->
+%                    {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
+%                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}|RemainList]})
+%            end
+%    end, WriteSet).
+
+%find_parts_for_name(Partitions) ->
+%    Repls = antidote_config:get(to_repl),
+%    [ReplNodes] = [L || {N, L} <- Repls, N == node()],
+%    lists:foldl(fun(Node, List) ->
+%                PartList = [P || {P, N} <- Partitions, N == Node],
+%                PartList++List
+%                end, [], ReplNodes).

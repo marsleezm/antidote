@@ -654,25 +654,32 @@ abort_others(PPTime, [{_Type, TxId, _PTime, _Value, PendingReaders}|Rest]=NonAbo
         false ->
             {DepDict, NonAborted, Readers}
     end.
-
-read_value(Key, TxId, InMemoryStore) ->
-    case ets:lookup(InMemoryStore, Key) of
-        [] ->
-            {ok, []};
-        [{Key, ValueList}] ->
-            MyClock = TxId#tx_id.snapshot_time,
-            find_version(ValueList, MyClock)
-    end.
-
-find_version([],  _SnapshotTime) ->
-    {ok, []};
-find_version([{TS, Value}|Rest], SnapshotTime) ->
-    case SnapshotTime >= TS of
-        true ->
-            {ok, Value};
-        false ->
-            find_version(Rest, SnapshotTime)
-    end.
-
-%get_time_diff({A1, B1, C1}, {A2, B2, C2}) ->
-%    ((A2-A1)*1000000+ (B2-B1))*1000000+ C2-C1.
+        
+%% Update its entry in DepDict.. If the transaction can be prepared already, prepare it
+%% (or just replicate it).. Otherwise just update and do nothing. 
+unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
+    %lager:warning("Trying to unblocking transaction ~w", [TxId]),
+    case dict:find(TxId, DepDict) of
+        {ok, {1, PrepareTime, Sender, RepMode}} ->
+            gen_server:cast(Sender, {solve_pending_prepared, TxId, PrepareTime}), 
+            case Partition of
+                ignore ->
+                    ok;
+                _ ->
+                   %lager:warning("~w unblocked, replicating writeset", [TxId]),
+                    [{TxId, {waiting, WriteSet}}] = ets:lookup(PreparedTxs, TxId),
+                    ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
+                    case RepMode of
+                        local_aggr -> ok;
+                        _ -> 
+                           %ning("Non local fast, Repmode is ~w", [RepMode]),
+                            PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
+                            repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord) 
+                    end
+            end,
+            DepDict1 = dict:update_counter(success_wait, 1, DepDict), 
+            dict:erase(TxId, DepDict1);
+        {ok, {N, PrepareTime, Sender, Type}} ->
+            %lager:warning("~w updates dep to ~w", [TxId, N-1]),
+            dict:store(TxId, {N-1, PrepareTime, Sender, Type}, DepDict)
+    end.  
