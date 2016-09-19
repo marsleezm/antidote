@@ -36,8 +36,10 @@
 deal_commit_deps(PreparedTxs, TxId, CommitTime) ->
     case ets:lookup(PreparedTxs, {dep, TxId}) of
         [] ->
+            lager:warning("Dealing commit deps for ~w, no deps", [TxId]),
             ok; %% No read dependency was created!
         [{_, List}] ->
+            lager:warning("Dealing commit deps for ~w, deps are ~w", [TxId, List]),
             SortList = lists:keysort(2, List),
             {DepNum, LastTxId} = lists:foldl(fun(DependTxId, {Num, PrevTxId}) ->
                             case PrevTxId of
@@ -62,7 +64,7 @@ deal_commit_deps(PreparedTxs, TxId, CommitTime) ->
                 false ->
                     gen_server:cast(LastTxId#tx_id.server_pid, {read_invalid, CommitTime, LastTxId})
             end,
-            ets:delete_object(PreparedTxs, {dep, TxId})
+            ets:delete(PreparedTxs, {dep, TxId})
     end.
 
 deal_abort_deps(PreparedTxs, TxId) ->
@@ -70,6 +72,7 @@ deal_abort_deps(PreparedTxs, TxId) ->
         [] ->
             ok; %% No read dependency was created!
         [{_, List}] ->
+            lager:warning("Dealing abort deps for ~w, deps are ~w", [TxId, List]),
             SortList = lists:keysort(2, List),
             _ = lists:foldl(fun(DependTxId, PrevTxId) ->
                             case PrevTxId of
@@ -79,7 +82,7 @@ deal_abort_deps(PreparedTxs, TxId) ->
                                     gen_server:cast(DependTxId#tx_id.server_pid, {read_aborted, -1, DependTxId}),
                                     DependTxId
                           end end, nil, SortList),
-            ets:delete_object(PreparedTxs, {dep, TxId})
+            ets:delete(PreparedTxs, {dep, TxId})
     end.
 
 

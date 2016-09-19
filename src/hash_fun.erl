@@ -223,7 +223,8 @@ build_rep_dict(true) ->
     Lists = antidote_config:get(to_repl),
     AllNodes = [Node || {Node, _} <- Lists],
     NodesPerDc = length(AllNodes) div antidote_config:get(num_dcs), 
-    DcNodes = lists:sublist(AllNodes, (antidote_config:get(dc_id)-1)*NodesPerDc+1, NodesPerDc),
+    DcId = repl_fsm:get_dc_id(node()),
+    DcNodes = lists:sublist(AllNodes, (DcId-1)*NodesPerDc+1, NodesPerDc),
     DcNodesSet = sets:from_list(DcNodes),
     
     ReverseList = lists:foldl(fun(RepedNode, L) ->
@@ -259,7 +260,9 @@ build_rep_dict(true) ->
                     dict:store(RepedNode, RepList, R)
                  end, RepDict1, AllNodes),
     AllButMe = AllNodes -- DcNodes,
-    CacheNode = AllButMe -- lists:flatten([Reps|| {_N, Reps} <- LocalDcReps]),
+    MyDcReps = lists:flatten([Reps|| {_N, Reps} <- LocalDcReps]),
+    lager:warning("MyNode is ~w, DcNodes are ~w, LocalDcReps are ~w", [node(), DcNodes, MyDcReps]),
+    CacheNode = AllButMe -- MyDcReps,
     lists:foldl(fun(N, D) ->
               dict:append(N, cache, D)
             end, RepDict2, CacheNode).

@@ -690,8 +690,12 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
 add_read_dep(ReaderTx, WriterTx, _Key, PreparedTxs) ->
 %    lager:warning("Inserting anti_dep from ~p to ~p", [ReaderTx, WriterTx]),
     case ets:lookup(PreparedTxs, {dep, WriterTx}) of
-        [] ->  ets:insert(PreparedTxs, {{dep, WriterTx}, [ReaderTx]});
-        [{_, V}] -> ets:insert(PreparedTxs, {{dep, WriterTx}, [ReaderTx|V]})
+        [] ->  
+            lager:warning("Add read dep of ~w for ~w", [WriterTx, ReaderTx]), 
+            ets:insert(PreparedTxs, {{dep, WriterTx}, [ReaderTx]});
+        [{_, V}] ->
+            lager:warning("Add read dep of ~w for ~w, V is ~w", [WriterTx, ReaderTx, V]), 
+            ets:insert(PreparedTxs, {{dep, WriterTx}, [ReaderTx|V]})
     end.
 %    ets:insert(anti_dep, {ReaderTx, WriterTx}).
 

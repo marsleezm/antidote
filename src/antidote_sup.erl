@@ -57,7 +57,7 @@ stop_rep() ->
 
 init(_Args) ->
     antidote_config:load("antidote.config"),
-    DcId =  antidote_config:get(dc_id),
+    DcId = repl_fsm:get_dc_id(node()), 
     
     ets:new(meta_info,
         [set,public,named_table,{read_concurrency,true},{write_concurrency,false}]),

@@ -243,7 +243,7 @@ handle_cast({abort, TxId, Partitions},
     
 handle_cast({commit, TxId, Partitions, CommitTime}, 
 	    SD0=#state{prepared_txs=PreparedTxs, dep_dict=DepDict}) ->
-    lager:warning("Commit ~w in cache", [TxId]),
+    lager:warning("Commit ~w in cache for ~w", [TxId, Partitions]),
     DepDict1 = lists:foldl(fun(Partition, D) ->
             case ets:lookup(PreparedTxs, {TxId, Partition}) of
                 [{{TxId, Partition}, KeySet}] ->
