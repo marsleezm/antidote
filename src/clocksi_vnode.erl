@@ -498,6 +498,21 @@ handle_command({append_values, KeyValues, CommitTime}, _Sender,
     %gen_fsm:reply(ToReply, {ok, {committed, CommitTime}}),
     {reply, {ok, committed}, State};
 
+handle_command({prev_remove, TxId, Type, Seq, TxCommitTime}, Sender,
+               #state{partition=Partition,
+                      committed_txs=CommittedTxs,
+                      prepared_txs=PreparedTxs,
+                      inmemory_store=InMemoryStore,
+                      if_specula=IfSpecula,
+                      dep_dict = DepDict
+                      } = State) ->
+    lager:warning("~w: Got prev remove req for ~w with ~w", [Partition, TxId, TxCommitTime]),
+    [{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
+    IfSpecula = true,
+    specula_utilities:deal_deps(PreparedTxs, TxId, Type, Seq, TxCommitTime, Sender),
+    local_cert_util:prev_remove(TxId, Type, Seq, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, master),
+    {noreply, State};
+
 handle_command({commit, TxId, TxCommitTime}, _Sender,
                #state{partition=Partition,
                       committed_txs=CommittedTxs,

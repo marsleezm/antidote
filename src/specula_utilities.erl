@@ -31,7 +31,7 @@
 
 -export([should_specula/3, make_prepared_specula/4, speculate_and_read/4, generate_snapshot/4, 
             coord_should_specula/1, finalize_version_and_reply/5, add_specula_meta/4,
-            finalize_dependency/5, deal_commit_deps/3, deal_abort_deps/2]).
+            finalize_dependency/5, deal_commit_deps/3, deal_abort_deps/2, deal_deps/6]).
 
 deal_commit_deps(PreparedTxs, TxId, CommitTime) ->
     case ets:lookup(PreparedTxs, {dep, TxId}) of
@@ -64,6 +64,33 @@ deal_commit_deps(PreparedTxs, TxId, CommitTime) ->
                 false ->
                     gen_server:cast(LastTxId#tx_id.server_pid, {read_invalid, CommitTime, LastTxId})
             end,
+            ets:delete(PreparedTxs, {dep, TxId})
+    end.
+
+deal_deps(PreparedTxs, TxId, abort, PartSeq, 0, Sender) ->
+    case ets:lookup(PreparedTxs, {dep, TxId}) of
+        [] ->
+            gen_server:cast(Sender, {cam_remove, TxId, PartSeq, 1});
+        [{_, List}] ->
+            lager:warning("Dealing commit deps for ~w, deps are ~w", [TxId, List]),
+            USortList = lists:usort(List),
+            Num = length(USortList),
+            lists:foreach(fun(DependTxId) ->
+                gen_server:cast(DependTxId#tx_id.server_pid, {read_aborted, -1, DependTxId, Sender, PartSeq, Num})
+                end, USortList),
+            ets:delete(PreparedTxs, {dep, TxId})
+    end;
+deal_deps(PreparedTxs, TxId, commit, PartSeq, CommitTime, Sender) ->
+    case ets:lookup(PreparedTxs, {dep, TxId}) of
+        [] ->
+            gen_server:cast(Sender, {cam_remove, TxId, PartSeq, 1});
+        [{_, List}] ->
+            lager:warning("Dealing commit deps for ~w, deps are ~w", [TxId, List]),
+            USortList = lists:usort(List),
+            Num = length(USortList),
+            lists:foreach(fun(DependTxId) ->
+                gen_server:cast(DependTxId#tx_id.server_pid, {read_aborted, -1, DependTxId, Sender, PartSeq, Num})
+                end, USortList),
             ets:delete(PreparedTxs, {dep, TxId})
     end.
 

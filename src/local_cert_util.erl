@@ -23,7 +23,7 @@
 -include("include/antidote.hrl").
 
 -export([prepare_for_master_part/5, ready_or_block/4, prepare_for_other_part/7, update_store/9, clean_abort_prepared/7, 
-            specula_commit/8, specula_read/4, insert_prepare/6]).
+            specula_commit/8, specula_read/4, insert_prepare/6, prev_remove/10]).
 
 -define(SPECULA_THRESHOLD, 0).
 
@@ -176,6 +176,102 @@ check_prepared(TxId, PreparedTxs, Key, _Value) ->
             {true, LastReaderTime+1}
     end.
 
+prev_remove([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTxs, DepDict, _Partition, _PartitionType) ->
+    DepDict;
+    %dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
+prev_remove([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PartitionType) ->
+     lager:warning("Trying to insert key ~p with for ~p, commit time is ~p", [Key, TxId, TxCommitTime]),
+    MyNode = {Partition, node()},
+    case ets:lookup(PreparedTxs, Key) of
+        [{Key, [{Type, TxId, _PrepareTime, LRTime, LSCTime, PrepNum, Value, PendingReaders}|Deps]}] ->
+            lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p", [Key, TxId, Type, PrepNum, TxCommitTime]),
+            lager:warning("~p Pending readers are ~p! Pending writers are ~p", [TxId, PendingReaders, Deps]),
+            {Head, Record, DepDict1, AbortedReaders, RemoveDepType, AbortPrep} 
+                = deal_pending_records(Deps, TxCommitTime, DepDict, MyNode, [], false, PartitionType, 0),
+            RPrepNum = case Type of specula_commit -> PrepNum-AbortPrep; _ -> PrepNum-AbortPrep-1 end,
+            case PartitionType of
+                cache ->  
+                    lists:foreach(fun({ReaderTxId, Node, Sender}) ->
+                            SnapshotTime = ReaderTxId#tx_id.snapshot_time,
+                            case SnapshotTime >= TxCommitTime of
+                                true ->
+                                    reply(Sender, {ok, Value});
+                                false ->
+                                    {_, RealKey} = Key,
+                                    lager:warning("Relaying read of ~w to ~w", [ReaderTxId, Node]),
+                                    clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false)
+                            end end,
+                        AbortedReaders++PendingReaders),
+                    case Head of
+                        [] -> 
+                            true = ets:insert(PreparedTxs, {Key, max(TxCommitTime, LRTime)}),
+                            update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
+                                DepDict1, Partition, PartitionType);
+                        {HType, HTxId, HPTime, HValue, HReaders} -> 
+                            DepDict2 = unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType),
+                            ets:insert(PreparedTxs, {Key, [{HType, HTxId, HPTime, LRTime, max(HPTime,LSCTime), RPrepNum, HValue, HReaders}|Record]}),
+                            update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
+                                DepDict2, Partition, PartitionType)
+                    end;
+                _ ->
+                    Values = case ets:lookup(InMemoryStore, Key) of
+                                [] ->
+                                    true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]}),
+                                    [[], Value];
+                                [{Key, ValueList}] ->
+                                    {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
+                                    [{_CommitTime, First}|_] = RemainList,
+                                    true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}|RemainList]}),
+                                    [First, Value]
+                            end,
+                    ets:insert(CommittedTxs, {Key, TxCommitTime}),
+                    lists:foreach(fun({ReaderTxId, ignore, Sender}) ->
+                            case ReaderTxId#tx_id.snapshot_time >= TxCommitTime of
+                                true ->
+                                    reply(Sender, {ok, lists:nth(2,Values)});
+                                false ->
+                                    reply(Sender, {ok, hd(Values)})
+                            end end,
+                        AbortedReaders++PendingReaders),
+                    lager:warning("Head is ~p, Record is ~p", [Head, Record]),
+                    case Head of
+                        [] -> ets:insert(PreparedTxs, {Key, max(TxCommitTime, LRTime)}),
+                            update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
+                                DepDict1, Partition, PartitionType);
+                        {repl_prepare, HTxId, HPTime, HValue, HReaders} -> 
+                            ets:insert(PreparedTxs, {Key, [{repl_prepare, HTxId, HPTime, LRTime, max(HPTime,LSCTime), RPrepNum, HValue, HReaders}|Record]}),
+                            update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
+                                DepDict1, Partition, PartitionType);
+                        {HType, HTxId, HPTime, HValue, HReaders} -> 
+                            lager:warning("Head Id is ~w, Head type is ~w", [HTxId, HType]),
+                            ets:insert(PreparedTxs, {Key, [{HType, HTxId, HPTime, LRTime, max(HPTime,LSCTime), RPrepNum, HValue, HReaders}|Record]}),
+                            DepDict2 = case Type of specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType);
+                                         prepared -> unblock_prepare(HTxId, DepDict1, Partition, remove_ppd) 
+                            end,
+                            update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
+                                DepDict2, Partition, PartitionType)
+                    end
+            end;
+        [{Key, [First|Others]}] ->
+            lager:warning("First is ~p, Others are ~p, PartitionType is ~p", [First, Others, PartitionType]),
+            {Record, DepDict2, CAbortPrep} = delete_and_read(commit, InMemoryStore, PreparedTxs, TxCommitTime, Key, DepDict, PartitionType, Partition, Others, TxId, [], First, 0),
+            case CAbortPrep of 
+                0 -> ets:insert(PreparedTxs, {Key, Record});
+                _ -> [{F1, F2, F3, F4, F5, FPrepNum, FValue, FPendReader}|FRest] = Record,
+                    ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, F5, FPrepNum-CAbortPrep, FValue, FPendReader}|FRest]}) 
+            end,
+            case PartitionType of cache -> ok; _ -> ets:insert(CommittedTxs, {Key, TxCommitTime}) end,
+            update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict2, Partition, PartitionType);
+        [] ->
+            %[{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
+            lager:error("Something is wrong!!! A txn updated two same keys ~p!", [Key]),
+            update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PartitionType);
+        R ->
+            lager:error("Record is ~p", [R]),
+            R = error,
+            error
+    end.
+
 
 -spec update_store(Keys :: [{key()}],
                           TxId::txid(),TxCommitTime:: {term(), term()},
@@ -260,7 +356,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             end;
         [{Key, [First|Others]}] ->
             lager:warning("First is ~p, Others are ~p, PartitionType is ~p", [First, Others, PartitionType]),
-            {Record, DepDict2, CAbortPrep} = delete_and_read(commit, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, Partition, Others, TxId, [], First, 0),
+            {Record, DepDict2, CAbortPrep} = delete_and_read(commit, InMemoryStore, PreparedTxs, TxCommitTime, Key, DepDict, PartitionType, Partition, Others, TxId, [], First, 0),
             case CAbortPrep of 
                 0 -> ets:insert(PreparedTxs, {Key, Record});
                 _ -> [{F1, F2, F3, F4, F5, FPrepNum, FValue, FPendReader}|FRest] = Record,
@@ -327,7 +423,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
             end;
         [{Key, [First|Others]}] -> 
             lager:warning("Aborting TxId is ~w, Key is ~w", [TxId, Key]),
-            {Record, DepDict2, CAbortPrep} = delete_and_read(abort, InMemoryStore, 0, Key, DepDict, PartitionType, Partition, Others, TxId, [], First, 0),
+            {Record, DepDict2, CAbortPrep} = delete_and_read(abort, InMemoryStore, PreparedTxs, 0, Key, DepDict, PartitionType, Partition, Others, TxId, [], First, 0),
             lager:warning("Record is ~w", [Record]),
             case Record of 
                 [] -> clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict, Partition, PartitionType);
@@ -367,6 +463,16 @@ deal_pending_records([{Type, TxId, PPTime, Value, PendingReaders}|PWaiter], SCTi
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     %% Abort should be fast, so send abort to myself directly.. Coord won't send abort to me again.
                     clocksi_vnode:abort([MyNode], TxId),
+                    case Type of
+                        specula_commit ->
+                            deal_pending_records(PWaiter, SCTime, NewDepDict, MyNode, PendingReaders++Readers, HasAbortPrep, PartitionType, AbortPrep);
+                        prepared ->
+                            deal_pending_records(PWaiter, SCTime, NewDepDict, MyNode, PendingReaders++Readers, max(HasAbortPrep, false), PartitionType, AbortPrep+1)
+                    end;
+                {ok, {_, _, Sender}} ->
+                    NewDepDict = dict:erase(TxId, DepDict),
+                    lager:warning("Prepare not valid anymore! For ~p, abort to ~p, Type is ~w", [TxId, Sender, Type]),
+                    gen_server:cast(Sender, {aborted, TxId, MyNode}),
                     case Type of
                         specula_commit ->
                             deal_pending_records(PWaiter, SCTime, NewDepDict, MyNode, PendingReaders++Readers, HasAbortPrep, PartitionType, AbortPrep);
@@ -700,7 +806,7 @@ add_read_dep(ReaderTx, WriterTx, _Key, PreparedTxs) ->
 %    ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
 
-delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, Partition, [{Type, TxId, _Time, Value, PendingReaders}|Rest], TxId, [], {PType, PTxId, PPrepTime, PLastReaderTime, PSCTime, PrepNum, PValue, PPendingReaders}, 0) ->
+delete_and_read(DeleteType, InMemoryStore, PreparedTxs, TxCommitTime, Key, DepDict, PartitionType, Partition, [{Type, TxId, _Time, Value, PendingReaders}|Rest], TxId, [], {PType, PTxId, PPrepTime, PLastReaderTime, PSCTime, PrepNum, PValue, PPendingReaders}, 0) ->
     %% If can read previous version: read
     %% If can not read previous version: add to previous pending
     RemainReaders = case DeleteType of 
@@ -735,7 +841,7 @@ delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, Partition
                 lists:foldl(fun({ReaderTxId, Node, Sender}, BlockReaders) ->
                     case sc_by_local(ReaderTxId) of
                         true ->
-                            %add_read_dep(ReaderTxId, PTxId, Key),
+                            add_read_dep(ReaderTxId, PTxId, Key, PreparedTxs),
                             reply(Sender, {specula, PValue}),
                             BlockReaders;
                         false -> [{ReaderTxId, Node, Sender}|BlockReaders]    
@@ -760,7 +866,7 @@ delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, Partition
                         end,
             {[{PType, PTxId, PPrepTime, PLastReaderTime, PSCTime, RPrepNum, PValue, NewPendingReaders}|[Head|RRecord]], DepDict2, 0}
     end;
-delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, Partition, [{Type, TxId, _Time, Value, PendingReaders}|Rest], TxId, Prev, {PType, PTxId, PPrepTime, PValue, PPendingReaders}, CAbortPrep) ->
+delete_and_read(DeleteType, InMemoryStore, PreparedTxs, TxCommitTime, Key, DepDict, PartitionType, Partition, [{Type, TxId, _Time, Value, PendingReaders}|Rest], TxId, Prev, {PType, PTxId, PPrepTime, PValue, PPendingReaders}, CAbortPrep) ->
     RemainReaders = case DeleteType of 
                         commit ->
                             case PartitionType of 
@@ -795,7 +901,7 @@ delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, Partition
                 lists:foldl(fun({ReaderTxId, Node, Sender}, BlockReaders) ->
                     case sc_by_local(ReaderTxId) of
                         true ->
-                            %add_read_dep(ReaderTxId, PTxId, Key),
+                            add_read_dep(ReaderTxId, PTxId, Key, PreparedTxs),
                             reply(Sender, {specula, PValue}),
                             BlockReaders;
                         false -> [{ReaderTxId, Node, Sender}|BlockReaders]    
@@ -818,13 +924,13 @@ delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, Partition
             end,
             {lists:reverse(Prev)++[{PType, PTxId, PPrepTime, PValue, NewPendingReaders}|[Head|RRecord]], DepDict2, NewCAbortPrep}
     end;
-delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, MyNode, [{Type, OtherTxId, Time, Value, PendingReaders}|Rest], TxId, Prev, {PType, PTxId, PPrepTime, PLastReaderTime, PSCTime, PrepNum, PValue, PPendingReaders}, CAbortPrep) ->
+delete_and_read(DeleteType, InMemoryStore, PreparedTxs, TxCommitTime, Key, DepDict, PartitionType, MyNode, [{Type, OtherTxId, Time, Value, PendingReaders}|Rest], TxId, Prev, {PType, PTxId, PPrepTime, PLastReaderTime, PSCTime, PrepNum, PValue, PPendingReaders}, CAbortPrep) ->
     Prev1 = [{PType, PTxId, PPrepTime, PLastReaderTime, PSCTime, PrepNum, PValue, PPendingReaders}|Prev],
-    delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, MyNode, Rest, TxId, Prev1, {Type, OtherTxId, Time, Value, PendingReaders}, CAbortPrep);
-delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, MyNode, [{Type, OtherTxId, Time, Value, PendingReaders}|Rest], TxId, Prev, {PType, PTxId, PPrepTime, PValue, PPendingReaders}, CAbortPrep) ->
+    delete_and_read(DeleteType, InMemoryStore, PreparedTxs, TxCommitTime, Key, DepDict, PartitionType, MyNode, Rest, TxId, Prev1, {Type, OtherTxId, Time, Value, PendingReaders}, CAbortPrep);
+delete_and_read(DeleteType, InMemoryStore, PreparedTxs, TxCommitTime, Key, DepDict, PartitionType, MyNode, [{Type, OtherTxId, Time, Value, PendingReaders}|Rest], TxId, Prev, {PType, PTxId, PPrepTime, PValue, PPendingReaders}, CAbortPrep) ->
     Prev1 = [{PType, PTxId, PPrepTime, PValue, PPendingReaders}|Prev],
-        delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, MyNode, Rest, TxId, Prev1, {Type, OtherTxId, Time, Value, PendingReaders}, CAbortPrep);
-delete_and_read(abort, _InMemoryStore, _TxCommitTime, _Key, DepDict, _PartitionType, _MyNode, [], _TxId, _Prev, _Whatever, 0) ->
+        delete_and_read(DeleteType, InMemoryStore, PreparedTxs, TxCommitTime, Key, DepDict, PartitionType, MyNode, Rest, TxId, Prev1, {Type, OtherTxId, Time, Value, PendingReaders}, CAbortPrep);
+delete_and_read(abort, _InMemoryStore, _P, _TxCommitTime, _Key, DepDict, _PartitionType, _MyNode, [], _TxId, _Prev, _Whatever, 0) ->
     lager:warning("Abort but got nothing"),
     {[], DepDict, 0}.
 

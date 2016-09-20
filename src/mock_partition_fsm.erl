@@ -44,12 +44,8 @@
         terminate/2]).
 
 -export([
-        repl_commit/6,
-        repl_commit/5,
-        repl_commit/3,
-        repl_abort/5,
-        repl_abort/4,
-        repl_abort/2,
+        repl_commit/4,
+        repl_abort/3,
         add_dependency/3,
         abort/2,
         commit/3,
@@ -83,26 +79,14 @@ init([]) ->
 if_applied(Param, Result) ->
     gen_server:call(test_fsm, {if_applied, Param, Result}).
 
-repl_commit(UpdatedParts, TxId, CommitTime) ->
+repl_commit(UpdatedParts, TxId, CommitTime, _) ->
     gen_server:cast(test_fsm, {repl_commit, TxId, UpdatedParts, CommitTime}).
 
-repl_commit(UpdatedParts, TxId, CommitTime, _, _,_) ->
-    gen_server:cast(test_fsm, {repl_commit, TxId, UpdatedParts, CommitTime}).
-
-repl_commit(UpdatedParts, TxId, CommitTime, _, _) ->
-    gen_server:cast(test_fsm, {repl_commit, TxId, UpdatedParts, CommitTime}).
-
-repl_abort(UpdatedParts, TxId) ->
+repl_abort(UpdatedParts, TxId, _) ->
     gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
 
 add_dependency(WriteTxId, ReadTxId, NumDeps) ->
     gen_server:cast(test_fsm, {add_dependency, WriteTxId, ReadTxId, NumDeps}).
-
-repl_abort(UpdatedParts, TxId, _, _,_) ->
-    gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
-
-repl_abort(UpdatedParts, TxId, _, _) ->
-    gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
 
 read_valid(_, RTxId, WTxId) ->
     gen_server:cast(test_fsm, {read_valid, RTxId, WTxId}).

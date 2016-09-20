@@ -463,9 +463,9 @@ handle_cast({repl_prepare, Type, TxId, Part, WriteSet, TimeStamp, Sender},
             {noreply, SD0}
     end;
 
-handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited}, 
+handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
 	    SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs, specula_read=SpeculaRead, committed_txs=CommittedTxs,
-        current_dict=CurrentDict, dep_dict=DepDict}) ->
+        dep_dict=DepDict}) ->
   %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
    DepDict1 = lists:foldl(fun(Partition, D) ->
                     [{{TxId, Partition}, KeySet}] = ets:lookup(PreparedTxs, {TxId, Partition}), 
@@ -478,10 +478,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
         true -> specula_utilities:deal_commit_deps(PreparedTxs, TxId, CommitTime); 
         _ -> ok
     end,
-    case IfWaited of
-        waited -> {noreply, SD0#state{current_dict=dict:store(TxId, finished, CurrentDict), dep_dict=DepDict1}};
-        no_wait -> {noreply, SD0#state{dep_dict=DepDict1}}
-    end;
+    {noreply, SD0#state{dep_dict=DepDict1}};
     %case dict:size(CurrentD1) > SetSize of
     %      true ->
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=dict:new(), backup_dict=CurrentD1}};
@@ -489,7 +486,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
     %end;
 
-handle_cast({repl_abort, TxId, Partitions, IfWaited}, 
+handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_read=SpeculaRead, current_dict=CurrentDict, dep_dict=DepDict, set_size=SetSize}) ->
    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     {CurrentDict1, DepDict1} = lists:foldl(fun(Partition, {D, DepD}) ->
@@ -506,19 +503,16 @@ handle_cast({repl_abort, TxId, Partitions, IfWaited},
         end, {CurrentDict, DepDict}, Partitions),
     %%% This needs to be stored because a prepare request may come twice: once from specula_prep and once 
     %%  from tx coord
-    CurrentDict2 = case IfWaited of waited -> dict:store(TxId, finished, CurrentDict1);
-                                    no_wait -> CurrentDict1 
-                   end,
     case SpeculaRead of
         true -> specula_utilities:deal_abort_deps(PreparedTxs, TxId);
         _ -> ok
     end,
-    case dict:size(CurrentDict2) > SetSize of
+    case dict:size(CurrentDict1) > SetSize of
         true ->
             %lager:warning("Current set is too large!"),
-            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict2, dep_dict=DepDict1}};
+            {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict1, dep_dict=DepDict1}};
         false ->
-            {noreply, SD0#state{current_dict=CurrentDict2, dep_dict=DepDict1}}
+            {noreply, SD0#state{current_dict=CurrentDict1, dep_dict=DepDict1}}
     end;
 
 handle_cast(_Info, StateData) ->

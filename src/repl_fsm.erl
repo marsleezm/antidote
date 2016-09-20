@@ -50,7 +50,7 @@
 	    handle_call/3,
 	    handle_cast/2,
          code_change/3,
-        prev_remove/8,
+        prev_remove/7,
         get_dc_id/1,
          handle_event/3,
          handle_info/2,
@@ -354,7 +354,7 @@ repl_abort(UpdatedParts, TxId, ToCache, RepDict, IfWaited) ->
             end end,  Acc, Replicas) end,
             [], NodeParts).
 
-prev_remove(TxId, Type, CommitTime, LocalParts, RemoteParts, LCBinary, RepDict, IfWaited) ->
+prev_remove(TxId, Type, CommitTime, LocalParts, RemoteParts, LCBinary, RepDict) ->
     TempBN = lists:foldl(fun(Node, BN) ->
                 riak_core_vnode_master:command(Node,
                              {prev_remove, TxId, Type, BN, CommitTime},
@@ -371,8 +371,17 @@ prev_remove(TxId, Type, CommitTime, LocalParts, RemoteParts, LCBinary, RepDict, 
                 cache -> ?CACHE_SERV:prev_remove(prev_remove, TxId, Type, TBN, CommitTime, Partitions),
                          {[{cache, Partitions}|Acc1], 2*TBN};
                 {local_dc, S} ->
-                    gen_server:cast({global, S}, {prev_remove, TxId, Type, TBN, CommitTime, Partitions, IfWaited}),
-                    {[{slave, S, Partitions}|Acc1], 2*TBN}
+                    gen_server:cast({global, S}, {prev_remove, TxId, Type, TBN, CommitTime, Partitions}),
+                    {[{slave, S, Partitions}|Acc1], 2*TBN};
+                S -> %% Non-local replica
+                    case Type of 
+                        commit ->
+                            gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions}),
+                            {Acc1, TBN};
+                        abort -> 
+                            gen_server:cast({global, S}, {repl_abort, TxId, Partitions}),
+                            {Acc1, TBN}
+                    end
             end end, {Acc, BN}, Replicas) end,
             {[], TempBN}, RemoteNodeParts),
     RemoteCumParts.
