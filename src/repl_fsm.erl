@@ -59,10 +59,8 @@
 %% States
 -export([repl_prepare/4,
 	    check_table/0,
-         repl_abort/4,
-         repl_abort/5,
-         repl_commit/5,
-         repl_commit/6,
+         repl_abort/3,
+         repl_commit/4,
          %repl_abort/4,
          %repl_commit/5,
          quorum_replicate/7,
@@ -298,12 +296,10 @@ index([_M|R], N) ->
 
     
 %% No replication
-repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict) ->
-    repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, no_wait).
 
-repl_commit([], _, _, _, _, _) ->
+repl_commit([], _, _, _) ->
     ok;
-repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, IfWaited) ->
+repl_commit(UpdatedParts, TxId, CommitTime, RepDict) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
@@ -312,22 +308,18 @@ repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, IfWaited) ->
             case R of
                 cache -> 
                     %lager:warning("~w: Sending to cache is ~w", [TxId, ToCache]),
-                    case ToCache of false -> ok;
-                                      true -> ?CACHE_SERV:commit(TxId, Partitions, CommitTime)
-                    end; 
+                    ?CACHE_SERV:commit(TxId, Partitions, CommitTime);
                 {local_dc, S} ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, IfWaited});
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions});
                 S ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, no_wait})
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions})
             end end,  Replicas) end,
             NodeParts).
 
-repl_abort(UpdatedParts, TxId, ToCache, RepDict) -> 
-    repl_abort(UpdatedParts, TxId, ToCache, RepDict, no_wait). 
 
-repl_abort([], _, _, _, _) ->
+repl_abort([], _, _) ->
     ok;
-repl_abort(UpdatedParts, TxId, ToCache, RepDict, IfWaited) ->
+repl_abort(UpdatedParts, TxId, RepDict) ->
    %lager:warning("Aborting to ~w", [UpdatedParts]),
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
@@ -335,12 +327,11 @@ repl_abort(UpdatedParts, TxId, ToCache, RepDict, IfWaited) ->
         %lager:info("repl abort of ~w for node ~w to replicas ~w for partitions ~w", [TxId, Node, Replicas, Partitions]),
         lists:foreach(fun(R) ->
             case R of
-                cache -> case ToCache of false -> ok;
-                                        true -> ?CACHE_SERV:abort(TxId, Partitions) 
-                         end;
+                cache -> 
+                    ?CACHE_SERV:abort(TxId, Partitions); 
                 {local_dc, S} ->
                     %lager:warning("Aborting to repl ~w, Parts are ~w", [S, Partitions]),
-                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, IfWaited});
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions});
                 S ->
                     %lager:warning("Aborting to repl ~w", [S]),
                     gen_server:cast({global, S}, {repl_abort, TxId, Partitions, no_wait})
