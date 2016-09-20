@@ -373,6 +373,18 @@ deal_pending_records([{Type, TxId, PPTime, Value, PendingReaders}|PWaiter], SCTi
                         prepared ->
                             deal_pending_records(PWaiter, SCTime, NewDepDict, MyNode, PendingReaders++Readers, max(HasAbortPrep, false), PartitionType, AbortPrep+1)
                     end;
+                {ok, {_, _, _, Sender, local}} ->
+                    NewDepDict = dict:erase(TxId, DepDict),
+                    lager:warning("Prepare not valid anymore! For ~p, abort to ~p, Type is ~w", [TxId, Sender, Type]),
+                    gen_server:cast(Sender, {aborted, TxId}),
+                    clocksi_vnode:abort([MyNode], TxId),
+                    %% Abort should be fast, so send abort to myself directly.. Coord won't send abort to me again.
+                    case Type of
+                        specula_commit ->
+                            deal_pending_records(PWaiter, SCTime, NewDepDict, MyNode, PendingReaders++Readers, HasAbortPrep, PartitionType, AbortPrep);
+                        prepared ->
+                            deal_pending_records(PWaiter, SCTime, NewDepDict, MyNode, PendingReaders++Readers, max(HasAbortPrep, false), PartitionType, AbortPrep+1)
+                    end;
                 {ok, {_, _, Sender}} ->
                     NewDepDict = dict:erase(TxId, DepDict),
                     lager:warning("Prepare not valid anymore! For ~p, abort to ~p, Type is ~w", [TxId, Sender, Type]),
