@@ -50,6 +50,7 @@
 	    handle_call/3,
 	    handle_cast/2,
          code_change/3,
+        prev_remove/8,
         get_dc_id/1,
          handle_event/3,
          handle_info/2,
@@ -305,22 +306,26 @@ repl_commit([], _, _, _, _, _) ->
     ok;
 repl_commit(UpdatedParts, TxId, CommitTime, ToCache, RepDict, IfWaited) ->
     NodeParts = build_node_parts(UpdatedParts),
-    lists:foreach(fun({Node, Partitions}) ->
+    lists:foldl(fun({Node, Partitions}, Acc) ->
         Replicas = dict:fetch(Node, RepDict),
         lager:info("repl commit of ~w for node ~w to replicas ~w for partitions ~w", [TxId, Node, Replicas, Partitions]),
-        lists:foreach(fun(R) ->
+        lists:foldl(fun(R, Acc1) ->
             case R of
                 cache -> 
                     %lager:warning("~w: Sending to cache is ~w", [TxId, ToCache]),
-                    case ToCache of false -> ok;
-                                      true -> ?CACHE_SERV:commit(TxId, Partitions, CommitTime)
+                    case ToCache of 
+                        false -> Acc1;
+                        true -> ?CACHE_SERV:commit(TxId, Partitions, CommitTime),
+                                [{cache, Partitions}|Acc1]
                     end; 
                 {local_dc, S} ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, IfWaited});
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, IfWaited}),
+                    [{slave, S, Partitions}|Acc1];
                 S ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, no_wait})
-            end end,  Replicas) end,
-            NodeParts).
+                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions, no_wait}),
+                    Acc1
+            end end, Acc, Replicas) end,
+            [], NodeParts).
 
 repl_abort(UpdatedParts, TxId, ToCache, RepDict) -> 
     repl_abort(UpdatedParts, TxId, ToCache, RepDict, no_wait). 
@@ -330,19 +335,44 @@ repl_abort([], _, _, _, _) ->
 repl_abort(UpdatedParts, TxId, ToCache, RepDict, IfWaited) ->
    %lager:warning("Aborting to ~w", [UpdatedParts]),
     NodeParts = build_node_parts(UpdatedParts),
-    lists:foreach(fun({Node, Partitions}) ->
+    lists:foldl(fun({Node, Partitions}, Acc) ->
         Replicas = dict:fetch(Node, RepDict),
         %lager:info("repl abort of ~w for node ~w to replicas ~w for partitions ~w", [TxId, Node, Replicas, Partitions]),
-        lists:foreach(fun(R) ->
+        lists:foldl(fun(R, Acc1) ->
             case R of
-                cache -> case ToCache of false -> ok;
-                                        true -> ?CACHE_SERV:abort(TxId, Partitions) 
+                cache -> case ToCache of false -> Acc1;
+                                        true -> ?CACHE_SERV:abort(TxId, Partitions), [{cache, Partitions}|Acc1] 
                          end;
                 {local_dc, S} ->
                     %lager:warning("Aborting to repl ~w, Parts are ~w", [S, Partitions]),
-                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, IfWaited});
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, IfWaited}),
+                    [{slave, S, Partitions}|Acc1];
                 S ->
                     %lager:warning("Aborting to repl ~w", [S]),
-                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, no_wait})
-            end end,  Replicas) end,
-            NodeParts).
+                    gen_server:cast({global, S}, {repl_abort, TxId, Partitions, no_wait}),
+                    Acc1
+            end end,  Acc, Replicas) end,
+            [], NodeParts).
+
+prev_remove(TxId, Type, CommitTime, LocalParts, RemoteParts, LCBinary, RepDict, IfWaited) ->
+    TempBN = lists:foldl(fun(Node, BN) ->
+                riak_core_vnode_master:command(Node,
+                             {prev_remove, TxId, Type, BN, CommitTime},
+                             {server, undefined, self()},
+                             ?CLOCKSI_MASTER),
+             BN*2
+            end, 1, LocalParts),
+
+    RemoteNodeParts = build_node_parts(RemoteParts),
+    {RemoteCumParts, LCBinary} = lists:foldl(fun({Node, Partitions}, {Acc, BN}) ->
+        Replicas = dict:fetch(Node, RepDict),
+        lists:foldl(fun(R, {Acc1, TBN}) ->
+            case R of
+                cache -> ?CACHE_SERV:prev_remove(prev_remove, TxId, Type, TBN, CommitTime, Partitions),
+                         {[{cache, Partitions}|Acc1], 2*TBN};
+                {local_dc, S} ->
+                    gen_server:cast({global, S}, {prev_remove, TxId, Type, TBN, CommitTime, Partitions, IfWaited}),
+                    {[{slave, S, Partitions}|Acc1], 2*TBN}
+            end end, {Acc, BN}, Replicas) end,
+            {[], TempBN}, RemoteNodeParts),
+    RemoteCumParts.
