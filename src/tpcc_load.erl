@@ -152,9 +152,9 @@ populate_district(TxServer, WarehouseId, DistrictId, PartList, WPerDc) ->
     put_to_node(TxServer, DcId, PartList, YtdKey, DYtd).
 
 populate_customer_orders(TxServer, WarehouseId, DistrictId, PartList, WPerDc) ->
-    lager:info("Warehouse ~w, district ~w: Populating orders from 1 to ~w", [WarehouseId, DistrictId, 
-                ?NB_MAX_ORDER]),
     NumUniqueNames = ?NUM_NAMES *?NUM_NAMES*?NUM_NAMES, 
+    lager:info("Warehouse ~w, district ~w: Populating orders from 1 to ~w, customers to ~w then to ~w", [WarehouseId, DistrictId, 
+                ?NB_MAX_ORDER, NumUniqueNames, ?NB_MAX_CUSTOMER]),
     FCustomerSeq = lists:seq(1, NumUniqueNames),
     SCustomerSeq = lists:seq(NumUniqueNames+1, ?NB_MAX_CUSTOMER),
     %% Randomize the list of all combination of names
@@ -180,7 +180,7 @@ add_customer_order(CustomerId, [NameNum|RestName], [RandOrder|RestOrder], TxServ
 
     CLast = tpcc_tool:name_by_num(NameNum),
     OrderId = RandOrder, 
-    %lager:info("Customer id is ~w, order is ~w, clast is ~p", [CustomerId, RandOrder, CLast]),
+    %lager:info("Customer id is ~w", [CustomerId]),
     Customer = tpcc_tool:create_customer(WarehouseId, DistrictId, CustomerId, CLast, CustomerTime, OrderId),
     CKey = tpcc_tool:get_key(Customer),
     put_to_node(TxServer, DcId, PartList, CKey, Customer),

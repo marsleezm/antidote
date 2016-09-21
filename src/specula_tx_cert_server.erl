@@ -1190,8 +1190,8 @@ solve_read_dependency(CommitTime, ReadDep, DepList, ClientDict) ->
                                       lager:warning("~w is my own, read valid", [DepTxId]),
                                     case dict:find(DepTxId, RD) of
                                         {ok, {0, _SolvedReadDeps, 0}} -> %% Local transaction is still reading
-                                              lager:warning("Deleting {~w, ~w} from antidep", [DepTxId, TxId]),
-                                            ets:delete_object(anti_dep, {DepTxId, TxId}), 
+                                            lager:warning("Deleting {~w, ~w} from antidep", [DepTxId, TxId]),
+                                            true = ets:delete_object(anti_dep, {DepTxId, TxId}), 
                                             {RD, MaybeCommit, ToAbort, ClientDict};
                                         {ok, {read_only, [TxId], _}} ->
                                             CS = dict:fetch(DepTxId#tx_id.client_pid, CD),

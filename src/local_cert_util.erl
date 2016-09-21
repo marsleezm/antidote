@@ -214,7 +214,10 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
                                 DepDict1, Partition, PartitionType);
                         {HType, HTxId, HPTime, HValue, HReaders} -> 
-                            DepDict2 = unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType),
+                            DepDict2 = case HType of 
+                                            repl_prepare -> DepDict1; 
+                                            prepared -> unblock_prepare(HTxId, DepDict1, Partition, remove_ppd)
+                                       end,
                             ets:insert(PreparedTxs, {Key, [{HType, HTxId, HPTime, LRTime, max(HPTime,LSCTime), RPrepNum, HValue, HReaders}|Record]}),
                             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
                                 DepDict2, Partition, PartitionType)
@@ -251,8 +254,12 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                         {HType, HTxId, HPTime, HValue, HReaders} -> 
                             lager:warning("Head Id is ~w, Head type is ~w", [HTxId, HType]),
                             ets:insert(PreparedTxs, {Key, [{HType, HTxId, HPTime, LRTime, max(HPTime,LSCTime), RPrepNum, HValue, HReaders}|Record]}),
-                            DepDict2 = case Type of specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType);
-                                         prepared -> unblock_prepare(HTxId, DepDict1, Partition, remove_ppd) 
+                            DepDict2 = case Type of 
+                                        specula_commit -> 
+                                            case HType of specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, remove_pd);
+                                                          prepared -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType)
+                                            end;
+                                        prepared -> unblock_prepare(HTxId, DepDict1, Partition, remove_ppd) 
                             end,
                             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
                                 DepDict2, Partition, PartitionType)
@@ -291,7 +298,8 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
                 cache -> 
                     lists:foreach(fun({ReaderTxId, Node, {relay, Sender}}) -> 
                             lager:warning("Relaying read of ~w to ~w", [ReaderTxId, Node]),
-                            clocksi_vnode:relay_read(Node, Key, ReaderTxId, Sender, false) end,
+                            {_, RealKey} = Key,
+                            clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false) end,
                               PendingReaders++AbortedReaders);
                 _ ->
                     lists:foldl(fun({_, ignore, Sender}, ToReturn) -> 
@@ -766,9 +774,12 @@ delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, Partition
             {[{PType, PTxId, PPrepTime, PLastReaderTime, PSCTime, RPrepNum, PValue, NewPendingReaders}], DepDict1, 0}; 
         {repl_prepare, _HTxId, _HPTime, _HValue, _HReaders} -> 
             {[{PType, PTxId, PPrepTime, PLastReaderTime, PSCTime, RPrepNum, PValue, NewPendingReaders}|[Head|RRecord]], DepDict1, 0}; 
-        {_, HTxId, _HPTime, _HValue, _HReaders} -> 
+        {HType, HTxId, _HPTime, _HValue, _HReaders} -> 
             DepDict2 = case Type of 
-                            specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType);
+                            specula_commit -> 
+                                    case HType of specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, remove_pd);
+                                                  prepared -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType)
+                                    end;
                             _ -> %% Type is repl_prepare or prepared 
                                 case PType of specula_commit ->unblock_prepare(HTxId, DepDict1, Partition, convert_to_pd);
                                            _ -> DepDict1 

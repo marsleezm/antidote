@@ -124,7 +124,7 @@ check_table() ->
 %    gen_server:cast({global, get_repl_name()}, {repl_commit, TxId, UpdatedParts, CommitTime}).
 
 quorum_replicate(Replicas, Type, TxId, Partition, WriteSet, TimeStamp, Sender) ->
-    lager:warning("~w of part ~w send to ~w", [TxId, Partition, Replicas]),
+   %lager:warning("~w of part ~w send to ~w", [TxId, Partition, Replicas]),
     lists:foreach(fun(Replica) ->
             gen_server:cast({global, Replica}, {repl_prepare, 
                 Type, TxId, Partition, WriteSet, TimeStamp, Sender})

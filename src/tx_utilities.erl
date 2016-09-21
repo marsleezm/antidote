@@ -21,7 +21,7 @@
 
 -include("antidote.hrl").
 
--export([create_tx_id/1, create_tx_id/2, create_tx_id/3, now_microsec/0, open_table/2, open_private_table/1, get_table_name/2, open_public_table/1]).
+-export([create_tx_id/1, create_tx_id/2, create_tx_id/3, now_microsec/0, open_table/2, open_public_table/1, open_private_table/1, get_table_name/2]).
 
 -spec create_tx_id(snapshot_time() | ignore) -> txid().
 create_tx_id(ClientClock) ->
@@ -53,21 +53,21 @@ open_table(Partition, Name) ->
         open_table(Partition, Name)
     end.
 
-open_private_table(Name) ->
-    try
-    ets:new(Name,
-        [set,private])
-    catch
-    Ex ->
-        lager:warn("Error when opening private table ~w", [Ex]),
-        %% Someone hasn't finished cleaning up yet
-        open_private_table(Name)
-    end.
-
 open_public_table(Name) ->
     try
     ets:new(Name,
         [set,public])
+    catch
+    Ex ->
+        lager:warn("Error when opening private table ~w", [Ex]),
+        %% Someone hasn't finished cleaning up yet
+        open_public_table(Name)
+    end.
+
+open_private_table(Name) ->
+    try
+    ets:new(Name,
+        [set,private])
     catch
     Ex ->
         lager:warn("Error when opening private table ~w", [Ex]),

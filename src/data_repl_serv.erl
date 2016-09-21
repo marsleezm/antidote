@@ -232,7 +232,7 @@ handle_call({read, Key, TxId, _Node}, Sender,
                 specula_read=SpeculaRead}) ->
     case SpeculaRead of
         false ->
-            lager:warning("Specula rea on data repl and false!!??"),
+           %lager:warning("Specula rea on data repl and false!!??"),
             SpeculaRead = true,
             case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {relay, Sender}) of
                 not_ready-> {noreply, SD0};
