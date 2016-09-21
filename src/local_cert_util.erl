@@ -291,7 +291,8 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
                 cache -> 
                     lists:foreach(fun({ReaderTxId, Node, {relay, Sender}}) -> 
                             lager:warning("Relaying read of ~w to ~w", [ReaderTxId, Node]),
-                            clocksi_vnode:relay_read(Node, Key, ReaderTxId, Sender, false) end,
+                            {_, RealKey} = Key,
+                            clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false) end,
                               PendingReaders++AbortedReaders);
                 _ ->
                     lists:foldl(fun({_, ignore, Sender}, ToReturn) -> 
