@@ -517,6 +517,7 @@ handle_cast({pending_prepared, TxId, PrepareTime, From},
                         true ->
                              lager:warning("Pending prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
+                            specula_commit(LocalParts, RemoteParts, TxId, NewMaxPrep, RepDict),
                             DepDict1 = dict:store(TxId, {PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
                             ClientDict1 = dict:store(Client, ClientState#client_state{stage=remote_cert, remote_updates=RemoteParts}, ClientDict),
                             {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
@@ -611,6 +612,7 @@ handle_cast({prepared, TxId, PrepareTime, From},
                                 true -> 
                                     %%In wait stage, only prepare and doesn't add data to table
                                      lager:warning("Decided to wait and prepare ~w, pending list is ~w, sending to ~w!!", [TxId, PendingList, RemoteParts]),
+                                    specula_commit(LocalParts, RemoteParts, TxId, NewMaxPrep, RepDict),
                                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, node()}),
                                     DepDict1 = dict:store(TxId, {PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
                                     ClientDict1 = dict:store(Client, ClientState#client_state{stage=remote_cert, 
@@ -744,7 +746,7 @@ try_solve_pending([], [], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, d
                                                     SpeculaPrepTime = max(PCommitTime+1, OldCurPrepTime),
                                                     RemoteParts = CState#client_state.remote_updates,
                                                      lager:warning("Spec comm curr txn: ~p, remote updates are ~p", [TxId, RemoteParts]),
-                                                    specula_commit(LocalParts, RemoteParts, TxId, SpeculaPrepTime, RepDict),
+                                                    %specula_commit(LocalParts, RemoteParts, TxId, SpeculaPrepTime, RepDict),
                                                     case (Prep == 0) and (Read == []) and (PendingList == []) of
                                                         true ->   
                                                              lager:warning("Can already commit ~w!!", [TxId]),
