@@ -138,10 +138,10 @@ handle_call({start_tx}, Sender, SD0) ->
 handle_call({start_tx, TxnSeq}, Sender, SD0) ->
     {Client, _} = Sender,
     handle_call({start_tx, TxnSeq, Client}, Sender, SD0);
-handle_call({start_tx, TxnSeq, Client}, Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS, client_dict=ClientDict}) ->
+handle_call({start_tx, TxnSeq, Client}, _Sender, SD0=#state{dep_dict=D, min_snapshot_ts=MinSnapshotTS, min_commit_ts=MinCommitTS, client_dict=ClientDict}) ->
     NewSnapshotTS = max(MinSnapshotTS, MinCommitTS) + 1, 
     TxId = tx_utilities:create_tx_id(NewSnapshotTS, Client, TxnSeq),
-     lager:warning("Start tx is ~p, Sender is ~p", [TxId, Sender]),
+     lager:warning("Start tx is ~p", [TxId]),
     ClientState = case dict:find(Client, ClientDict) of
                     error ->
                         #client_state{};

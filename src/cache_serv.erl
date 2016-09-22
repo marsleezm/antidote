@@ -194,7 +194,7 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp},
 %% Need to certify here
 handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
         SD0=#state{prepared_txs=PreparedTxs, dep_dict=DepDict}) ->
-    lager:warning("cache server local certify for [~w, ~w]", [TxId, Partition]),
+   %lager:warning("cache server local certify for [~w, ~w]", [TxId, Partition]),
     Result = local_cert_util:prepare_for_other_part(TxId, Partition, WriteSet, ignore, PreparedTxs, TxId#tx_id.snapshot_time, cache),
     case Result of
         {ok, PrepareTime} ->
@@ -216,7 +216,7 @@ handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
 
 handle_cast({specula_commit, TxId, Partition, SpeculaCommitTime}, State=#state{prepared_txs=PreparedTxs,
         dep_dict=DepDict}) ->
-    lager:warning("specula commit for [~w, ~w]", [TxId, Partition]),
+   %lager:warning("specula commit for [~w, ~w]", [TxId, Partition]),
     case ets:lookup(PreparedTxs, {TxId, Partition}) of
         [{{TxId, Partition}, Keys}] ->
             DepDict1 = local_cert_util:specula_commit(Keys, TxId, SpeculaCommitTime, ignore, PreparedTxs, DepDict, Partition, cache),
@@ -230,7 +230,7 @@ handle_cast({specula_commit, TxId, Partition, SpeculaCommitTime}, State=#state{p
 %% In ets, faster for read.
 handle_cast({abort, TxId, Partitions}, 
 	    SD0=#state{prepared_txs=PreparedTxs, dep_dict=DepDict}) ->
-    lager:warning("Abort ~w in cache", [TxId]),
+   %lager:warning("Abort ~w in cache", [TxId]),
     DepDict1 = lists:foldl(fun(Partition, D) ->
             case ets:lookup(PreparedTxs, {TxId, Partition}) of 
                 [{{TxId, Partition}, KeySet}] -> 
@@ -243,7 +243,7 @@ handle_cast({abort, TxId, Partitions},
     
 handle_cast({commit, TxId, Partitions, CommitTime}, 
 	    SD0=#state{prepared_txs=PreparedTxs, dep_dict=DepDict}) ->
-    lager:warning("Commit ~w in cache", [TxId]),
+   %lager:warning("Commit ~w in cache", [TxId]),
     DepDict1 = lists:foldl(fun(Partition, D) ->
             case ets:lookup(PreparedTxs, {TxId, Partition}) of
                 [{{TxId, Partition}, KeySet}] ->

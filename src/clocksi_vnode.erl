@@ -356,16 +356,16 @@ handle_command({internal_read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBl
 %% This read serves for all normal cases.
 handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
-    lager:warning("~w relay read ~p, is specula ~w", [TxId, Key, SpeculaRead]),
+   % lager:warning("~w relay read ~p, is specula ~w", [TxId, Key, SpeculaRead]),
     case SpeculaRead of
         false ->
             case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Reader}}) of
                 not_ready->
-                    lager:warning("Read for ~w of ~w blocked!", [Key, TxId]),
+                    %lager:warning("Read for ~w of ~w blocked!", [Key, TxId]),
                     {noreply, SD0};
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
-                    lager:warning("Read for ~w of ~w finished, Result is ~w! Replying to ~w", [Key, TxId, Result, Reader]),
+                    %lager:warning("Read for ~w of ~w finished, Result is ~w! Replying to ~w", [Key, TxId, Result, Reader]),
                     gen_server:reply(Reader, Result), 
     		        %T2 = os:timestamp(),
                     {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
