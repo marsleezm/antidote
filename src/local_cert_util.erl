@@ -334,7 +334,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
                     end
             end;
         [{Key, [First|Others]}] -> 
-            lager:warning("Aborting TxId is ~w, Key is ~w", [TxId, Key]),
+            lager:warning("Aborting TxId is ~w, Key is ~p", [TxId, Key]),
             {Record, DepDict2, CAbortPrep} = delete_and_read(abort, InMemoryStore, 0, Key, DepDict, PartitionType, Partition, Others, TxId, [], First, 0),
             lager:warning("Record is ~w", [Record]),
             case Record of 
@@ -815,7 +815,7 @@ delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, Partition
     %% If can not read previous version: add to previous pending
     {Head, RRecord, DepDict1, AbortedReaders, RemoveDepType, AbortNum}
         = deal_pending_records(Rest, TxCommitTime, DepDict, {Partition, node()}, [], false, PartitionType, 0),
-    lager:warning("Pending readers are ~w, aborted readers are ~w", [RemainReaders, AbortedReaders]),
+    lager:warning("Pending readers are ~w, aborted readers are ~w, Head is ~w", [RemainReaders, AbortedReaders, Head]),
     NewPendingReaders = 
         case PType of 
             specula_commit ->
