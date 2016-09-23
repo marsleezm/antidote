@@ -491,7 +491,6 @@ unblock_prepare(TxId, DepDict, Partition, RemoveDepType) ->
             %DepDict1 = dict:update_counter(success_wait, 1, DepDict), 
             dict:erase(TxId, DepDict);
         {ok, {1, PrepDep, PrepareTime, Sender, RepMode, TxWriteSet}} ->
-            lager:warning("~w Herre", [TxId]),
             case RemoveDepType of 
                 remove_ppd ->
                     lager:warning("~p Removing ppd, PrepDep is ~w", [TxId, PrepDep]),
@@ -515,7 +514,7 @@ unblock_prepare(TxId, DepDict, Partition, RemoveDepType) ->
                     end;
                 remove_pd -> 
                     lager:warning("~p Removing pd", [TxId]),
-                    dict:store(TxId, {1, PrepDep-1, PrepareTime, Sender, RepMode}, DepDict)
+                    dict:store(TxId, {1, PrepDep-1, PrepareTime, Sender, RepMode, TxWriteSet}, DepDict)
             end;
         {ok, {PendPrepDep, PrepDep, PrepareTime, Sender, RepMode, WriteSet}} ->
             lager:warning("~w Herre", [TxId]),
