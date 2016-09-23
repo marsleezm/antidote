@@ -837,12 +837,16 @@ delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, Partition
         {repl_prepare, _HTxId, _HPTime, _HValue, _HReaders} -> 
             {lists:reverse(Prev)++[{PType, PTxId, PPrepTime, PValue, NewPendingReaders}|[Head|RRecord]], DepDict1, NewCAbortPrep};
         {HType, HTxId, _, _, _} -> 
-            DepDict2 = case HType of specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType);
-                         _ -> %% Type is repl_prepare or prepared 
-                            case PType of specula_commit ->unblock_prepare(HTxId, DepDict1, Partition, convert_to_pd);
-                                           _ -> DepDict1 
-                            end
-            end,
+            DepDict2 = case Type of
+                            specula_commit ->
+                                    case HType of specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, remove_pd);
+                                                  prepared -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType)
+                                    end;
+                            _ -> %% Type is repl_prepare or prepared 
+                                case PType of specula_commit ->unblock_prepare(HTxId, DepDict1, Partition, convert_to_pd);
+                                           _ -> DepDict1
+                                end
+                        end,
             {lists:reverse(Prev)++[{PType, PTxId, PPrepTime, PValue, NewPendingReaders}|[Head|RRecord]], DepDict2, NewCAbortPrep}
     end;
 delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, MyNode, [{Type, OtherTxId, Time, Value, PendingReaders}|Rest], TxId, Prev, {PType, PTxId, PPrepTime, PLastReaderTime, PSCTime, PrepNum, PValue, PPendingReaders}, CAbortPrep) ->
