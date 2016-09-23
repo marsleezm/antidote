@@ -260,11 +260,21 @@ handle_call({certify_read, TxId, ClientMsgId, Client}, Sender, SD0=#state{min_co
         true ->
             case {InvalidAborted, dict:find(TxId, DepDict)} of
                 {1, _} ->
+                    case ClientState#client_state.aborted_update of
+                        ?NO_TXN -> 
+                            lager:warning("Aborted ~w", [TxId]),
+                            ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
+                                    committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
+                            DepDict1 = dict:erase(TxId, DepDict),
+                            {reply, {aborted, {rev([TxId|AbortedReads]), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
+                        AbortedTxId ->
+                            lager:warning("Cascade aborted aborted txid is ~w, TxId is  ~w", [AbortedTxId, TxId]),
+                            ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
+                                            committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
+                            DepDict1 = dict:erase(TxId, DepDict),
+                            {reply, {cascade_abort, {AbortedTxId, rev([TxId|AbortedReads]), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
+                    end;
                     %% Some read is invalid even before the txn starts.. If invalid_aborted is larger than 0, it can possibly be saved.
-                     lager:warning("~w aborted!", [TxId]),
-                    ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, committed_updates=[], committed_reads=[], aborted_reads=[], invalid_aborted=0}, ClientDict), 
-                     lager:warning("Returning specula_commit for ~w", [TxId]),
-                    {reply, {ok, {specula_commit, LastCommitTs, {rev([TxId|AbortedReads]), rev(CommittedUpdates), rev(CommittedReads)}}}, SD0#state{dep_dict=dict:erase(TxId, DepDict), client_dict=ClientDict1}};
                 {0, {ok, {_, B, _}}} ->
                     case ReadDepTxs of
                         B ->
