@@ -157,7 +157,6 @@ handle_call({start_tx, TxnSeq, Client}, _Sender, SD0=#state{dep_dict=D, min_snap
     case OldTxId of
         ?NO_TXN ->
             ClientState1 = ClientState#client_state{tx_id=TxId, stage=read, pending_prepares=0},
-               lager:warning("~p client state is ~p", [Client, ClientState1]),
             {reply, TxId, SD0#state{client_dict=dict:store(Client, ClientState1, ClientDict), dep_dict=D1, 
                 min_snapshot_ts=NewSnapshotTS}};
         _ ->
@@ -165,14 +164,12 @@ handle_call({start_tx, TxnSeq, Client}, _Sender, SD0=#state{dep_dict=D, min_snap
             case Stage of 
                 read ->
                     ClientState1 = ClientState#client_state{tx_id=TxId, stage=read, pending_prepares=0, invalid_aborted=0},
-                       lager:warning("~p client state is ~p", [Client, ClientState1]),
                     {reply, TxId, SD0#state{client_dict=dict:store(Client, ClientState1, ClientDict),
                         min_snapshot_ts=NewSnapshotTS, dep_dict=dict:erase(OldTxId, D1)}}; 
                 _ ->
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
                     ClientDict1 = dict:store(TxId, {LocalParts, RemoteParts}, ClientDict),
                     ClientState1 = ClientState#client_state{tx_id=TxId, stage=read, pending_list=PendingList++[OldTxId], pending_prepares=0, invalid_aborted=0},
-                       lager:warning("~p client state is ~p", [Client, ClientState1]),
                     {reply, TxId, SD0#state{dep_dict=D1, 
                         min_snapshot_ts=NewSnapshotTS, client_dict=dict:store(Client, ClientState1, ClientDict1)}}
             end
@@ -397,7 +394,7 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, Cli
                     end
             end;
         false ->
-             lager:warning("~w: invalid message id!! My is ~w, from client is ~w", [TxId, SentMsgId, ClientMsgId]),
+             lager:warning("~w: invalid message id!! My is ~w, from client is ~w, aborted update is ~w", [TxId, SentMsgId, ClientMsgId, ClientState#client_state.aborted_update]),
             case ClientState#client_state.aborted_update of
                 ?NO_TXN -> 
                     ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
@@ -730,7 +727,6 @@ terminate(Reason, _SD) ->
 %%%%%%%%%%%%%%%%%%%%%
 try_solve_pending([], [], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, dep_dict=DepDict, pending_txs=PendingTxs,
             min_commit_ts=MinCommitTs}, ClientsOfCommTxns) ->
-     lager:warning("Try to check current txn, ClientsOfCommTxns are ~w", [ClientsOfCommTxns]),
     {ClientDict1, DepDict1, PendingTxs1, NewMayCommit, NewToAbort, NewCommitTime} = 
             lists:foldl(fun(Client, {CD, DD, PD, MayCommit, ToAbort, PCommitTime}) ->
                     CState = dict:fetch(Client, CD),
@@ -738,7 +734,6 @@ try_solve_pending([], [], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, d
                     case TxId of
                         ?NO_TXN -> {CD, DD, PD, MayCommit, ToAbort, PCommitTime};
                         _ ->
-                             lager:warning("Curent txn id is ~w", [TxId]),
                             case CState#client_state.committed_updates of [] -> {CD, DD, PD, MayCommit, ToAbort, PCommitTime};
                                 _ ->
                                     AbortedReads = CState#client_state.aborted_reads,
@@ -816,7 +811,6 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                             end,
                             RD1 = dict:erase(TxId, DepDict),
                             gen_server:reply(Sender, {aborted, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}),
-                             lager:warning("Replyed aborted"),
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, committed_updates=[], committed_reads=[], aborted_reads=[]}, ClientDict), 
                             try_solve_pending(ToCommitTxs, Rest++NewToAbort, 
                                 SD0#state{dep_dict=RD1, client_dict=ClientDict1}, ClientsOfCommTxns);
@@ -1123,15 +1117,12 @@ abort_tx(TxId, LocalParts, RemoteParts, RepDict, Stage, LocalOnlyPart) ->
 
 local_certify(LocalUpdates, RemoteUpdates, TxId, RepDict) ->
     {LocalParts, NumLocalParts} = ?CLOCKSI_VNODE:prepare(LocalUpdates, TxId, local),
-     lager:warning("Local Parts are ~w, Num local parts are ~w", [LocalParts, NumLocalParts]),
     {NumSlaveParts, NumCacheParts} = lists:foldl(fun({{Part, Node}, Updates}, {NumSParts, NumCParts}) ->
                     case dict:find({rep, Node}, RepDict) of
                         {ok, DataReplServ} ->
-                             lager:warning("LocalCert to ~p, ~p", [DataReplServ, Part]),
                             ?DATA_REPL_SERV:local_certify(DataReplServ, TxId, Part, Updates),
                             {NumSParts+1, NumCParts}; 
                         _ ->
-                             lager:warning("LocalCert to cache"),
                             ?CACHE_SERV:local_certify(TxId, Part, Updates),
                             {NumSParts, NumCParts+1}
                     end end, {0, 0}, RemoteUpdates),
