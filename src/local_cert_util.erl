@@ -836,8 +836,8 @@ delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, Partition
             {lists:reverse(Prev)++[{PType, PTxId, PPrepTime, PValue, NewPendingReaders}], DepDict1, NewCAbortPrep};
         {repl_prepare, _HTxId, _HPTime, _HValue, _HReaders} -> 
             {lists:reverse(Prev)++[{PType, PTxId, PPrepTime, PValue, NewPendingReaders}|[Head|RRecord]], DepDict1, NewCAbortPrep};
-        {Type, HTxId, _, _, _} -> 
-            DepDict2 = case Type of specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType);
+        {HType, HTxId, _, _, _} -> 
+            DepDict2 = case HType of specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType);
                          _ -> %% Type is repl_prepare or prepared 
                             case PType of specula_commit ->unblock_prepare(HTxId, DepDict1, Partition, convert_to_pd);
                                            _ -> DepDict1 
