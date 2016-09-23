@@ -773,9 +773,9 @@ delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, Partition
         {HType, HTxId, _HPTime, _HValue, _HReaders} -> 
             DepDict2 = case Type of 
                             specula_commit -> 
-                                    case HType of specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, remove_pd);
-                                                  prepared -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType)
-                                    end;
+                                case HType of specula_commit -> DepDict1; 
+                                              prepared -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType)
+                                end;
                             _ -> %% Type is repl_prepare or prepared 
                                 case PType of specula_commit ->unblock_prepare(HTxId, DepDict1, Partition, convert_to_pd);
                                            _ -> DepDict1 
@@ -835,9 +835,9 @@ delete_and_read(DeleteType, InMemoryStore, TxCommitTime, Key, DepDict, Partition
         {HType, HTxId, _, _, _} -> 
             DepDict2 = case Type of
                             specula_commit ->
-                                    case HType of specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, remove_pd);
-                                                  prepared -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType)
-                                    end;
+                                case HType of specula_commit -> DepDict1; 
+                                              prepared -> unblock_prepare(HTxId, DepDict1, Partition, RemoveDepType)
+                                end;
                             _ -> %% Type is repl_prepare or prepared 
                                 case PType of specula_commit ->unblock_prepare(HTxId, DepDict1, Partition, convert_to_pd);
                                            _ -> DepDict1
