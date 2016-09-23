@@ -881,10 +881,10 @@ find(ReaderTxId, SnapshotTime, [], ToReturn, AllPrevious, SenderInfo) ->
                     end
             end;
         {prepared, PTxId, PTime, Value, PendingReaders} ->
-            lager:warning("~p can not read specula value, because still prepared!", [PTxId]),
+            %lager:warning("~p can not read specula value, because still prepared!", [PTxId]),
             case SnapshotTime >= PTime + ?SPECULA_THRESHOLD of
                 true ->
-                    lager:warning("Allprevious are ~w", [AllPrevious]),
+                    %lager:warning("Allprevious are ~w", [AllPrevious]),
                     case AllPrevious of
                         [] -> {not_ready, [], [{prepared, PTxId, PTime, Value, [SenderInfo|PendingReaders]}]};
                         _ -> {not_ready, [], lists:reverse(AllPrevious) ++ [{prepared, PTxId, PTime, Value, [SenderInfo|PendingReaders]}]}
