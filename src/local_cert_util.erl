@@ -155,13 +155,13 @@ check_prepared(TxId, PreparedTxs, Key, _Value) ->
             {true, 1};
         %%% The type of the record: prepared or specula-commit; TxId; PrepareTime; LastReaderTime;
         %% The specula-commit time of the last record
-        [{Key, [{_Type, PrepTxId, PrepareTime, LastReaderTime, LastSCTime, PrepNum, _PrepValue, _RWaiter}|_PWaiter]=_Record}] ->
+        [{Key, [{Type, PrepTxId, PrepareTime, LastReaderTime, LastSCTime, PrepNum, _PrepValue, _RWaiter}|_PWaiter]=_Record}] ->
            lager:warning("For key ~p: ~p prepared already! LastStTime is ~p, ~p may fail", [Key, PrepTxId, LastSCTime, TxId]),
             case LastSCTime > SnapshotTime of
                 true ->
                     false;
                 false ->
-                     lager:warning("~p: ~p waits for ~p with ~p", [Key, TxId, PrepTxId, PrepareTime]),
+                     lager:warning("~p: ~p waits for ~p that is ~p with ~p", [Key, TxId, PrepTxId, Type, PrepareTime]),
                     %% If all previous txns have specula-committed, then this txn can be directly pend-prepared and specula-committed 
                     %% Otherwise, this txn has to wait until all preceding prepared txn to be specula-committed
                     %% has_spec_commit means this txn can pend prep and then spec commit 
@@ -252,7 +252,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
                                 DepDict1, Partition, PartitionType);
                         {HType, HTxId, HPTime, HValue, HReaders} -> 
-                            lager:warning("Head Id is ~w, Head type is ~w", [HTxId, HType]),
+                            lager:warning("TxId is ~w, MyType is ~w, Head Id is ~w, Head type is ~w", [TxId, Type, HTxId, HType]),
                             ets:insert(PreparedTxs, {Key, [{HType, HTxId, HPTime, LRTime, max(HPTime,LSCTime), RPrepNum, HValue, HReaders}|Record]}),
                             DepDict2 = case Type of 
                                         specula_commit -> 
@@ -364,7 +364,7 @@ deal_pending_records([{repl_prepare, TxId, PPTime, Value, PendingReaders}|PWaite
     end;
 deal_pending_records([{Type, TxId, PPTime, Value, PendingReaders}|PWaiter], SCTime, 
             DepDict, MyNode, Readers, HasAbortPrep, PartitionType, AbortPrep) ->
-    lager:warning("Dealing with ~p, ~p, commit time is ~p", [TxId, PPTime, SCTime]),
+    lager:warning("Dealing with ~p, Type is ~p, ~p, commit time is ~p", [TxId, Type, PPTime, SCTime]),
     case SCTime > TxId#tx_id.snapshot_time of
         true ->
             %% Abort the current txn
@@ -590,13 +590,11 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
             specula_commit(Rest, TxId, SCTime, InMemoryStore, 
                   PreparedTxs, DepDict2, Partition, PartitionType);
         [{Key, [{specula_commit, OtherTxId, MySCTime, LastReaderTime, LastPrepTime, PrepNum, Value, OtherPendReaders}|RecordList]}] ->
-            lager:warning("iN Spec commit"),
             case find_prepare_record(RecordList, TxId) of
                 [] -> 
                     specula_commit(Rest, TxId, SCTime, InMemoryStore, 
                           PreparedTxs, DepDict, Partition, PartitionType);
                 {Prev, {TxId, TxPrepTime, TxSCValue, PendingReaders}, RestRecords} ->
-                    lager:warning("After finding record"),
                     {Head, Record, DepDict1, AbortedReaders, _, AbortPrep} = deal_pending_records(RestRecords, SCTime, DepDict, MyNode, [], false, PartitionType, 0),
                     case PartitionType of
                         cache ->

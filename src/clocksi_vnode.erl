@@ -145,7 +145,7 @@ relay_read(Node, Key, TxId, Reader, From) ->
 prepare(Updates, TxId, Type) ->
     ProposeTime = TxId#tx_id.snapshot_time+1,
     lists:foldl(fun({Node, WriteSet}, {Partitions, NumPartitions}) ->
-        %lager:warning("Sending prepare to ~w", [Node]),
+         lager:warning("Sending prepare to ~w", [Node]),
         riak_core_vnode_master:command(Node,
                            {prepare, TxId, WriteSet, Type, ProposeTime},
                            self(),
@@ -299,19 +299,19 @@ handle_command({do_reply, TxId}, _Sender, SD0=#state{prepared_txs=PreparedTxs, i
     ets:delete(PreparedTxs, {pending, TxId}),
     case IfReplicate of
         true ->
-            %lager:warning("Start replicate ~w", [TxId]),
+             lager:warning("Start replicate ~w", [TxId]),
             {Sender, _RepMode, _WriteSet, PrepareTime} = Result,
             gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
             {reply, ok, SD0};
         false ->
-            %lager:warning("Start replying ~w", [TxId]),
+             lager:warning("Start replying ~w", [TxId]),
             {From, Reply} = Result,
             gen_server:cast(From, Reply),
             {reply, ok, SD0}
     end;
 
 handle_command({if_prepared, TxId, Keys}, _Sender, SD0=#state{prepared_txs=PreparedTxs}) ->
-    %lager:warning("Checking if prepared of ~w for ~w", [TxId, Keys]),
+     lager:warning("Checking if prepared of ~w for ~w", [TxId, Keys]),
     Result = helper:handle_if_prepared(TxId, Keys, PreparedTxs), 
     {reply, Result, SD0};
 
@@ -356,35 +356,35 @@ handle_command({internal_read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBl
 %% This read serves for all normal cases.
 handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
-   %lager:warning("~w relay read ~p, is specula ~w", [TxId, Key, SpeculaRead]),
+    lager:warning("~w relay read ~p, is specula ~w", [TxId, Key, SpeculaRead]),
     case SpeculaRead of
         false ->
             case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Reader}}) of
                 not_ready->
-                    %lager:warning("Read for ~w of ~w blocked!", [Key, TxId]),
+                     lager:warning("Read for ~w of ~w blocked!", [Key, TxId]),
                     {noreply, SD0};
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
-                    %lager:warning("Read for ~w of ~w finished, Result is ~w! Replying to ~w", [Key, TxId, Result, Reader]),
+                     lager:warning("Read for ~w of ~w finished, Result is ~w! Replying to ~w", [Key, TxId, Result, Reader]),
                     gen_server:reply(Reader, Result), 
     		        %T2 = os:timestamp(),
                     {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
-              %lager:warning("Specula read!!"),
+               lager:warning("Specula read!!"),
             case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Reader}}) of
                 not_ready->
-                    %lager:warning("Read blocked!"),
+                     lager:warning("Read blocked!"),
                     {noreply, SD0};
                 {specula, Value} ->
                     gen_server:reply(Reader, {ok, Value}), 
     		        %T2 = os:timestamp(),
-                     %lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
+                      lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
                     {noreply, SD0};
 				        %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
-                    %lager:warning("Read committed verions ~w", [Result]),
+                     lager:warning("Read committed verions ~w", [Result]),
                     gen_server:reply(Reader, Result), 
     		        %T2 = os:timestamp(),
                     {noreply, SD0}
@@ -403,13 +403,13 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                               dep_dict=DepDict,
                               debug=Debug
                               }) ->
-    %lager:warning("Got prepare request for ~w at ~w", [TxId, Partition]),
+     lager:warning("Got prepare request for ~w at ~w", [TxId, Partition]),
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
     Result = local_cert_util:prepare_for_master_part(TxId, WriteSet, CommittedTxs, PreparedTxs, ProposedTs),
     case Result of
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
-            %lager:warning("~w: ~w certification check prepred with ~w, RepMode is ~w", [Partition, TxId, PrepareTime, RepMode]),
+             lager:warning("~w: ~w certification check prepred with ~w, RepMode is ~w", [Partition, TxId, PrepareTime, RepMode]),
             case Debug of
                 false ->
                     %case RepMode of local -> ok;
@@ -440,7 +440,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
             {noreply, State#state{dep_dict=NewDepDict}};
         {error, write_conflict} ->
     %DepDict1 = dict:store(success_wait, 0, DepDict),
-            %lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
+             lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
             case Debug of
                 false ->
                     case RepMode of 
@@ -459,7 +459,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
 
 handle_command({specula_commit, TxId, SpeculaCommitTime}, _Sender, State=#state{prepared_txs=PreparedTxs,
         inmemory_store=InMemoryStore, dep_dict=DepDict, partition=Partition}) ->
-    %lager:warning("Got specula commit for ~w", [TxId]),
+     lager:warning("Got specula commit for ~w", [TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             %repl_fsm:repl_prepare(Partition, prepared, TxId, RepMsg),
@@ -508,7 +508,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
                       %num_committed=NumCommitted,
                       if_specula=IfSpecula
                       } = State) ->
-    %lager:warning("~w: Got commit req for ~w with ~w", [Partition, TxId, TxCommitTime]),
+     lager:warning("~w: Got commit req for ~w with ~w", [Partition, TxId, TxCommitTime]),
     Result = commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula),
     case Result of
         {ok, committed, DepDict1} ->
@@ -520,14 +520,14 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
 handle_command({abort, TxId}, _Sender,
                State = #state{partition=Partition, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore,
                 dep_dict=DepDict, if_specula=IfSpecula}) ->
-    %lager:warning("~w: Aborting ~w", [Partition, TxId]),
+     lager:warning("~w: Aborting ~w", [Partition, TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             case IfSpecula of
                 true -> specula_utilities:deal_abort_deps(TxId);
                 false -> ok
             end,
-            %lager:warning("Found key set"),
+             lager:warning("Found key set"),
             true = ets:delete(PreparedTxs, TxId),
             DepDict1 = local_cert_util:clean_abort_prepared(PreparedTxs, Keys, TxId, InMemoryStore, DepDict, Partition, master),
             {noreply, State#state{dep_dict=DepDict1}};
@@ -593,7 +593,7 @@ async_send_msg(Delay, Msg, To) ->
 %    set_prepared(PreparedTxs,Rest,TxId,Time, [Key|KeySet]).
 
 commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula)->
-    %lager:warning("Before commit ~w", [TxId]),
+     lager:warning("Before commit ~w", [TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             case IfSpecula of
@@ -645,11 +645,11 @@ abort_others(PPTime, [{_Type, TxId, _PTime, _Value, PendingReaders}|Rest]=NonAbo
                 {ok, {_, _, Sender, _}} ->
                     NewDepDict = dict:erase(TxId, DepDict),
                     gen_server:cast(Sender, {aborted, TxId, MyNode}),
-                   %lager:warning("Aborting ~w, because PPTime ~w is larger", [TxId, PPTime]),
+                    lager:warning("Aborting ~w, because PPTime ~w is larger", [TxId, PPTime]),
                     abort([MyNode], TxId),
                     abort_others(PPTime, Rest, NewDepDict, MyNode, PendingReaders++Readers);
                 error ->
-                   %lager:warning("~w aborted already", [TxId]),
+                    lager:warning("~w aborted already", [TxId]),
                     abort_others(PPTime, Rest, DepDict, MyNode, PendingReaders ++ Readers)
             end;
         false ->

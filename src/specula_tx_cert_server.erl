@@ -1155,7 +1155,7 @@ try_commit_follower(LastCommitTime, [H|Rest]=PendingList, RepDict, DepDict,
             end,
     case Result of
         false ->
-              lager:warning("Returning ~w ~w ~w ~w ~w ~w ~w ~w", [PendingTxs, PendingList, LastCommitTime, DepDict, LastAbortTxs, LastMayCommit, ClientDict, CommittedTxs]),
+              %lager:warning("Returning ~w ~w ~w ~w ~w ~w ~w ~w", [PendingTxs, PendingList, LastCommitTime, DepDict, LastAbortTxs, LastMayCommit, ClientDict, CommittedTxs]),
             {PendingTxs, PendingList, LastCommitTime, DepDict, LastAbortTxs, LastMayCommit, ClientDict, CommittedTxs};
         {true, CommitTime} ->
              lager:warning("Commit pending specula ~w", [H]),
