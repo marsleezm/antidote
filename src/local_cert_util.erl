@@ -186,12 +186,12 @@ update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedT
     DepDict;
     %dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PartitionType) ->
-     lager:warning("Trying to insert key ~p with for ~p, commit time is ~p", [Key, TxId, TxCommitTime]),
+     %lager:warning("Trying to insert key ~p with for ~p, commit time is ~p", [Key, TxId, TxCommitTime]),
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{Type, TxId, _PrepareTime, LRTime, LSCTime, PrepNum, Value, PendingReaders}|Deps]}] ->
-            lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p", [Key, TxId, Type, PrepNum, TxCommitTime]),
-            lager:warning("~p Pending readers are ~p! Pending writers are ~p", [TxId, PendingReaders, Deps]),
+            %lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p", [Key, TxId, Type, PrepNum, TxCommitTime]),
+            %lager:warning("~p Pending readers are ~p! Pending writers are ~p", [TxId, PendingReaders, Deps]),
             {Head, Record, DepDict1, AbortedReaders, RemoveDepType, AbortPrep} 
                 = deal_pending_records(Deps, TxCommitTime, DepDict, MyNode, [], false, PartitionType, 0),
             RPrepNum = case Type of specula_commit -> PrepNum-AbortPrep; _ -> PrepNum-AbortPrep-1 end,
@@ -536,12 +536,12 @@ specula_commit([], _TxId, _SCTime, _InMemoryStore, _PreparedTxs, DepDict, _Parti
     %dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+SCTime-PrepareTime, Cnt+1} end, DepDict);
     DepDict;
 specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Partition, PartitionType) ->
-    lager:warning("Trying to insert key ~p with for ~p, specula commit time is ~p", [Key, TxId, SCTime]),
+    %lager:warning("Trying to insert key ~p with for ~p, specula commit time is ~p", [Key, TxId, SCTime]),
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         %% If this one is prepared, no one else can be specula-committed already, so sc-time should be the same as prep time 
         [{Key, [{prepared, TxId, _PrepareTime, LastReaderTime, LastPrepTime, PrepNum, Value, PendingReaders}|Deps] }] ->
-            lager:warning("Here, deps are ~w", [Deps]),
+            %lager:warning("Here, deps are ~w", [Deps]),
             {Head, Record, DepDict1, AbortedReaders, _, AbortPrep} = deal_pending_records(Deps, SCTime, DepDict, MyNode, [], false, PartitionType, 0),
             case Head == [] of
                 true -> Record = [],
@@ -957,11 +957,9 @@ insert_prepare(PreparedTxs, TxId, Partition, WriteSet, TimeStamp, Sender) ->
                                               [{Key, [{_Type, _PrepTxId, _, LastReaderTS, _, _, _, _}|_Rest]}] ->
                                                   {[Key|KS], max(Ts, LastReaderTS+1)};
                                               [{Key, LastReaderTS}] ->  
-                                                     lager:warning("For ~p, last reader ts is ~p", [Key, LastReaderTS]),
                                                   {[Key|KS], max(Ts, LastReaderTS+1)}
                                           end end, {[], TimeStamp}, WriteSet),
               lists:foreach(fun({Key, Value}) ->
-                          lager:warning("Trying to insert key ~p", [Key]),
                           case ets:lookup(PreparedTxs, Key) of
                               [] ->
                                   true = ets:insert(PreparedTxs, {Key, [{repl_prepare, TxId, ToPrepTS, ToPrepTS, ToPrepTS, 1, Value, []}]});
