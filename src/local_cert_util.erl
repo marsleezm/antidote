@@ -242,7 +242,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                                     reply(Sender, {ok, hd(Values)})
                             end end,
                         AbortedReaders++PendingReaders),
-                    lager:warning("Head is ~p, Record is ~p", [Head, Record]),
+                    %lager:warning("Head is ~p, Record is ~p", [Head, Record]),
                     case Head of
                         [] -> ets:insert(PreparedTxs, {Key, max(TxCommitTime, LRTime)}),
                             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
@@ -664,11 +664,10 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
-             lager:warning("Nothing prepared!!"),
             ets:insert(PreparedTxs, {Key, SnapshotTime}),
             ready;
         [{Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, LastPPTime, CanPendPrep, Value, PendingReader}| PendingPrepare]}] ->
-              lager:warning("~p: has ~p with ~p, Type is ~p, lastpp time is ~p, pending prepares are ~p",[Key, PreparedTxId, PrepareTime, Type, LastPPTime, PendingPrepare]),
+              %lager:warning("~p: has ~p with ~p, Type is ~p, lastpp time is ~p, pending prepares are ~p",[Key, PreparedTxId, PrepareTime, Type, LastPPTime, PendingPrepare]),
             case PrepareTime =< SnapshotTime of
                 true ->
                     %% The read is not ready, may read from speculative version 
@@ -700,12 +699,11 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
                             not_ready;
                         _ ->
                             %% There is more than one speculative version
-                            lager:warning("Going to read specual value"),
                             add_read_dep(TxId, ToReadTx, Key),
                             case SnapshotTime > LastReaderTime of
-                                true -> lager:warning("Inserting here"), 
+                                true -> 
                                         ets:insert(PreparedTxs, [{Key, [{Type, PreparedTxId, PrepareTime, SnapshotTime, LastPPTime, CanPendPrep, Value, PendingReader}| PendingPrepare]}]);
-                                false -> lager:warning("No need to insert"),  
+                                false -> 
                                         ok
                             end,
                             {specula, ToReadValue}
@@ -937,10 +935,8 @@ find(ReaderTxId, SnapshotTime, [{Type, TxId, Time, Value, PendingReaders}|Rest]=
             case ToReturn of 
                 first ->
                     AllPrevious = [],
-                    lager:warning("Here"),
                     find(ReaderTxId, SnapshotTime, Rest, {Type, TxId, Time, Value, PendingReaders}, [], SenderInfo);
                 _ ->
-                    lager:warning("Filling ~w", [[ToReturn|AllPrevious]]),
                     find(ReaderTxId, SnapshotTime, Rest, {Type, TxId, Time, Value, PendingReaders}, [ToReturn|AllPrevious], SenderInfo)
             end 
     end.
