@@ -190,11 +190,11 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{Type, TxId, _PrepareTime, LRTime, LSCTime, PrepNum, Value, PendingReaders}|Deps]}] ->
-            %lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p", [Key, TxId, Type, PrepNum, TxCommitTime]),
             %lager:warning("~p Pending readers are ~p! Pending writers are ~p", [TxId, PendingReaders, Deps]),
             {Head, Record, DepDict1, AbortedReaders, RemoveDepType, AbortPrep} 
                 = deal_pending_records(Deps, TxCommitTime, DepDict, MyNode, [], false, PartitionType, 0),
             RPrepNum = case Type of specula_commit -> PrepNum-AbortPrep; _ -> PrepNum-AbortPrep-1 end,
+            lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p, RPrepNum is ~p, AbortPrep is ~w", [Key, TxId, Type, PrepNum, TxCommitTime, RPrepNum, AbortPrep]),
             case PartitionType of
                 cache ->  
                     lists:foreach(fun({ReaderTxId, Node, Sender}) ->
