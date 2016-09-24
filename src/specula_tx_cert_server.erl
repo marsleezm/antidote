@@ -1147,16 +1147,16 @@ specula_commit(LocalPartitions, RemotePartitions, TxId, SpeculaCommitTs, RepDict
 
 %% Deal dependencies and check if any following transactions can be committed.
 try_commit_follower(LastCommitTime, [], _RepDict, DepDict, PendingTxs, ClientDict, ToAbortTxs, MayCommitTxs, CommittedTxs) ->
-       lager:warning("Returning ~w ~w ~w ~w ~w ~p ~p", [PendingTxs, LastCommitTime, DepDict, ToAbortTxs, MayCommitTxs, ClientDict, CommittedTxs]),
+       %lager:warning("Returning ~w ~w ~w ~w ~w ~p ~p", [PendingTxs, LastCommitTime, DepDict, ToAbortTxs, MayCommitTxs, ClientDict, CommittedTxs]),
     {PendingTxs, [], LastCommitTime, DepDict, ToAbortTxs, MayCommitTxs, ClientDict, CommittedTxs};
 try_commit_follower(LastCommitTime, [H|Rest]=PendingList, RepDict, DepDict, 
                         PendingTxs, ClientDict, LastAbortTxs, LastMayCommit, CommittedTxs) ->
     Result = case dict:find(H, DepDict) of
                 {ok, {0, [], PendingMaxPT}} ->
-                     lager:warning("If can commit decision for ~w is true", [H]),
+                     %lager:warning("If can commit decision for ~w is true", [H]),
                     {true, max(PendingMaxPT, LastCommitTime+1)};
                 _R ->
-                     lager:warning("If can commit decision for ~w is not true", [H]),
+                     %lager:warning("If can commit decision for ~w is not true", [H]),
                     false
             end,
     case Result of
