@@ -539,7 +539,7 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
     case ets:lookup(PreparedTxs, Key) of
         %% If this one is prepared, no one else can be specula-committed already, so sc-time should be the same as prep time 
         [{Key, [{prepared, TxId, _PrepareTime, LastReaderTime, LastPrepTime, PrepNum, Value, PendingReaders}|Deps] }] ->
-            %lager:warning("Here, deps are ~w", [Deps]),
+            lager:warning("SC commit for ~w, ~p, prepnum are ~w", [TxId, Key, PrepNum]),
             {Head, Record, DepDict1, AbortedReaders, _, AbortPrep} = deal_pending_records(Deps, SCTime, DepDict, MyNode, [], false, PartitionType, 0),
             case Head == [] of
                 true -> Record = [],
@@ -560,7 +560,6 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
                                     true ->
                                         reply({relay, Sender}, {ok, Value});
                                     false ->
-                                        lager:warning("Relaying read of ~w to ~w", [ReaderTxId, Node]),
                                         {_, RealKey} = Key,
                                         clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false)
                                 end end,
@@ -632,7 +631,7 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
                                     end,
                     %%% Just to expose more erros if possible
                     true = TxPrepTime =< SCTime,
-                    lager:warning("Other transaction is ~p, Head is ~p, Record is ~p", [OtherTxId, Head, Record]),
+                    lager:warning("Other transaction is ~p, Head is ~p, Record is ~p, PrepNum is ~w, AbortPrep is ~w", [OtherTxId, Head, Record, PrepNum, AbortPrep]),
                     true = ets:insert(PreparedTxs, {Key, [{specula_commit, OtherTxId, MySCTime, LastReaderTime, max(SCTime, LastPrepTime), PrepNum-1-AbortPrep, Value, OtherPendReaders}|RemainRecords]}),
                     specula_commit(Rest, TxId, SCTime, InMemoryStore, PreparedTxs,
                         DepDict2, Partition, PartitionType)
@@ -662,7 +661,7 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
         [] ->
             ets:insert(PreparedTxs, {Key, SnapshotTime}),
             ready;
-        [{Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, LastPPTime, CanPendPrep, Value, PendingReader}| PendingPrepare]}] ->
+        [{Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, LastPPTime, PendPrepNum, Value, PendingReader}| PendingPrepare]}] ->
               %lager:warning("~p: has ~p with ~p, Type is ~p, lastpp time is ~p, pending prepares are ~p",[Key, PreparedTxId, PrepareTime, Type, LastPPTime, PendingPrepare]),
             case PrepareTime =< SnapshotTime of
                 true ->
@@ -675,22 +674,22 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
                             %% There is more than one speculative version
                             case sc_by_local(TxId) and (Type == specula_commit) of
                                 true ->
-                                    lager:warning("~p finally reading specula version ~p", [TxId, Value]),
+                                    lager:warning("~p finally reading specula version ~p, pend prep num is ~w", [TxId, Value, PendPrepNum]),
                                     add_read_dep(TxId, PreparedTxId, Key),
                                     case SnapshotTime > LastReaderTime of
-                                        true -> ets:insert(PreparedTxs, [{Key, [{specula_commit, PreparedTxId, PrepareTime, SnapshotTime, LastPPTime, CanPendPrep, Value, PendingReader}| PendingPrepare]}]);
+                                        true -> ets:insert(PreparedTxs, [{Key, [{specula_commit, PreparedTxId, PrepareTime, SnapshotTime, LastPPTime, PendPrepNum, Value, PendingReader}| PendingPrepare]}]);
                                         false -> ok
                                     end,
                                     {specula, Value};
                                 false ->
-                                    lager:warning("~p can not read this version, not by local or not specula commit, Type is ~p, PrepTx is ~p", [TxId, Type, PreparedTxId]),
-                                    ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, NextReaderTime, LastPPTime, CanPendPrep,
+                                    lager:warning("~p can not read this version, not by local or not specula commit, Type is ~p, PrepTx is ~p, PendPrepNum is ~w", [TxId, Type, PreparedTxId, PendPrepNum]),
+                                    ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, NextReaderTime, LastPPTime, PendPrepNum,
                                         Value, [SenderInfo|PendingReader]}| PendingPrepare]}),
                                     not_ready
                             end;
                         not_ready ->
-                            lager:warning("Key ~p: ~p can not read this version, not ready, Record is ~w", [Key, TxId, Record]),
-                            ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, NextReaderTime, LastPPTime, CanPendPrep, Value,
+                            lager:warning("Key ~p: ~p can not read this version, not ready, Record is ~w, PendPrepNum ~w", [Key, TxId, Record, PendPrepNum]),
+                            ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, NextReaderTime, LastPPTime, PendPrepNum, Value,
                                 PendingReader}| Record]}),
                             not_ready;
                         _ ->
@@ -698,7 +697,7 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
                             add_read_dep(TxId, ToReadTx, Key),
                             case SnapshotTime > LastReaderTime of
                                 true -> 
-                                        ets:insert(PreparedTxs, [{Key, [{Type, PreparedTxId, PrepareTime, SnapshotTime, LastPPTime, CanPendPrep, Value, PendingReader}| PendingPrepare]}]);
+                                        ets:insert(PreparedTxs, [{Key, [{Type, PreparedTxId, PrepareTime, SnapshotTime, LastPPTime, PendPrepNum, Value, PendingReader}| PendingPrepare]}]);
                                 false -> 
                                         ok
                             end,
