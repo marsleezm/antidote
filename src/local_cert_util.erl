@@ -156,12 +156,12 @@ check_prepared(TxId, PreparedTxs, Key, _Value) ->
         %%% The type of the record: prepared or specula-commit; TxId; PrepareTime; LastReaderTime;
         %% The specula-commit time of the last record
         [{Key, [{Type, PrepTxId, PrepareTime, LastReaderTime, LastSCTime, PrepNum, _PrepValue, _RWaiter}|_PWaiter]=_Record}] ->
-            lager:warning("For key ~p: ~p prepared already! LastStTime is ~p, ~p may fail, PrepNum is ~w", [Key, PrepTxId, LastSCTime, TxId, PrepNum]),
+            %lager:warning("For key ~p: ~p prepared already! LastStTime is ~p, ~p may fail, PrepNum is ~w", [Key, PrepTxId, LastSCTime, TxId, PrepNum]),
             case LastSCTime > SnapshotTime of
                 true ->
                     false;
                 false ->
-                     lager:warning("~p: ~p waits for ~p that is ~p with ~p", [Key, TxId, PrepTxId, Type, PrepareTime]),
+                     lager:warning("~p: ~p waits for ~p that is ~p with ~p, PrepNum is ~w", [Key, TxId, PrepTxId, Type, PrepareTime, PrepNum]),
                     %% If all previous txns have specula-committed, then this txn can be directly pend-prepared and specula-committed 
                     %% Otherwise, this txn has to wait until all preceding prepared txn to be specula-committed
                     %% has_spec_commit means this txn can pend prep and then spec commit 
