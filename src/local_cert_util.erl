@@ -156,7 +156,7 @@ check_prepared(TxId, PreparedTxs, Key, _Value) ->
         %%% The type of the record: prepared or specula-commit; TxId; PrepareTime; LastReaderTime;
         %% The specula-commit time of the last record
         [{Key, [{Type, PrepTxId, PrepareTime, LastReaderTime, LastSCTime, PrepNum, _PrepValue, _RWaiter}|_PWaiter]=_Record}] ->
-           lager:warning("For key ~p: ~p prepared already! LastStTime is ~p, ~p may fail", [Key, PrepTxId, LastSCTime, TxId]),
+            lager:warning("For key ~p: ~p prepared already! LastStTime is ~p, ~p may fail, PrepNum is ~w", [Key, PrepTxId, LastSCTime, TxId, PrepNum]),
             case LastSCTime > SnapshotTime of
                 true ->
                     false;
@@ -288,16 +288,15 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
 clean_abort_prepared(_PreparedTxs, [], _TxId, _InMemoryStore, DepDict, _, _) ->
     DepDict; 
 clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Partition, PartitionType) ->
-    lager:warning("Aborting ~p for key ~p", [TxId, Key]),
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{Type, TxId, _PrepTime, LastReaderTime, LastPPTime, PrepNum, _Value, PendingReaders}|RestRecords]}] ->
+            lager:warning("Aborting ~p for key ~p, PrepNum is ~w", [TxId, Key, PrepNum]),
             {Head, RemainRecord, DepDict1, AbortedReaders, remove_pd, 0}
                   = deal_pending_records(RestRecords, 0, DepDict, MyNode, [], false, PartitionType, 0),
             case PartitionType of
                 cache -> 
                     lists:foreach(fun({ReaderTxId, Node, {relay, Sender}}) -> 
-                            lager:warning("Relaying read of ~w to ~w", [ReaderTxId, Node]),
                             {_, RealKey} = Key,
                             clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false) end,
                               PendingReaders++AbortedReaders);
@@ -334,7 +333,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
                     end
             end;
         [{Key, [First|Others]}] -> 
-            lager:warning("Aborting TxId is ~w, Key is ~p", [TxId, Key]),
+            lager:warning("Aborting TxId ~w, Key is ~p, First is ~w, Others are ~w", [TxId, Key, First, Others]),
             {Record, DepDict2, CAbortPrep} = delete_and_read(abort, InMemoryStore, 0, Key, DepDict, PartitionType, Partition, Others, TxId, [], First, 0),
             lager:warning("Record is ~w", [Record]),
             case Record of 
