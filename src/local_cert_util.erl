@@ -293,7 +293,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{Type, TxId, _PrepTime, LastReaderTime, LastPPTime, PrepNum, _Value, PendingReaders}|RestRecords]}] ->
-            lager:warning("Aborting ~p for key ~p, PrepNum is ~w", [TxId, Key, PrepNum]),
+            lager:warning("Aborting ~p for key ~p, PrepNum is ~w, Type is ~w", [TxId, Key, PrepNum, Type]),
             {Head, RemainRecord, DepDict1, AbortedReaders, remove_pd, 0}
                   = deal_pending_records(RestRecords, 0, DepDict, MyNode, [], false, PartitionType, 0),
             case PartitionType of
@@ -544,8 +544,8 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
     case ets:lookup(PreparedTxs, Key) of
         %% If this one is prepared, no one else can be specula-committed already, so sc-time should be the same as prep time 
         [{Key, [{prepared, TxId, _PrepareTime, LastReaderTime, LastPrepTime, PrepNum, Value, PendingReaders}|Deps] }] ->
-            lager:warning("SC commit for ~w, ~p, prepnum are ~w", [TxId, Key, PrepNum]),
             {Head, Record, DepDict1, AbortedReaders, _, AbortPrep} = deal_pending_records(Deps, SCTime, DepDict, MyNode, [], false, PartitionType, 0),
+            lager:warning("SC commit for ~w, ~p, prepnum are ~w, AbortPrep is ~w", [TxId, Key, PrepNum, AbortPrep]),
             case Head == [] of
                 true -> Record = [],
                 true = ets:insert(PreparedTxs, {Key, [{specula_commit, TxId, SCTime, LastReaderTime, max(SCTime, LastPrepTime), 0, Value, []}]});
@@ -976,6 +976,7 @@ insert_prepare(PreparedTxs, TxId, Partition, WriteSet, TimeStamp, Sender) ->
       end.
 
 add_to_list(ToPrepTxId, ToPrepTS, ToPrepValue, [{Type, PrepTxId, PrepTS, LastReaderTS, LastSCTime, PrepNum, PrepValue, Reader}|Rest]) -> 
+    lager:warning("Insert prepare for ~w, previous tx is ~w, type is ~e, new prep num is ~w", [ToPrepTxId, PrepTxId, Type, PrepNum]),
     [{Type, PrepTxId, PrepTS, LastReaderTS, max(LastSCTime, ToPrepTS), PrepNum+1, PrepValue, Reader}|
         add_to_list(ToPrepTxId, ToPrepTS, ToPrepValue, Rest)];
 add_to_list(ToPrepTxId, ToPrepTS, ToPrepValue, [{Type, PrepTxId, PrepTS, PrepValue, Reader}|Rest] = L) ->
