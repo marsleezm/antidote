@@ -545,7 +545,7 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
         %% If this one is prepared, no one else can be specula-committed already, so sc-time should be the same as prep time 
         [{Key, [{prepared, TxId, _PrepareTime, LastReaderTime, LastPrepTime, PrepNum, Value, PendingReaders}|Deps] }] ->
             {Head, Record, DepDict1, AbortedReaders, _, AbortPrep} = deal_pending_records(Deps, SCTime, DepDict, MyNode, [], false, PartitionType, 0),
-            lager:warning("SC commit for ~w, ~p, prepnum are ~w, AbortPrep is ~w", [TxId, Key, PrepNum, AbortPrep]),
+            lager:warning("SC commit for ~w, ~p, prepnum are ~w, AbortPrep is ~w, replying to ~w, ~w", [TxId, Key, PrepNum, AbortPrep, PendingReaders, AbortedReaders]),
             case Head == [] of
                 true -> Record = [],
                 true = ets:insert(PreparedTxs, {Key, [{specula_commit, TxId, SCTime, LastReaderTime, max(SCTime, LastPrepTime), 0, Value, []}]});
