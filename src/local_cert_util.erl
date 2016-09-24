@@ -167,7 +167,7 @@ check_prepared(TxId, PreparedTxs, Key, _Value) ->
                     %% has_spec_commit means this txn can pend prep and then spec commit 
                     %% has_pend_prep basically means this txn can not even pend_prep
                     case PrepNum of 0 ->  {prep_dep, LastReaderTime+1};
-                                        _ -> {pend_prep_dep, LastReaderTime+1}
+                                    _ -> {pend_prep_dep, LastReaderTime+1}
                     end
             end;
         [{Key, LastReaderTime}] ->
@@ -194,6 +194,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             {Head, Record, DepDict1, AbortedReaders, RemoveDepType, AbortPrep} 
                 = deal_pending_records(Deps, TxCommitTime, DepDict, MyNode, [], false, PartitionType, 0),
             RPrepNum = case Type of specula_commit -> PrepNum-AbortPrep; _ -> PrepNum-AbortPrep-1 end,
+            case RPrepNum < 0 of true -> lager:error("RPrepNum is ~w!, PrepNum is ~w, AbortPrep is ~w, ~w, ~w, Key is ~w", [RPrepNum, PrepNum, AbortPrep, TxId, Type, Key]); false -> ok end,
            %lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p, RPrepNum is ~p, AbortPrep is ~w", [Key, TxId, Type, PrepNum, TxCommitTime, RPrepNum, AbortPrep]),
             case PartitionType of
                 cache ->  
@@ -271,6 +272,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             case CAbortPrep of 
                 0 -> ets:insert(PreparedTxs, {Key, Record});
                 _ -> [{F1, F2, F3, F4, F5, FPrepNum, FValue, FPendReader}|FRest] = Record,
+                    case FPrepNum < CAbortPrep of true -> lager:error("FPrepNum is ~w! CAbortPrep is ~w, ~w, ~w, Key ~w", [FPrepNum, CAbortPrep, TxId, F1, Key]); false -> ok end,
                     ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, F5, FPrepNum-CAbortPrep, FValue, FPendReader}|FRest]}) 
             end,
             case PartitionType of cache -> ok; _ -> ets:insert(CommittedTxs, {Key, TxCommitTime}) end,
@@ -315,6 +317,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
                     true = ets:insert(PreparedTxs, {Key, LastReaderTime}),
                     clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict1, Partition, PartitionType);
                 {repl_prepare, HTxId, HPTime, HValue, HReaders} ->
+                    case PrepNum < 1 of true -> lager:error("PrepNum is ~w, TxId is ~w, Type is ~w, Key is ~w, H: ~w", [PrepNum, TxId, Type, Key, HTxId]); false -> ok end,
                     true = ets:insert(PreparedTxs, {Key, [{repl_prepare, HTxId, HPTime, LastReaderTime, max(HPTime,LastPPTime), PrepNum-1,
                             HValue, HReaders}|RemainRecord]}),
                     clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict1, Partition, PartitionType);
@@ -326,6 +329,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
                                     HValue, HReaders}|RemainRecord]}),
                             clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition, PartitionType);
                         prepared -> 
+                            case PrepNum < 1 of true -> lager:error("PrepNum is ~w, TxId is ~w, Type is ~w, Key is ~w, H: ~w, ~w", [PrepNum, TxId, Type, Key, HTxId, HType]); false -> ok end,
                             DepDict2 = unblock_prepare(HTxId, DepDict1, Partition, remove_ppd),
                             ets:insert(PreparedTxs, {Key, [{HType, HTxId, HPTime, LastReaderTime, HPTime, PrepNum-1,
                                     HValue, HReaders}|RemainRecord]}),
@@ -342,6 +346,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
                     case CAbortPrep of 
                         0 -> ets:insert(PreparedTxs, {Key, Record});
                         _ -> [{F1, F2, F3, F4, F5, FPrepNum, FValue, FPendReader}|FRest] = Record,
+                            case FPrepNum < CAbortPrep of true -> lager:error("FPrepNum is ~w! CAbortPrep is ~w, ~w, ~w, Key ~w", [FPrepNum, CAbortPrep, TxId, F1, Key]); false -> ok end,
                            ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, F5, FPrepNum-CAbortPrep, FValue, FPendReader}|FRest]}) 
                     end,
                     clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition, PartitionType)
@@ -632,6 +637,7 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
                                     end,
                     %%% Just to expose more erros if possible
                     true = TxPrepTime =< SCTime,
+                    case PrepNum < AbortPrep+1 of true -> lager:error("PrepNum is ~w! AbortPrep is ~w, ~w, Key ~w", [PrepNum, AbortPrep, TxId, Key]); false -> ok end,
                    %lager:warning("TxId is ~w, Key is ~w, Other transaction is ~p, Head is ~p, Record is ~p, PrepNum is ~w, AbortPrep is ~w", [TxId, Key, OtherTxId, Head, Record, PrepNum, AbortPrep]),
                     true = ets:insert(PreparedTxs, {Key, [{specula_commit, OtherTxId, MySCTime, LastReaderTime, max(SCTime, LastPrepTime), PrepNum-1-AbortPrep, Value, OtherPendReaders}|RemainRecords]}),
                     specula_commit(Rest, TxId, SCTime, InMemoryStore, PreparedTxs,
