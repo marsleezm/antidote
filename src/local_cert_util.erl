@@ -587,6 +587,7 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
             specula_commit(Rest, TxId, SCTime, InMemoryStore, 
                   PreparedTxs, DepDict2, Partition, PartitionType);
         [{Key, [{specula_commit, OtherTxId, MySCTime, LastReaderTime, LastPrepTime, PrepNum, Value, OtherPendReaders}|RecordList]}] ->
+            lager:warning("SC commit for ~w, ~p, prepnum are ~w", [TxId, Key, PrepNum]),
             case find_prepare_record(RecordList, TxId) of
                 [] -> 
                     specula_commit(Rest, TxId, SCTime, InMemoryStore, 
@@ -631,7 +632,7 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
                                     end,
                     %%% Just to expose more erros if possible
                     true = TxPrepTime =< SCTime,
-                    lager:warning("Other transaction is ~p, Head is ~p, Record is ~p, PrepNum is ~w, AbortPrep is ~w", [OtherTxId, Head, Record, PrepNum, AbortPrep]),
+                    lager:warning("TxId is ~w, Key is ~w, Other transaction is ~p, Head is ~p, Record is ~p, PrepNum is ~w, AbortPrep is ~w", [TxId, Key, OtherTxId, Head, Record, PrepNum, AbortPrep]),
                     true = ets:insert(PreparedTxs, {Key, [{specula_commit, OtherTxId, MySCTime, LastReaderTime, max(SCTime, LastPrepTime), PrepNum-1-AbortPrep, Value, OtherPendReaders}|RemainRecords]}),
                     specula_commit(Rest, TxId, SCTime, InMemoryStore, PreparedTxs,
                         DepDict2, Partition, PartitionType)
