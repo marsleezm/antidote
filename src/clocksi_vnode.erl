@@ -465,7 +465,7 @@ handle_command({specula_commit, TxId, SpeculaCommitTime}, _Sender, State=#state{
             {noreply, State#state{dep_dict=DepDict1}};
         [] ->
             lager:error("Prepared record of ~w has disappeared!", [TxId]),
-            error
+            {noreply, State}
     end;
 
 handle_command({append_value, Key, Value, CommitTime}, Sender,
