@@ -290,18 +290,21 @@ handle_call({certify_read, TxId, ClientMsgId, Client}, Sender, SD0=#state{min_co
                     end
             end;
         false ->
-            case ClientState#client_state.aborted_update of
-                ?NO_TXN -> 
-                    ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
-                            committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
-                    DepDict1 = dict:erase(TxId, DepDict),
-                    {reply, {aborted, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
-                AbortedTxId ->
-                    ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
-                                    committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
-                    DepDict1 = dict:erase(TxId, DepDict),
-                    {reply, {cascade_abort, {AbortedTxId, rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
-            end
+            ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN}, ClientDict),
+            DepDict1 = dict:erase(TxId, DepDict),
+            {reply, wrong_msg, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
+            %case ClientState#client_state.aborted_update of
+            %    ?NO_TXN -> 
+            %        ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
+            %                committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
+            %        DepDict1 = dict:erase(TxId, DepDict),
+            %        {reply, {aborted, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
+            %    AbortedTxId ->
+            %        ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
+            %                        committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
+            %        DepDict1 = dict:erase(TxId, DepDict),
+            %        {reply, {cascade_abort, {AbortedTxId, rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
+            %end
     end;
 
 handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Sender, SD0) ->
@@ -394,19 +397,22 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, Cli
                     end
             end;
         false ->
-             lager:warning("~w: invalid message id!! My is ~w, from client is ~w, aborted update is ~w", [TxId, SentMsgId, ClientMsgId, ClientState#client_state.aborted_update]),
-            case ClientState#client_state.aborted_update of
-                ?NO_TXN -> 
-                    ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
-                            committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
-                    DepDict1 = dict:erase(TxId, DepDict),
-                    {reply, {aborted, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
-                AbortedTxId ->
-                    ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
-                                    committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
-                    DepDict1 = dict:erase(TxId, DepDict),
-                    {reply, {cascade_abort, {AbortedTxId, rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
-            end
+            ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN}, ClientDict),
+            DepDict1 = dict:erase(TxId, DepDict),
+            {reply, wrong_msg, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
+            % lager:warning("~w: invalid message id!! My is ~w, from client is ~w, aborted update is ~w", [TxId, SentMsgId, ClientMsgId, ClientState#client_state.aborted_update]),
+            %case ClientState#client_state.aborted_update of
+            %    ?NO_TXN -> 
+            %        ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
+            %                committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
+            %        DepDict1 = dict:erase(TxId, DepDict),
+            %        {reply, {aborted, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
+            %    AbortedTxId ->
+            %        ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
+            %                        committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
+            %        DepDict1 = dict:erase(TxId, DepDict),
+            %        {reply, {cascade_abort, {AbortedTxId, rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}}
+            %end
     end;
 
 handle_call({read, Key, TxId, Node}, Sender, SD0=#state{specula_read=SpeculaRead}) ->
