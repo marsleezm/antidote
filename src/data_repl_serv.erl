@@ -486,7 +486,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_read=SpeculaRead, current_dict=CurrentDict, dep_dict=DepDict, set_size=SetSize}) ->
-    lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
+   %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     {CurrentDict1, DepDict1} = lists:foldl(fun(Partition, {D, DepD}) ->
                case ets:lookup(PreparedTxs, {TxId, Partition}) of
                     [{{TxId, Partition}, KeySet}] ->
@@ -495,7 +495,7 @@ handle_cast({repl_abort, TxId, Partitions},
                         DepD1= local_cert_util:clean_abort_prepared(PreparedTxs, KeySet, TxId, InMemoryStore, DepD, Partition, slave),
                         {D, DepD1};
                     [] ->
-                        lager:warning("Repl abort arrived early! ~w", [TxId]),
+                       %lager:warning("Repl abort arrived early! ~w", [TxId]),
                         {dict:store(TxId, finished, D), DepD}
                 end
         end, {CurrentDict, DepDict}, Partitions),
