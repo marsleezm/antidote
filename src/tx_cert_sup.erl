@@ -28,7 +28,7 @@
 
 -export([init/1, certify/4, certify_update/6, get_stat/0, get_int_data/3, start_tx/3, single_read/3, clean_all_data/0, clean_data/1, 
             load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, trace/1, get_oldest/0,
-            get_oldest/1, 
+            get_oldest/1, get_all_size/0, get_size/1, read_all/0, read_all_nodes/0, 
             get_all_oldest/0,  get_pid/1, get_pids/1, get_global_pid/1]).
 
 -define(READ_TIMEOUT, 30000).
@@ -176,19 +176,85 @@ clean_data(Sender) ->
     gen_server:call(node(), {clean_data}),
     Sender ! cleaned.
 
-get_all_oldest() ->
-    lager:info("1"),
+get_all_size() ->
     Parts = hash_fun:get_partitions(),
-    lager:info("2"),
     Set = lists:foldl(fun({_, N}, D) ->
                 sets:add_element(N, D)
                 end, sets:new(), Parts),
     AllNodes = sets:to_list(Set),
-    lager:info("3"),
+    lager:warning("Send alreay"),
+    lists:foreach(fun(Node) ->
+                    spawn(rpc, call, [Node, tx_cert_sup, get_size, [self()]])
+    end, AllNodes),
+    lager:warning("Waiting"),
+    R = lists:foldl(fun(_, {PS, CS, DS, AllS}) ->
+                   receive {S1, S2, S3, S4} -> 
+                    {PS+S1, CS+S2, DS+S3, AllS+S4} 
+                   end end, {0,0,0,0}, AllNodes),
+    lager:warning("Final R is ~w", [R]).
+
+read_all_nodes() ->
+    Parts = hash_fun:get_partitions(),
+    Set = lists:foldl(fun({_, N}, D) ->
+                sets:add_element(N, D)
+                end, sets:new(), Parts),
+    AllNodes = sets:to_list(Set),
+    lager:warning("Send alreay"),
+    lists:foreach(fun(Node) ->
+                    spawn(rpc, call, [Node, tx_cert_sup, read_all, []])
+    end, AllNodes).
+
+read_all() ->
+    ToReplicate = repl_fsm_sup:find_to_repl(),
+    DataRepl = lists:foldl(fun(Node, Acc) ->
+            ReplName = list_to_atom(atom_to_list(node())++"repl"++atom_to_list(Node)),
+            [ReplName|Acc] end, [], ToReplicate),
+    Parts = hash_fun:get_partitions(),
+    MyParts = [{Part, Node} || {Part, Node} <- Parts, Node == node()],
+    lists:foreach(fun(N) -> 
+                    data_repl_serv:read_all(N)
+                  end, DataRepl),
+    lists:foreach(fun(N) -> 
+                    clocksi_vnode:read_all(N)
+                  end, MyParts).
+
+get_size(Sender) ->
+    lager:warning("Got request from ~w", [Sender]),
+    ToReplicate = repl_fsm_sup:find_to_repl(),
+    DataRepl = lists:foldl(fun(Node, Acc) ->
+            ReplName = list_to_atom(atom_to_list(node())++"repl"++atom_to_list(Node)),
+            [ReplName|Acc] end, [], ToReplicate),
+    lager:warning("Got all data repl"),
+    Parts = hash_fun:get_partitions(),
+    lager:warning("Got all parts "),
+    MyParts = [{Part, Node} || {Part, Node} <- Parts, Node == node()],
+    lager:warning("My parts are ~w, data repl is ~w ", [MyParts, DataRepl]),
+    {PS, CS, DS, AllS} = 
+        lists:foldl(fun(N, {S1, S2, S3, S4}) -> 
+                        lager:warning("Sending to ~w", [N]),
+                        {DS1, DS2, DS3, DS4} = data_repl_serv:get_size(N),
+                        lager:warning("Got reply from ~w", [N]),
+                        {S1+DS1, S2+DS2, S3+DS3, S4+DS4}
+                    end, {0, 0, 0, 0}, DataRepl),
+    {PS1, CS1, DS1, AllS1} = 
+        lists:foldl(fun(N, {S1, S2, S3, S4}) -> 
+                        lager:warning("Sending to ~w", [N]),
+                        {DS1, DS2, DS3, DS4} = clocksi_vnode:get_size(N),
+                        lager:warning("Got reply from ~w", [N]),
+                        {S1+DS1, S2+DS2, S3+DS3, S4+DS4}
+                    end, {PS, CS, DS, AllS}, MyParts),
+    lager:warning("PS is ~w, CS is ~w, DS is ~w, AllS is ~w", [PS1, CS1, DS1, AllS1]),
+    Sender ! {PS1, CS1, DS1, AllS1}.
+
+get_all_oldest() ->
+    Parts = hash_fun:get_partitions(),
+    Set = lists:foldl(fun({_, N}, D) ->
+                sets:add_element(N, D)
+                end, sets:new(), Parts),
+    AllNodes = sets:to_list(Set),
     lists:foreach(fun(Node) ->
                     spawn(rpc, call, [Node, tx_cert_sup, get_oldest, [self()]])
     end, AllNodes),
-    lager:info("4"),
     lists:foldl(fun(_, OldT) ->
                    receive T -> 
                         lager:info("Got reply of T", [T]),

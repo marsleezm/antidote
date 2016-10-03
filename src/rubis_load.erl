@@ -45,6 +45,7 @@ load(_) ->
     [M] = [L || {N, L} <- ReplList, N == MyNode ],
     MyRepIds = get_indexes(M, AllNodes),
     FullPartList = lists:flatten([L || {_, L} <- PartList]),
+    lager:warning("My rep Ids are ~w, All nodes are ~w, FullPartlist is ~w", [MyRepIds, AllNodes, FullPartList]),
     HashLength = length(FullPartList),
     MyReps = lists:map(fun(Index) ->  Name = lists:nth(Index, AllNodes),  {Index, {rep, get_rep_name(MyNode, Name)}} end, MyRepIds),
     DcId = index(MyNode, AllNodes),
@@ -54,11 +55,11 @@ load(_) ->
     lager:info("TargetNode is ~p, DcId is ~w, My Replica Ids are ~w",[MyNode, DcId, MyReps]),
     StartTime = os:timestamp(),
     try
-        ets:delete(rubis_load)
+        ets:delete(load_info)
     catch
         error:badarg ->  lager:warning("Ets table already deleted!")
     end,
-    ets:new(rubis_load, [named_table, public, set]),
+    ets:new(load_info, [named_table, public, set]),
     
     case DcId of 1 ->
             CT = tpcc_tool:now_nsec() - 100000,
@@ -73,9 +74,9 @@ load(_) ->
     Part1 = get_partition("COMMIT_TIME", FullPartList, HashLength),
     {ok, COMMIT_TIME} = clocksi_vnode:internal_read(Part1, "COMMIT_TIME", tx_utilities:create_tx_id(0)),
     %lager:info("Got commit, is ~w", [COMMIT_TIME]),
-    ets:insert(rubis_load, {"COMMIT_TIME", COMMIT_TIME}),
+    ets:insert(load_info, {"COMMIT_TIME", COMMIT_TIME}),
 
-    ets:insert(rubis_load, {active_items, 0}),
+    ets:insert(load_info, {active_items, 0}),
     load_config(),
 
     ToPopulateParts = [{DcId, server}|MyReps],
@@ -93,7 +94,7 @@ load(_) ->
                  end,
         spawn(rubis_load, thread_load, [Id, Tables, PartList, self()]) end, ToPopulateParts),
     lists:foreach(fun(_) ->  receive {done, I, S} -> ok, lager:info("Receive a reply from ~w, ~w", [I, S]) end end, ToPopulateParts), 
-    ets:delete(rubis_load),
+    ets:delete(load_info),
     EndTime = os:timestamp(),
     lager:info("Population finished.. used ~w", [timer:now_diff(EndTime, StartTime)/1000000]).
 
@@ -111,7 +112,7 @@ load_config() ->
 load_config([]) ->
     ok;
 load_config([{Key, Value} | Rest]) ->
-    ets:insert(rubis_load, {Key, Value}),
+    ets:insert(load_info, {Key, Value}),
     load_config(Rest);
 load_config([ Other | Rest]) ->
     io:format("Ignoring non-tuple config value: ~p\n", [Other]),
@@ -128,9 +129,9 @@ thread_load(MyNode, Server, PartList, Sup) ->
 
     lager:info("Finished populating items"),
 
-    [{_, NumOrgOldItems}] = ets:lookup(rubis_load, database_number_of_old_items), 
-    [{_, NumActiveItems}] = ets:lookup(rubis_load, active_items),
-    [{_, ReduceFactor}] = ets:lookup(rubis_load, reduce_factor),
+    [{_, NumOrgOldItems}] = ets:lookup(load_info, database_number_of_old_items), 
+    [{_, NumActiveItems}] = ets:lookup(load_info, active_items),
+    [{_, ReduceFactor}] = ets:lookup(load_info, reduce_factor),
 
     LastItemId = (NumOrgOldItems div ReduceFactor) + (NumActiveItems div ReduceFactor), 
     LastItemKey = rubis_tool:get_key(MyNode, lastitem), 
@@ -179,20 +180,20 @@ load_all(Device, Type, Count, PartList, TxServer, MyNode, PopulateNodes) ->
         eof -> 
             case Type of 
                 category ->
-                    ets:insert(rubis_load, {num_categories, Count-1});
+                    ets:insert(load_info, {num_categories, Count-1});
                 region ->
-                    ets:insert(rubis_load, {num_regions, Count-1})
+                    ets:insert(load_info, {num_regions, Count-1})
             end;
         Line0 ->
             Value = case Type of
                 category ->
                     [V0|Num0] = re:split(Line0, "\\(", [{return, list}]),
                     [Num|_] = re:split(Num0, "\\)", [{return, list}]),
-                    [{_, ReduceFactor}] = ets:lookup(rubis_load, reduce_factor),
+                    [{_, ReduceFactor}] = ets:lookup(load_info, reduce_factor),
                     ReducedNum = list_to_integer(Num) div ReduceFactor,
-                    ets:update_counter(rubis_load, active_items, ReducedNum), 
+                    ets:update_counter(load_info, active_items, ReducedNum), 
                     lists:foreach(fun({N, _}) ->
-                        ets:insert(rubis_load, {{N, Count}, ReducedNum})
+                        ets:insert(load_info, {{N, Count}, ReducedNum})
                             end, PopulateNodes),
                     droplast(V0);
                 region ->
@@ -206,41 +207,39 @@ load_all(Device, Type, Count, PartList, TxServer, MyNode, PopulateNodes) ->
 
 populate_comments(TxServer, MyNode, PartList) ->
     %%% Populate comments 
-    [{_, NumOrgUsers}] = ets:lookup(rubis_load, database_number_of_users), 
-    [{_, ReduceFactor}] = ets:lookup(rubis_load, reduce_factor), 
+    [{_, NumOrgUsers}] = ets:lookup(load_info, database_number_of_users), 
+    [{_, ReduceFactor}] = ets:lookup(load_info, reduce_factor), 
     NumUsers = NumOrgUsers div ReduceFactor,
+    [{_, CommentFinalLength0}] = ets:lookup(load_info, database_comment_max_length), 
+    CommentFinalLength = CommentFinalLength0 div 10,
 
-    Comments = ["Very bad", "Bad", "Normal", "Good", "Very good"],
     Seq = lists:seq(1, NumUsers),
     lists:foldl(fun(ItemId, SellerD) ->
                 Seller = random:uniform(NumUsers), 
                 FromUser = random:uniform(NumUsers),
                 Rating = ItemId rem 5 - 2,
-                Comment = lists:nth(Rating+3, Comments),
                 {SellerD1, Ind} = case dict:find(Seller, SellerD) of
                         error -> {dict:store(Seller, {1, [{MyNode,ItemId}]}, SellerD),  1};
                         {ok, {Len, L}} -> {dict:store(Seller, {Len+1, [{MyNode,ItemId}|L]}, SellerD), Len+1}
                      end,
                 CommentKey = rubis_tool:get_key({{MyNode, Seller}, Ind}, comment),
                 Now = rubis_tool:now_nsec(),
-                CommentObj = rubis_tool:create_comment({MyNode, FromUser}, {MyNode, Seller}, ItemId, Rating, Now, Comment),
+                CommentObj = rubis_tool:create_comment({MyNode, FromUser}, {MyNode, Seller}, CommentFinalLength, ItemId, Rating, Now),
                 put_to_node(TxServer, MyNode, PartList, CommentKey, CommentObj),
                 SellerD1
             end, dict:new(), Seq).
     
 populate_users(TxServer, MyNode, PartList, SellerD)->
-    [{_, NumOrgUsers}] = ets:lookup(rubis_load, database_number_of_users), 
-    [{_, ReduceFactor}] = ets:lookup(rubis_load, reduce_factor), 
-    [{_, NumRegions}] = ets:lookup(rubis_load, num_regions), 
+    [{_, NumOrgUsers}] = ets:lookup(load_info, database_number_of_users), 
+    [{_, ReduceFactor}] = ets:lookup(load_info, reduce_factor), 
+    [{_, NumRegions}] = ets:lookup(load_info, num_regions), 
     NumUsers = NumOrgUsers div ReduceFactor,
     Now = rubis_tool:now_nsec(),
     Seq = lists:seq(1, NumUsers),
     lists:foreach(fun(Index) ->
                     UserId = {MyNode, Index},
                     UserKey = rubis_tool:get_key(UserId, user),
-                    StrI = Index,
-                    User = rubis_tool:create_user(StrI, StrI, StrI, 
-                        StrI, StrI, Now, 0, 0, (Index rem NumRegions) + 1),
+                    User = rubis_tool:create_user(Index, Now, 0, 0, (Index rem NumRegions) + 1),
                     {NumComments, SellingItems} = case dict:find(Index, SellerD) of
                                     error -> {0, []};
                                     {ok, {Len, Is}} -> {Len, Is} 
@@ -251,21 +250,23 @@ populate_users(TxServer, MyNode, PartList, SellerD)->
 
 populate_items(TxServer, MyNode, PartList) ->
     random:seed({1, 1, MyNode}),
-    [{_, NumOrgOldItems}] = ets:lookup(rubis_load, database_number_of_old_items), 
-    [{_, NumActiveItems}] = ets:lookup(rubis_load, active_items),
-    [{_, ReduceFactor}] = ets:lookup(rubis_load, reduce_factor), 
-    [{_, Duration}] = ets:lookup(rubis_load, max_duration), 
+    [{_, NumOrgOldItems}] = ets:lookup(load_info, database_number_of_old_items), 
+    [{_, NumActiveItems}] = ets:lookup(load_info, active_items),
+    [{_, ReduceFactor}] = ets:lookup(load_info, reduce_factor), 
+    [{_, Duration}] = ets:lookup(load_info, max_duration), 
 
-    [{_, ReserverPrice}] = ets:lookup(rubis_load, database_percentage_of_items_with_reserve_price), 
-    [{_, BuyNowItems}] = ets:lookup(rubis_load, database_percentage_of_buy_now_items), 
-    [{_, UniqueItems}] = ets:lookup(rubis_load, database_percentage_of_unique_items), 
-    [{_, MaxQuantity}] = ets:lookup(rubis_load, database_max_quantity_for_multiple_items), 
+    [{_, ReserverPrice}] = ets:lookup(load_info, database_percentage_of_items_with_reserve_price), 
+    [{_, BuyNowItems}] = ets:lookup(load_info, database_percentage_of_buy_now_items), 
+    [{_, UniqueItems}] = ets:lookup(load_info, database_percentage_of_unique_items), 
+    [{_, MaxQuantity}] = ets:lookup(load_info, database_max_quantity_for_multiple_items), 
 
-    [{_, NumOrgUsers}] = ets:lookup(rubis_load, database_number_of_users), 
-    %[{_, NumOrgMaxBids}] = ets:lookup(rubis_load, database_max_bids_per_item), 
-    %[{_, NumRegions}] = ets:lookup(rubis_load, num_regions), 
-    [{_, NumCategories}] = ets:lookup(rubis_load, num_categories), 
-    [{_, NumRegions}] = ets:lookup(rubis_load, num_regions), 
+    [{_, NumOrgUsers}] = ets:lookup(load_info, database_number_of_users), 
+    [{_, CommentLength0}] = ets:lookup(load_info, database_item_description_length),
+    CommentLength = CommentLength0 div 10,
+    %[{_, NumOrgMaxBids}] = ets:lookup(load_info, database_max_bids_per_item), 
+    %[{_, NumRegions}] = ets:lookup(load_info, num_regions), 
+    [{_, NumCategories}] = ets:lookup(load_info, num_categories), 
+    [{_, NumRegions}] = ets:lookup(load_info, num_regions), 
     NumOldItems = NumOrgOldItems div ReduceFactor,
     NumUsers = NumOrgUsers div ReduceFactor,
     %NumMaxBids = NumOrgMaxBids div 4,
@@ -313,7 +314,7 @@ populate_items(TxServer, MyNode, PartList) ->
             ItemId = {MyNode, Index},
             Name = Index,
             Now = rubis_tool:now_nsec(),
-            Item = rubis_tool:create_item(Name, "Don't buy it!", InitialPrice, Qty, RPrice, BuyNowPrice,
+            Item = rubis_tool:create_item(Name, CommentLength, InitialPrice, Qty, RPrice, BuyNowPrice,
               Now, Now+Dur, SellerId, CategoryId),
             ItemKey = rubis_tool:get_key(ItemId, item),
             put_to_node(TxServer, MyNode, PartList, ItemKey, Item),
@@ -351,10 +352,10 @@ populate_items(TxServer, MyNode, PartList) ->
 
 find_categories(MyNode, Index, CatNum) ->
     C = Index rem CatNum + 1,
-    [{_, Num}] = ets:lookup(rubis_load, {MyNode, C}),
+    [{_, Num}] = ets:lookup(load_info, {MyNode, C}),
     case Num of 0 -> 
                      find_categories(MyNode, Index+1, CatNum);
-                _ -> ets:insert(rubis_load, {{MyNode, C}, Num-1}),
+                _ -> ets:insert(load_info, {{MyNode, C}, Num-1}),
                      C
     end.
 
@@ -363,7 +364,7 @@ get_partition(Key, PartList, HashLength) ->
     lists:nth(Num, PartList).
     
 put_to_node(Tabs, _DcId, _PartList, Key, Value) ->
-    [{"COMMIT_TIME", CommitTime}] = ets:lookup(rubis_load, "COMMIT_TIME"),
+    [{"COMMIT_TIME", CommitTime}] = ets:lookup(load_info, "COMMIT_TIME"),
     case is_list(Tabs) of
         true -> %% Is clocksi table
             Index = crypto:bytes_to_integer(erlang:md5(Key)) rem length(Tabs) + 1,
@@ -382,7 +383,7 @@ put_to_node(Tabs, _DcId, _PartList, Key, Value) ->
 %multi_put(TxServer, DcId, PartList, WriteSet) ->
 %    {_, L} = lists:nth(DcId, PartList%),
 %    DictList = dict:to_list(WriteSet),
-%    [{"COMMIT_TIME", CommitTime}] = ets:lookup(rubis_load, "COMMIT_TIME"),
+%    [{"COMMIT_TIME", CommitTime}] = ets:lookup(load_info, "COMMIT_TIME"),
 %    lists:foreach(fun({Index, KeyValues}) ->
 %            Part = lists:nth(Index, L),    
 %            put(TxServer, Part, KeyValues, CommitTime)

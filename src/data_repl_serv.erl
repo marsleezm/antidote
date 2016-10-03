@@ -37,7 +37,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--define(NUM_VERSIONS, 10).
+-define(NUM_VERSIONS, 40).
 -define(READ_TIMEOUT, 15000).
 %% API
 -export([start_link/2]).
@@ -55,6 +55,8 @@
 %% States
 -export([relay_read/4,
         get_table/1,
+        get_size/1,
+        read_all/1,
 	    check_key/2,
         get_ts/4,
         clean_data/2,
@@ -108,6 +110,9 @@ read(Name, Key, TxId, Part) ->
 get_table(Name) ->
     gen_server:call({global, Name}, {get_table}, ?READ_TIMEOUT).
 
+get_size(Name) ->
+    gen_server:call({global, Name}, {get_size}, ?READ_TIMEOUT).
+
 get_ts(Name, TxId, Partition, WriteSet) ->
     gen_server:call({global, Name}, {get_ts, TxId, Partition, WriteSet}, ?READ_TIMEOUT).
 
@@ -142,6 +147,9 @@ prepare_specula(Name, TxId, Partition, WriteSet, PrepareTime) ->
 local_certify(Name, TxId, Partition, WriteSet) ->
     gen_server:cast({global, Name}, {local_certify, TxId, Partition, WriteSet, self()}).
 
+read_all(Name) ->
+    gen_server:cast({global, Name}, {get_size}).
+
 specula_commit(Name, TxId, Partition, SpeculaCommitTs) ->
     gen_server:cast({global, Name}, {specula_commit, TxId, Partition, SpeculaCommitTs}).
 
@@ -164,13 +172,13 @@ clean_data(Name, Sender) ->
 
 
 init([Name, _Parts]) ->
-    lager:info("Data repl inited with name ~w", [Name]),
     InMemoryStore = tx_utilities:open_public_table(repl_log),
     PreparedTxs = tx_utilities:open_private_table(prepared_txs),
     CommittedTxs = tx_utilities:open_private_table(committed_txs),
     %NumPartitions = length(hash_fun:get_partitions()),
     [{_, Replicas}] = ets:lookup(meta_info, node()),
     TotalReplFactor = length(Replicas)+1,
+    lager:info("Data repl inited with name ~w, repl factor is ~w", [Name, TotalReplFactor]),
     SpeculaRead = antidote_config:get(specula_read),
     Concurrent = antidote_config:get(concurrent),
     SpeculaLength = antidote_config:get(specula_length),
@@ -187,6 +195,13 @@ handle_call({get_table}, _Sender, SD0=#state{inmemory_store=InMemoryStore}) ->
 
 handle_call({get_pid}, _Sender, SD0) ->
         {reply, self(), SD0};
+
+handle_call({get_size}, _Sender, SD0=#state{
+          prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, committed_txs=CommittedTxs}) ->
+  TableSize = ets:info(InMemoryStore, memory) * erlang:system_info(wordsize),
+  PrepareSize = ets:info(PreparedTxs, memory) * erlang:system_info(wordsize),
+  CommittedSize = ets:info(CommittedTxs, memory) * erlang:system_info(wordsize),
+  {reply, {PrepareSize, CommittedSize, TableSize, TableSize+PrepareSize+CommittedSize}, SD0};
 
 handle_call({retrieve_log, LogName},  _Sender,
 	    SD0=#state{inmemory_store=InMemoryStore}) ->
@@ -336,6 +351,14 @@ handle_cast({relay_read, Key, TxId, Reader},
             gen_server:reply(Reader, Value),
             {noreply, SD0}
     end;
+
+handle_cast({read_all}, SD0=#state{
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
+    Now = tx_utilities:now_microsec(),
+    lists:foreach(fun({Key, _}) ->
+            ets:insert(PreparedTxs, {Key, Now})
+            end, ets:tab2list(InMemoryStore)),
+    {noreply, SD0};
 
 handle_cast({prepare_specula, TxId, Part, WriteSet, ToPrepTS}, 
 	    SD0=#state{prepared_txs=PreparedTxs}) ->

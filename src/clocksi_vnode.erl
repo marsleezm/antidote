@@ -19,7 +19,7 @@
 -include("antidote.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--define(NUM_VERSION, 10).
+-define(NUM_VERSION, 44440).
 -define(SPECULA_THRESHOLD, 0).
 
 -export([start_vnode/1,
@@ -27,6 +27,7 @@
         debug_read/3,
 	    relay_read/5,
         abort_others/5,
+        get_size/1,
         %set_prepared/5,
         get_table/1,
         clean_data/2,
@@ -43,6 +44,7 @@
         append_value/5,
         append_values/4,
         abort/2,
+        read_all/1,
 
         init/1,
         terminate/2,
@@ -130,6 +132,16 @@ debug_read(Node, Key, TxId) ->
     riak_core_vnode_master:sync_command(Node,
                                    {debug_read, Key, TxId},
                                    ?CLOCKSI_MASTER, infinity).
+
+get_size(Node) ->
+    riak_core_vnode_master:sync_command(Node,
+                                   {get_size},
+                                   ?CLOCKSI_MASTER, infinity).
+
+read_all(Node) ->
+    riak_core_vnode_master:command(Node,
+                                   {read_all}, self(),
+                                   ?CLOCKSI_MASTER).
 
 clean_data(Node, From) ->
     riak_core_vnode_master:command(Node,
@@ -352,6 +364,21 @@ handle_command({internal_read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBl
             %lager:info("Got value for ~w, ~w", [Key, Result]),
             {reply, Result, SD0}
     end;
+
+handle_command({get_size}, _Sender, SD0=#state{
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, committed_txs=CommittedTxs}) ->
+    TableSize = ets:info(InMemoryStore, memory) * erlang:system_info(wordsize),
+    PrepareSize = ets:info(PreparedTxs, memory) * erlang:system_info(wordsize),
+    CommittedSize = ets:info(CommittedTxs, memory) * erlang:system_info(wordsize),
+    {reply, {PrepareSize, CommittedSize, TableSize, TableSize+PrepareSize+CommittedSize}, SD0};
+
+handle_command({read_all}, _Sender, SD0=#state{
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
+    Now = tx_utilities:now_microsec(),
+    lists:foreach(fun({Key, _}) ->
+            ets:insert(PreparedTxs, {Key, Now})
+            end, ets:tab2list(InMemoryStore)),
+    {noreply, SD0};
 
 %% This read serves for all normal cases.
 handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state{
