@@ -29,7 +29,7 @@
 -export([init/1, certify/4, certify_update/6, get_stat/0, get_int_data/3, start_tx/3, single_read/3, clean_all_data/0, clean_data/1, 
             load_local/3, start_read_tx/1, set_int_data/3, read/4, single_commit/4, append_values/4, load/2, trace/1, get_oldest/0,
             get_oldest/1, get_all_size/0, get_size/1, read_all/0, read_all_nodes/0, 
-            get_all_oldest/0,  get_pid/1, get_pids/1, get_global_pid/1]).
+            get_all_oldest/0,  get_pid/1, get_pids/1, get_global_pid/1, get_hitcounters/0]).
 
 -define(READ_TIMEOUT, 30000).
 
@@ -340,6 +340,16 @@ get_pid(WorkerId) ->
         false -> whereis(WorkerId)
     end.
 
+get_hitcounters() ->
+    SPL = lists:seq(1, ?NUM_SUP),
+    R = lists:foldl(fun(N, HT) ->
+            case gen_server:call(generate_module_name(N), {get_hitcounter}) of 
+                Num -> HT+Num 
+            end end, 0, SPL),
+    lager:warning("Total hitcounter is ~w", [R]),
+    R.
+    
+
 get_pids(Names) ->
     AllPids = lists:foldl(fun(WorkerId, Acc) ->
                 case is_integer(WorkerId) of
@@ -348,7 +358,6 @@ get_pids(Names) ->
                 end
                 end, [], Names),
     lists:reverse(AllPids).
-                
 
 get_global_pid(Name) ->
     gen_server:call({global, Name}, {get_pid}).

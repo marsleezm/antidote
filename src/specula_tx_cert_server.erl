@@ -72,6 +72,7 @@
         specula_read :: term(),
         min_commit_ts = 0 :: non_neg_integer(),
         min_snapshot_ts = 0 :: non_neg_integer(),
+        hit_counter=0,
         num_specula_read=0 :: non_neg_integer()
         }).
 
@@ -131,6 +132,9 @@ handle_call({get_pid}, _Sender, SD0) ->
 handle_call({start_read_tx}, _Sender, SD0) ->
     TxId = tx_utilities:create_tx_id(0),
     {reply, TxId, SD0};
+
+handle_call({get_hitcounter}, _Sender, SD0=#state{hit_counter=HitCounter}) ->
+    {reply, HitCounter, SD0}; 
 
 handle_call({start_tx}, Sender, SD0) ->
     {Client, _} = Sender,
@@ -326,7 +330,7 @@ handle_call({abort_txn, TxId, Client}, _Sender, SD0=#state{dep_dict=DepDict, cli
 handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Sender, SD0) ->
     {Client, _} = Sender,
     handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, Client}, Sender, SD0);
-handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, Client}, Sender, SD0=#state{rep_dict=RepDict, pending_txs=PendingTxs, total_repl_factor=ReplFactor, min_commit_ts=LastCommitTs, specula_length=SpeculaLength, dep_dict=DepDict, client_dict=ClientDict}) ->
+handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, Client}, Sender, SD0=#state{rep_dict=RepDict, pending_txs=PendingTxs, total_repl_factor=ReplFactor, min_commit_ts=LastCommitTs, specula_length=SpeculaLength, dep_dict=DepDict, client_dict=ClientDict, hit_counter=HitCounter}) ->
     %% If there was a legacy ongoing transaction.
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
@@ -373,7 +377,7 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, Cli
                                                     {0, ReadDepTxs--B, LastCommitTs+1}, DepDict),
                                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=TxId, local_updates=[], 
                                                 remote_updates=[], stage=remote_cert, sender=Sender}, ClientDict),
-                                            {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
+                                            {noreply, SD0#state{dep_dict=DepDict1, hit_counter=HitCounter+1, client_dict=ClientDict1}};
                                         false -> %% Can speculate. After replying, removing TxId
                                             %% Update specula data structure, and clean the txid so we know current txn is already replied
                                              %lgaer:warning("Returning specula_commit for ~w, ReadDepTxs are ~w, B is ~w", [TxId, ReadDepTxs, B]),
@@ -522,7 +526,8 @@ handle_cast({clean_data, Sender}, #state{name=Name}) ->
 %%  Transaction that has already cert_aborted.
 %% Has to add local_cert here, because may receive pending_prepared, prepared from the same guy.
 handle_cast({pending_prepared, TxId, PrepareTime, _From}, 
-	    SD0=#state{dep_dict=DepDict, specula_length=SpeculaLength, client_dict=ClientDict, pending_txs=PendingTxs,rep_dict=RepDict}) ->  
+	    SD0=#state{dep_dict=DepDict, specula_length=SpeculaLength, client_dict=ClientDict, hit_counter=HitCounter,
+         pending_txs=PendingTxs,rep_dict=RepDict}) ->  
     Client = TxId#tx_id.client_pid,
     ClientState = dict:fetch(Client, ClientDict),
     Stage = ClientState#client_state.stage,
@@ -547,7 +552,7 @@ handle_cast({pending_prepared, TxId, PrepareTime, _From},
                             specula_commit(LocalParts, RemoteParts, TxId, NewMaxPrep, RepDict),
                             DepDict1 = dict:store(TxId, {PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
                             ClientDict1 = dict:store(Client, ClientState#client_state{stage=remote_cert, remote_updates=RemoteParts}, ClientDict),
-                            {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
+                            {noreply, SD0#state{dep_dict=DepDict1, hit_counter=HitCounter+1, client_dict=ClientDict1}};
                         false ->
                              %lgaer:warning("Pending prep: decided to speculate ~w and prepare to ~w pending list is ~w!!", [TxId, RemoteUpdates, PendingList]),
                             AbortedReads = ClientState#client_state.aborted_reads,
@@ -604,7 +609,7 @@ handle_cast({solve_pending_prepared, TxId, PrepareTime, _From},
     end;
 
 handle_cast({prepared, TxId, PrepareTime, _From}, 
-	    SD0=#state{dep_dict=DepDict, specula_length=SpeculaLength, 
+	    SD0=#state{dep_dict=DepDict, specula_length=SpeculaLength, hit_counter=HitCounter, 
             client_dict=ClientDict, rep_dict=RepDict, pending_txs=PendingTxs}) ->
      %lgaer:warning("Got prepare for ~w, prepare time is ~w from ~w", [TxId, PrepareTime, From]),
     Client = TxId#tx_id.client_pid,
@@ -644,7 +649,7 @@ handle_cast({prepared, TxId, PrepareTime, _From},
                                     DepDict1 = dict:store(TxId, {PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
                                     ClientDict1 = dict:store(Client, ClientState#client_state{stage=remote_cert, 
                                         remote_updates=RemoteParts}, ClientDict),
-                                    {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
+                                    {noreply, SD0#state{dep_dict=DepDict1, hit_counter=HitCounter+1, client_dict=ClientDict1}};
                                 false ->
                                     %% Add dependent data into the table
                                     PendingTxs1 = dict:store(TxId, {LocalParts, RemoteParts}, PendingTxs),

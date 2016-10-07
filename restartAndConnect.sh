@@ -59,17 +59,17 @@ sudo rm -r ./dev/dev6/log
 sleep 2 
 sudo ./dev/dev1/bin/antidote start
 sudo ./dev/dev2/bin/antidote start
-sudo ./dev/dev3/bin/antidote start
-sudo ./dev/dev4/bin/antidote start
-sudo ./dev/dev5/bin/antidote start
-sudo ./dev/dev6/bin/antidote start
+#sudo ./dev/dev3/bin/antidote start
+#sudo ./dev/dev4/bin/antidote start
+#sudo ./dev/dev5/bin/antidote start
+#sudo ./dev/dev6/bin/antidote start
 
 sleep 3
 sudo ./dev/dev2/bin/antidote-admin cluster join dev1@127.0.0.1
-sudo ./dev/dev3/bin/antidote-admin cluster join dev1@127.0.0.1
-sudo ./dev/dev4/bin/antidote-admin cluster join dev1@127.0.0.1
-sudo ./dev/dev5/bin/antidote-admin cluster join dev1@127.0.0.1
-sudo ./dev/dev6/bin/antidote-admin cluster join dev1@127.0.0.1
+#sudo ./dev/dev3/bin/antidote-admin cluster join dev1@127.0.0.1
+#sudo ./dev/dev4/bin/antidote-admin cluster join dev1@127.0.0.1
+#sudo ./dev/dev5/bin/antidote-admin cluster join dev1@127.0.0.1
+#sudo ./dev/dev6/bin/antidote-admin cluster join dev1@127.0.0.1
 sleep 1
 sudo ./dev/dev1/bin/antidote-admin cluster plan
 sudo ./dev/dev1/bin/antidote-admin cluster commit 
