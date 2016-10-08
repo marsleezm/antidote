@@ -8,6 +8,7 @@
 -export([delete_1/2, delete_2/2, check_length1/2, check_time/1, check_length2/2,
          lookup_1/2, lookup_2/2, get_my_range/4, dict2/2,
          check_node/1, check_list/1, test_hash/2, ets2/2,
+         bs/1,
          pass1/1, pass2/1, set1/2, set2/2, set3/2]).
 
 check_time(N) ->
@@ -228,6 +229,56 @@ fun2(_) ->
     ets:lookup(table,2),
     ok.
 
+bs(_) ->
+    Sml = 0,
+    Big = 8,
+    Dict = dict:new(),
+    NewDict = lists:foldl(fun(N, D) ->
+                dict:store(N, inf, D)
+                end, Dict, lists:seq(Sml, Big)),
+    T1 = 300,
+    T2 = 200,
+    T3 = 400,
+    T4 = 200,
+    T5 = 300,
+    D1 = dict:store(Sml, T1, NewDict),
+    {S1, B1, M1} = int_bs(D1, Sml, Big, Sml, inf),
+    io:format("~w, ~w, ~w ~n", [S1, B1, M1]),
+    D2 = dict:store(M1, T2, D1),
+    {S2, B2, M2} = int_bs(D2, S1, B1, M1, T2),
+    io:format("~w, ~w, ~w ~n", [S2, B2, M2]),
+    D3 = dict:store(M2, T3, D2),
+    {S3, B3, M3} = int_bs(D3, S2, B2, M2, T3),
+    io:format("~w, ~w, ~w ~n", [S3, B3, M3]),
+
+    D4 = dict:store(M3, T4, D3),
+    {S4, B4, M4} = int_bs(D4, S3, B3, M3, T4),
+    io:format("~w, ~w, ~w ~n", [S4, B4, M4]),
+
+    D5 = dict:store(M4, T5, D4),
+    {S5, B5, M5} = int_bs(D5, S4, B4, M4, T5),
+
+    io:format("~w, ~w, ~w ~n", [S5, B5, M5]).
+
+int_bs(Dict, Small, Big, Mid, Throughput) ->
+    SmallTh = dict:fetch(Small, Dict),
+    io:format("Small th is ~w, th is ~w ~n", [SmallTh, Throughput]),
+    case Throughput > SmallTh of
+        true ->
+            S1 = Mid,
+            M1 = (S1 + Big) div 2,
+            case M1 of 
+                Mid -> {S1, Big, Big};
+                _ -> {S1, Big, M1}
+            end;
+        false ->
+            B1 = Mid,
+            M1 = (Small + B1) div 2,
+            case M1 of 
+                Mid -> {Small, B1, Small};
+                _ -> {Small, B1, M1}
+            end
+    end.
 
 check1(Key, Times, Dict) ->
     Seq = lists:seq(1, Times),
@@ -254,4 +305,5 @@ random_string(Len) ->
     ChrsSize = size(Chrs),
     F = fun(_, R) -> [element(random:uniform(ChrsSize), Chrs) | R] end,
     lists:foldl(F, "", lists:seq(1, Len)).
+
 

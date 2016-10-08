@@ -327,11 +327,18 @@ handle_call({abort_txn, TxId, Client}, _Sender, SD0=#state{dep_dict=DepDict, cli
             committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
     {reply, {aborted, {AbortedReads, rev(CommittedUpdates), CommittedReads}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
 
-handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Sender, SD0) ->
-    {Client, _} = Sender,
-    handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, Client}, Sender, SD0);
-handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, Client}, Sender, SD0=#state{rep_dict=RepDict, pending_txs=PendingTxs, total_repl_factor=ReplFactor, min_commit_ts=LastCommitTs, specula_length=SpeculaLength, dep_dict=DepDict, client_dict=ClientDict, hit_counter=HitCounter}) ->
+handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, NewSpeculaLength}, Sender, SD0=#state{specula_length=SpeculaLength}) ->
+    case NewSpeculaLength of
+        SpeculaLength ->
+            handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Sender, SD0);
+        ignore ->
+            handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Sender, SD0);
+        _ ->
+            handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Sender, SD0#state{specula_length=NewSpeculaLength})
+    end;
+handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Sender, SD0=#state{rep_dict=RepDict, pending_txs=PendingTxs, total_repl_factor=ReplFactor, min_commit_ts=LastCommitTs, specula_length=SpeculaLength, dep_dict=DepDict, client_dict=ClientDict, hit_counter=HitCounter}) ->
     %% If there was a legacy ongoing transaction.
+    {Client, _} = Sender,
     ReadDepTxs = [T2  || {_, T2} <- ets:lookup(anti_dep, TxId)],
     true = ets:delete(anti_dep, TxId),
      %lgaer:warning("Start certifying ~w, readDepTxs is ~w, Sender is ~w, local parts remote parts are ~w", [TxId, ReadDepTxs, Sender, RemoteUpdates]),
