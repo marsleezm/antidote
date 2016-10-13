@@ -235,7 +235,7 @@ handle_call({append_values, KeyValues, CommitTime}, _Sender, SD0=#state{replicat
 handle_call({read, Key, TxId, _Node}, Sender, 
 	    SD0=#state{replicated_log=ReplicatedLog, pending_log=PendingLog,
                 specula_read=SpeculaRead, ts=Ts}) ->
-   %lager:warning("Got read from ~w to ~w, Part is ~w", [TxId, Key, Part]),
+   %lager:warning("Got read from ~w to ~w, Node is ~w", [TxId, Key, Node]),
     case SpeculaRead of
         false ->
             case ready_or_block(TxId, Key, PendingLog, Sender) of
@@ -329,18 +329,20 @@ handle_cast({relay_read, Key, TxId, Reader},
 
 handle_cast({prepare_specula, TxId, Part, WriteSet, TimeStamp},
         SD0=#state{pending_log=PendingLog, ts=Ts}) ->
+   %lager:warning("Received prepare specula for ~w, WriteSet is ~w, Partition is ~w", [TxId, WriteSet, Part]),
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
-                      case ets:lookup(PendingLog, {Part,Key}) of
+                      case ets:lookup(PendingLog, Key) of
                           [] ->
+                             %lager:warning("Inserted ~w, ~w", [Part, Key]),
                               true = ets:insert(PendingLog, {Key, [{TxId, TimeStamp, Value, []}]}),
                               [Key|KS];
                           [{Key, RemainList}] ->
                               NewList = insert_version(RemainList, TxId, TimeStamp, Value),
+                             %lager:warning("Inserting ~w, new list is ~w", [Key, NewList]),
                               true = ets:insert(PendingLog, {Key, NewList}),
                               [Key|KS]
                       end end, [], WriteSet),
     ets:insert(PendingLog, {{TxId, Part}, KeySet}),
-    %lager:warning("Specula prepare for [~w, ~w, KeySet is ~p]", [TxId, Partition, KeySet]),
     {noreply, SD0#state{ts=max(Ts, TimeStamp)}};
 
 handle_cast({clean_data, Sender}, SD0=#state{replicated_log=OldReplicatedLog, pending_log=OldPendingLog}) ->
@@ -438,6 +440,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions, IfWaited},
    %lager:warning("repl commit for ~w ~w", [TxId, Partitions]),
     lists:foreach(fun(Partition) ->
                     [{{TxId, Partition}, KeySet}] = ets:lookup(PendingLog, {TxId, Partition}), 
+                   %lager:warning("For part ~w, key set is ~w", [Partition, KeySet]),
                     ets:delete(PendingLog, {TxId, Partition}),
                     _MaxTS = update_store(Partition, KeySet, TxId, CommitTime, ReplicatedLog, PendingLog, 0)
         end, Partitions),
@@ -548,6 +551,7 @@ update_store(_Part, [], _TxId, _TxCommitTime, _InMemoryStore, _PendingTxs, TS) -
     TS;
 update_store(Part, [Key|Rest], TxId, TxCommitTime, InMemoryStore, PendingTxs, TS) ->
     [{Key, List}] = ets:lookup(PendingTxs, Key),
+   %lager:warning("Key list is ~w, ~w", [Key, List]),
     {{TxId, _, Value, PendingReaders}, PrepareRemainList} = delete_item(List, TxId, []),
     Values = case ets:lookup(InMemoryStore, Key) of
                 [] ->
