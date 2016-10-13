@@ -171,7 +171,7 @@ handle_call({start_tx, TxnSeq, Client}, _Sender, SD0=#state{dep_dict=D, min_snap
                         min_snapshot_ts=NewSnapshotTS, dep_dict=dict:erase(OldTxId, D1)}}; 
                 _ ->
                     RemoteParts = [P||{P, _} <-RemoteUpdates],
-                    ClientDict1 = dict:store(TxId, {LocalParts, RemoteParts}, ClientDict),
+                    ClientDict1 = dict:store(TxId, {LocalParts, RemoteParts, waited}, ClientDict),
                     ClientState1 = ClientState#client_state{tx_id=TxId, stage=read, pending_list=PendingList++[OldTxId], pending_prepares=0, invalid_aborted=0},
                     {reply, TxId, SD0#state{dep_dict=D1, 
                         min_snapshot_ts=NewSnapshotTS, client_dict=dict:store(Client, ClientState1, ClientDict1)}}
@@ -765,14 +765,14 @@ try_solve_pending([], [], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, d
                                             case CState#client_state.stage of
                                                 remote_cert ->
                                                     SpeculaPrepTime = max(PCommitTime+1, OldCurPrepTime),
-                                                    RemoteParts = CState#client_state.remote_updates,
+                                                    RemoteParts = [P||{P, _} <- CState#client_state.remote_updates],
                                                      %lgaer:warning("Spec comm curr txn: ~p, remote updates are ~p", [TxId, RemoteParts]),
                                                     %specula_commit(LocalParts, RemoteParts, TxId, SpeculaPrepTime, RepDict),
                                                     case (Prep == 0) and (Read == []) and (PendingList == []) of
                                                         true ->   
                                                              %lgaer:warning("Can already commit ~w!!", [TxId]),
                                                             {DD1, NewMayCommit, NewToAbort, CD1} = commit_tx(TxId, SpeculaPrepTime, 
-                                                                LocalParts, RemoteParts, dict:erase(TxId, DD), RepDict, CD),
+                                                                LocalParts, RemoteParts, dict:erase(TxId, DD), RepDict, CD, waited),
                                                             CS1 = dict:fetch(Client, CD1),
                                                             gen_server:reply(Sender, {ok, {committed, SpeculaPrepTime, {rev(CS1#client_state.aborted_reads), rev(CS1#client_state.committed_updates), CS1#client_state.committed_reads}}}),
                                                             CD2 = dict:store(Client, CS1#client_state{committed_updates=[], committed_reads=[], aborted_reads=[],
@@ -781,7 +781,7 @@ try_solve_pending([], [], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, d
                                                         false ->
                                                              %lgaer:warning("Returning specula_commit for ~w", [TxId]),
                                                             gen_server:reply(Sender, {ok, {specula_commit, SpeculaPrepTime, {rev(CState#client_state.aborted_reads), rev(CState#client_state.committed_updates), CState#client_state.committed_reads}}}),
-                                                            PD1 = dict:store(TxId, {LocalParts, RemoteParts}, PD),
+                                                            PD1 = dict:store(TxId, {LocalParts, RemoteParts, waited}, PD),
                                                             CD1 = dict:store(Client, CState#client_state{committed_updates=[], committed_reads=[], aborted_reads=[], pending_list=PendingList ++ [TxId], tx_id=?NO_TXN}, CD),
                                                             {CD1, DD, PD1, MayCommit, ToAbort, PCommitTime}
                                                     end;
