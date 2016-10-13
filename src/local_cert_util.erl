@@ -883,7 +883,7 @@ find(ReaderTxId, SnapshotTime, [], ToReturn, AllPrevious, SenderInfo) ->
                     case AllPrevious of 
                         [] -> {not_ready, [], [{specula_commit, SCTxId, SCTime, SCValue, [SenderInfo|SCPendingReaders]}]};
                         _ ->
-                            {not_ready, [], lists:revese(AllPrevious)++ [{specula_commit, SCTxId, SCTime, SCValue, [SenderInfo|SCPendingReaders]}]}
+                            {not_ready, [], lists:reverse(AllPrevious)++ [{specula_commit, SCTxId, SCTime, SCValue, [SenderInfo|SCPendingReaders]}]}
                     end
             end;
         {prepared, PTxId, PTime, Value, PendingReaders} ->
