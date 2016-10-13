@@ -186,7 +186,7 @@ init([Name, _Parts]) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size= min(max(TotalReplFactor*8*Concurrent*max(SpeculaLength,4), 400), 50000), specula_read=SpeculaRead,
+    {ok, #state{name=Name, set_size= min(max(TotalReplFactor*12*Concurrent*max(SpeculaLength,4), 400), 60000), specula_read=SpeculaRead,
                 prepared_txs = PreparedTxs, current_dict = dict:new(), committed_txs=CommittedTxs, dep_dict=dict:new(), 
                 backup_dict = dict:new(), inmemory_store = InMemoryStore}}.
 
