@@ -178,10 +178,10 @@ init([Name, _Parts]) ->
     %NumPartitions = length(hash_fun:get_partitions()),
     [{_, Replicas}] = ets:lookup(meta_info, node()),
     TotalReplFactor = length(Replicas)+1,
-    lager:info("Data repl inited with name ~w, repl factor is ~w", [Name, TotalReplFactor]),
-    SpeculaRead = antidote_config:get(specula_read),
     Concurrent = antidote_config:get(concurrent),
     SpeculaLength = antidote_config:get(specula_length),
+    lager:info("Data repl inited with name ~w, repl factor is ~w, set size is ~w", [Name, TotalReplFactor, min(max(TotalReplFactor*10*Concurrent*max(SpeculaLength,6), 5000), 60000)]),
+    SpeculaRead = antidote_config:get(specula_read),
     %TsDict = lists:foldl(fun(Part, Acc) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
