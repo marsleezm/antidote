@@ -90,10 +90,10 @@
         num_specula_read=0 :: non_neg_integer(),
         num_read=0 :: non_neg_integer(),
         set_size :: non_neg_integer(),
-        %current_dict :: dict(),
-        %backup_dict :: dict(),
-        current_dict :: cache_id(),
-        backup_dict :: cache_id(),
+        current_dict :: dict(),
+        backup_dict :: dict(),
+        %current_dict :: cache_id(),
+        %backup_dict :: cache_id(),
         %ts_dict :: dict(),
         specula_read :: boolean(),
         name :: atom(),
@@ -183,7 +183,7 @@ init([Name, _Parts]) ->
     TotalReplFactor = length(Replicas)+1,
     Concurrent = antidote_config:get(concurrent),
     SpeculaLength = antidote_config:get(specula_length),
-    SetSize = min(max(TotalReplFactor*10*Concurrent*max(SpeculaLength,6), 5000), 60000),
+    SetSize = min(max(TotalReplFactor*10*Concurrent*max(SpeculaLength,6), 5000), 40000),
     lager:info("Data repl inited with name ~w, repl factor is ~w, set size is ~w", [Name, TotalReplFactor, SetSize]),
     SpeculaRead = antidote_config:get(specula_read),
     %TsDict = lists:foldl(fun(Part, Acc) ->
@@ -191,8 +191,8 @@ init([Name, _Parts]) ->
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
     {ok, #state{name=Name, set_size=SetSize, specula_read=SpeculaRead,
-                prepared_txs = PreparedTxs, current_dict = tx_utilities:open_private_table(current), committed_txs=CommittedTxs, dep_dict=dict:new(), 
-                backup_dict = tx_utilities:open_private_table(backup), inmemory_store = InMemoryStore}}.
+                prepared_txs = PreparedTxs, current_dict = dict:new(), committed_txs=CommittedTxs, dep_dict=dict:new(), 
+                backup_dict = dict:new(), inmemory_store = InMemoryStore}}.
 
 handle_call({get_table}, _Sender, SD0=#state{inmemory_store=InMemoryStore}) ->
     {reply, InMemoryStore, SD0};
@@ -418,17 +418,18 @@ handle_cast({specula_commit, TxId, Partition, SpeculaCommitTime}, State=#state{p
     end;
 
 handle_cast({clean_data, Sender}, SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs,
-            committed_txs=CommittedTxs, current_dict=CurrentDict, backup_dict=BackupDict}) ->
+            committed_txs=CommittedTxs}) ->
     %lager:info("Got request!"),
     ets:delete_all_objects(PreparedTxs),
     ets:delete_all_objects(InMemoryStore),
     ets:delete_all_objects(CommittedTxs),
-    ets:delete(CurrentDict),
-    ets:delete(BackupDict),
+    %ets:delete(CurrentDict),
+    %ets:delete(BackupDict),
     lager:info("Data repl replying!"),
     Sender ! cleaned,
-    {noreply, SD0#state{prepared_txs = PreparedTxs, current_dict = tx_utilities:open_private_table(current), 
-                backup_dict = tx_utilities:open_private_table(backup), table_size=0, 
+    {noreply, SD0#state{prepared_txs = PreparedTxs, current_dict = dict:new(), %tx_utilities:open_private_table(current), 
+                backup_dict = dict:new(), %tx_utilities:open_private_table(backup), 
+                table_size=0, 
                 num_specula_read=0, num_read=0, inmemory_store = InMemoryStore, committed_txs=CommittedTxs}};
 
 %% Where shall I put the speculative version?
@@ -461,22 +462,22 @@ handle_cast({repl_prepare, Type, TxId, Part, WriteSet, TimeStamp, Sender},
 	    SD0=#state{prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, current_dict=CurrentDict, backup_dict=BackupDict}) ->
     case Type of
         prepared ->
-            %case dict:find(TxId, CurrentDict) of
-                %{ok, finished} ->
-                    %{noreply, SD0};
-                %error ->
-            case ets:lookup(CurrentDict, TxId) of
-                [{TxId, finished}] ->
+            case dict:find(TxId, CurrentDict) of
+                {ok, finished} ->
                     {noreply, SD0};
-                [] ->
-                    %case dict:find(TxId, BackupDict) of
-                    %    {ok, finished} ->
-                    %        {noreply, SD0};
-                    %    error ->
-                    case ets:lookup(BackupDict, TxId) of
-                        [{TxId, finished}] ->
+                error ->
+            %case ets:lookup(CurrentDict, TxId) of
+            %    [{TxId, finished}] ->
+            %        {noreply, SD0};
+            %    [] ->
+                    case dict:find(TxId, BackupDict) of
+                        {ok, finished} ->
                             {noreply, SD0};
-                        [] ->
+                        error ->
+                    %case ets:lookup(BackupDict, TxId) of
+                    %    [{TxId, finished}] ->
+                    %        {noreply, SD0};
+                    %    [] ->
                             %lager:warning("Got repl prepare for ~w, ~w", [TxId, Part]),
                             local_cert_util:insert_prepare(PreparedTxs, TxId, Part, WriteSet, TimeStamp, Sender),
                             {noreply, SD0}
@@ -542,7 +543,7 @@ handle_cast({repl_abort, TxId, Partitions, local},
     {noreply, SD0#state{dep_dict=DepDict1}};
 
 handle_cast({repl_abort, TxId, Partitions}, 
-	    SD0=#state{prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_read=SpeculaRead, current_dict=CurrentDict, dep_dict=DepDict, set_size=SetSize, table_size=TableSize, backup_dict=BackupDict}) ->
+	    SD0=#state{prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_read=SpeculaRead, current_dict=CurrentDict, dep_dict=DepDict, set_size=SetSize, table_size=TableSize}) ->
    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     {IfMissed, DepDict1} = lists:foldl(fun(Partition, {IfMiss, DepD}) ->
                case ets:lookup(PreparedTxs, {TxId, Partition}) of
@@ -565,15 +566,15 @@ handle_cast({repl_abort, TxId, Partitions},
     end,
     case IfMissed of
         true ->
-            ets:insert(CurrentDict, {TxId, finished}),
+            %ets:insert(CurrentDict, {TxId, finished}),
+            CurrentDict1 = dict:store(TxId, finished, CurrentDict),
             case TableSize > SetSize of
                 true ->
                     %lager:warning("Current set is too large!"),
-                    ets:delete(BackupDict),
-                    CurrentDict1 = tx_utilities:open_private_table(current),
-                    {noreply, SD0#state{current_dict=CurrentDict1, backup_dict=CurrentDict, table_size=0, dep_dict=DepDict1}};
+                    %ets:delete(BackupDict),
+                    {noreply, SD0#state{current_dict=dict:new(), backup_dict=CurrentDict1, table_size=0, dep_dict=DepDict1}};
                 false ->
-                    {noreply, SD0#state{current_dict=CurrentDict, dep_dict=DepDict1, table_size=TableSize+1}}
+                    {noreply, SD0#state{current_dict=CurrentDict1, dep_dict=DepDict1, table_size=TableSize+1}}
             end;
         false ->
             {noreply, SD0#state{dep_dict=DepDict1}}
