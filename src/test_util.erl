@@ -8,8 +8,8 @@
 -export([delete_1/2, delete_2/2, check_length1/2, check_time/1, check_length2/2,
          lookup_1/2, lookup_2/2, get_my_range/4, dict2/2,
          check_node/1, check_list/1, test_hash/2, ets2/2,
-         bs/1, dict_store/1, dict_delete/2,
-         ets_store/1, ets_delete/2, ets_das/1,
+         bs/1, dict_store/3, dict_delete/2,
+         ets_store/3, ets_delete/2, ets_das/1,
          pass1/1, pass2/1, set1/2, set2/2, set3/2]).
 
 check_time(N) ->
@@ -101,12 +101,17 @@ set3(N, S) ->
     Diff = timer:now_diff(os:timestamp(), T),
     io:format("Diff is ~w ~n", [Diff]).
 
-dict_store(S) ->
-    Seq = lists:seq(1, S),
+dict_store(S, Time, Lookup) ->
+    Times = lists:seq(1, Time),
     T = os:timestamp(),
-    _Dict1 = lists:foldl(fun(M,Set) -> dict:store(M, finished, Set) end, dict:new(), Seq),
+    lists:foreach(fun(_) -> 
+    Seq = lists:seq(1, S),
+    Dict1 = lists:foldl(fun(M,Set) -> dict:store(M, finished, Set) end, dict:new(), Seq),
+    L = lists:seq(1, Lookup),
+    lists:foreach(fun(_) -> dict:find(1, Dict1) end, L)
+    end, Times),
     Diff = timer:now_diff(os:timestamp(), T),
-    io:format("Diff is ~w ~n", [Diff]).
+    io:format("Diff is ~w sec ~n", [Diff / 1000000]).
 
 dict_delete(S, R) ->
     Seq = lists:seq(1, S),
@@ -119,13 +124,19 @@ dict_delete(S, R) ->
     Diff = timer:now_diff(os:timestamp(), T),
     io:format("Diff is ~w ~n", [Diff]).
 
-ets_store(S) ->
+ets_store(S, Time, Lookup) ->
+    Times = lists:seq(1, Time),
+    T = os:timestamp(),
+    lists:foreach(fun(_) -> 
     Table = ets:new(haha, [set]),
     Seq = lists:seq(1, S),
-    T = os:timestamp(),
     _Dict1 = lists:foldl(fun(M,_Set) -> ets:insert(Table, {M, finished}) end, dict:new(), Seq),
+    L = lists:seq(1, Lookup),
+    lists:foreach(fun(_) -> ets:lookup(Table, 1) end, L), 
+    ets:delete(Table)
+    end, Times), 
     Diff = timer:now_diff(os:timestamp(), T),
-    io:format("Diff is ~w ~n", [Diff]).
+    io:format("Diff is ~w sec ~n", [Diff / 1000000]).
 
 ets_das(S) ->
     Table = ets:new(haha, [set]),

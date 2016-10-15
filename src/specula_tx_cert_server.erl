@@ -546,7 +546,7 @@ handle_cast({pending_prepared, TxId, PrepareTime, _From},
             LocalParts = ClientState#client_state.local_updates, 
             RemoteUpdates = ClientState#client_state.remote_updates, 
             PendingPrepares = ClientState#client_state.pending_prepares, 
-              %lager:warning("Speculative receive pending_prepared for ~w from ~w, current pp is ~w", [TxId, From, PendingPrepares+1]),
+            %lager:warning("Speculative receive pending_prepared for ~w from ~w, current pp is ~w", [TxId, From, PendingPrepares+1]),
             case dict:find(TxId, DepDict) of
                 %% Maybe can commit already.
                 {ok, {1, ReadDepTxs, OldPrepTime}} ->
@@ -1065,7 +1065,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
     {LocalParts, RemoteParts} = dict:fetch(TxId, PendingTxs),
     PendingTxs1 = dict:erase(TxId, PendingTxs),
     DepList = ets:lookup(dependency, TxId),
-      %lager:warning("Specula abort ~w: My read dependncy are ~w", [TxId, DepList]),
+    %lager:warning("Specula abort ~w: My read dependncy are ~w", [TxId, DepList]),
     Self = self(),
     ToAbortTxs = lists:foldl(fun({_, DepTxId}, AccToAbort) ->
                               TxServer = DepTxId#tx_id.server_pid,
@@ -1114,9 +1114,9 @@ abort_tx(TxId, LocalParts, RemoteParts, RepDict, Stage, LocalOnlyPart) ->
                             end
                     end, [], DepList),
     ?CLOCKSI_VNODE:abort(LocalParts, TxId),
-    ?REPL_FSM:repl_abort(LocalParts, TxId, RepDict),
     case Stage of 
         remote_cert ->
+            ?REPL_FSM:repl_abort(LocalParts, TxId, RepDict),
             ?CLOCKSI_VNODE:abort(RemoteParts, TxId),
             ?REPL_FSM:repl_abort(RemoteParts, TxId, RepDict),
             case LocalOnlyPart of 
@@ -1130,11 +1130,12 @@ abort_tx(TxId, LocalParts, RemoteParts, RepDict, Stage, LocalOnlyPart) ->
                     end
             end;
         local_cert ->
+            ?REPL_FSM:repl_abort(LocalParts, TxId, RepDict),
             NodeParts = build_node_parts(RemoteParts),
             lists:foreach(fun({Node, Partitions}) ->
                 case dict:find({rep, Node}, RepDict) of
                     {ok, DataReplServ} ->
-                        gen_server:cast({global, DataReplServ}, {repl_abort, TxId, Partitions});
+                        gen_server:cast({global, DataReplServ}, {repl_abort, TxId, Partitions, local});
                     _ ->
                         ?CACHE_SERV:abort(TxId, Partitions)
             end end, NodeParts)
