@@ -418,15 +418,17 @@ handle_cast({specula_commit, TxId, Partition, SpeculaCommitTime}, State=#state{p
     end;
 
 handle_cast({clean_data, Sender}, SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs,
-            committed_txs=CommittedTxs}) ->
+            committed_txs=CommittedTxs, current_dict=CurrentDict, backup_dict=BackupDict}) ->
     %lager:info("Got request!"),
     ets:delete_all_objects(PreparedTxs),
     ets:delete_all_objects(InMemoryStore),
     ets:delete_all_objects(CommittedTxs),
+    ets:delete(CurrentDict),
+    ets:delete(BackupDict),
     lager:info("Data repl replying!"),
     Sender ! cleaned,
-    {noreply, SD0#state{prepared_txs = PreparedTxs, current_dict = tx_utilitie:open_private_table(current), 
-                backup_dict = tx_utilitie:open_private_table(backup), table_size=0, 
+    {noreply, SD0#state{prepared_txs = PreparedTxs, current_dict = tx_utilities:open_private_table(current), 
+                backup_dict = tx_utilities:open_private_table(backup), table_size=0, 
                 num_specula_read=0, num_read=0, inmemory_store = InMemoryStore, committed_txs=CommittedTxs}};
 
 %% Where shall I put the speculative version?
