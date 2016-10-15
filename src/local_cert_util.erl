@@ -217,7 +217,8 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                         {HType, HTxId, HPTime, HValue, HReaders} -> 
                             DepDict2 = case HType of 
                                             repl_prepare -> DepDict1; 
-                                            prepared -> unblock_prepare(HTxId, DepDict1, Partition, remove_ppd)
+                                            prepared -> unblock_prepare(HTxId, DepDict1, Partition, remove_ppd);
+                                            specula_commit -> unblock_prepare(HTxId, DepDict1, Partition, remove_pd)
                                        end,
                             ets:insert(PreparedTxs, {Key, [{HType, HTxId, HPTime, LRTime, max(HPTime,LSCTime), RPrepNum, HValue, HReaders}|Record]}),
                             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
