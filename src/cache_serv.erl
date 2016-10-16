@@ -129,23 +129,28 @@ handle_call({clean_data}, _Sender, SD0=#state{prepared_txs=PreparedTxs}) ->
     {reply, ok, SD0#state{num_specula_read=0, num_attempt_read=0}};
 
 handle_call({read, Key, TxId, Node}, Sender, 
-	    SD0=#state{specula_read=false}) ->
-    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
-    {noreply, SD0};
+	    SD0=#state{specula_read=SpeculaRead}) ->
+    handle_call({read, Key, TxId, Node, SpeculaRead}, Sender, SD0); 
 
-handle_call({read, Key, TxId, {Partition, _}=Node}, Sender, 
-	    SD0=#state{prepared_txs=PreparedTxs, specula_read=true}) ->
-    %lager:warning("Cache specula read ~w of ~w", [Key, TxId]), 
-    case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, {relay, Sender}}) of
-        not_ready->
-            %lager:warning("Read blocked!"),
-            {noreply, SD0};
-        {specula, Value} ->
-            {reply, {ok, Value}, SD0};
-        ready ->
-            %lager:warning("Read finished!"),
+handle_call({read, Key, TxId, {Partition, _}=Node, SpeculaRead}, Sender, 
+	    SD0=#state{prepared_txs=PreparedTxs}) ->
+    case SpeculaRead of
+        false ->
             ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
-            {noreply, SD0}
+            {noreply, SD0};
+        true ->
+            %lager:warning("Cache specula read ~w of ~w", [Key, TxId]), 
+            case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, {relay, Sender}}) of
+                not_ready->
+                    %lager:warning("Read blocked!"),
+                    {noreply, SD0};
+                {specula, Value} ->
+                    {reply, {ok, Value}, SD0};
+                ready ->
+                    %lager:warning("Read finished!"),
+                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
+                    {noreply, SD0}
+            end
     end;
 
 handle_call({read, Key, TxId}, _Sender,

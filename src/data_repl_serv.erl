@@ -246,14 +246,14 @@ handle_call({debug_read, Key, TxId}, _Sender,
     end;
 
 %% The real key is be read as {Part, Key} 
-handle_call({read, Key, TxId, _Node}, Sender, 
-	    SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs,
-                specula_read=SpeculaRead}) ->
+handle_call({read, Key, TxId, _Node}, Sender, SD0=#state{specula_read=SpeculaRead}) ->
+    handle_call({read, Key, TxId, _Node, SpeculaRead}, Sender, SD0); 
+handle_call({read, Key, TxId, _Node, SpeculaRead}, Sender, 
+	    SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs}) ->
     case SpeculaRead of
         false ->
            %lager:warning("Specula rea on data repl and false!!??"),
-            SpeculaRead = true,
-            case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {relay, Sender}) of
+            case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Sender}}) of
                 not_ready-> {noreply, SD0};
                 ready ->
                     %lager:warning("Read finished!"),
@@ -499,7 +499,7 @@ handle_cast({repl_prepare, Type, TxId, Part, WriteSet, TimeStamp, Sender},
     end;
 
 handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
-	    SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs, specula_read=SpeculaRead, committed_txs=CommittedTxs,
+	    SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs, committed_txs=CommittedTxs,
         dep_dict=DepDict}) ->
   %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
    DepDict1 = lists:foldl(fun(Partition, D) ->
@@ -509,10 +509,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
                         D, Partition, slave)
                     %end
         end, DepDict, Partitions),
-    case SpeculaRead of
-        true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
-        _ -> ok
-    end,
+    specula_utilities:deal_commit_deps(TxId, CommitTime), 
     {noreply, SD0#state{dep_dict=DepDict1}};
     %case dict:size(CurrentD1) > SetSize of
     %      true ->
@@ -521,7 +518,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
     %        {noreply, SD0#state{ts_dict=TsDict1, current_dict=CurrentD1}}
     %end;
 handle_cast({repl_abort, TxId, Partitions, local}, 
-	    SD0=#state{prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_read=SpeculaRead, dep_dict=DepDict}) ->
+	    SD0=#state{prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, dep_dict=DepDict}) ->
    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     DepDict1 = lists:foldl(fun(Partition, DepD) ->
                case ets:lookup(PreparedTxs, {TxId, Partition}) of
@@ -536,14 +533,11 @@ handle_cast({repl_abort, TxId, Partitions, local},
         end, DepDict, Partitions),
     %%% This needs to be stored because a prepare request may come twice: once from specula_prep and once 
     %%  from tx coord
-    case SpeculaRead of
-        true -> specula_utilities:deal_abort_deps(TxId);
-        _ -> ok
-    end,
+    specula_utilities:deal_abort_deps(TxId),
     {noreply, SD0#state{dep_dict=DepDict1}};
 
 handle_cast({repl_abort, TxId, Partitions}, 
-	    SD0=#state{prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_read=SpeculaRead, current_dict=CurrentDict, dep_dict=DepDict, set_size=SetSize, table_size=TableSize}) ->
+	    SD0=#state{prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, current_dict=CurrentDict, dep_dict=DepDict, set_size=SetSize, table_size=TableSize}) ->
    %lager:warning("repl abort for ~w ~w", [TxId, Partitions]),
     {IfMissed, DepDict1} = lists:foldl(fun(Partition, {IfMiss, DepD}) ->
                case ets:lookup(PreparedTxs, {TxId, Partition}) of
@@ -560,10 +554,7 @@ handle_cast({repl_abort, TxId, Partitions},
         end, {false, DepDict}, Partitions),
     %%% This needs to be stored because a prepare request may come twice: once from specula_prep and once 
     %%  from tx coord
-    case SpeculaRead of
-        true -> specula_utilities:deal_abort_deps(TxId);
-        _ -> ok
-    end,
+    specula_utilities:deal_abort_deps(TxId),
     case IfMissed of
         true ->
             %ets:insert(CurrentDict, {TxId, finished}),

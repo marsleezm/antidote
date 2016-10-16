@@ -544,14 +544,11 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
 
 handle_command({abort, TxId}, _Sender,
                State = #state{partition=Partition, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore,
-                dep_dict=DepDict, if_specula=IfSpecula}) ->
+                dep_dict=DepDict}) ->
     %lager:warning("~w: Aborting ~w", [Partition, TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
-            case IfSpecula of
-                true -> specula_utilities:deal_abort_deps(TxId);
-                false -> ok
-            end,
+            specula_utilities:deal_abort_deps(TxId),
             %lager:warning("Found key set"),
             true = ets:delete(PreparedTxs, TxId),
             DepDict1 = local_cert_util:clean_abort_prepared(PreparedTxs, Keys, TxId, InMemoryStore, DepDict, Partition, master),
@@ -617,14 +614,11 @@ async_send_msg(Delay, Msg, To) ->
 %    true = ets:insert(PreparedTxs, {Key, {TxId, Time, Value, [], []}}),
 %    set_prepared(PreparedTxs,Rest,TxId,Time, [Key|KeySet]).
 
-commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula)->
+commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, _IfSpecula)->
     %lager:warning("Before commit ~w", [TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
-            case IfSpecula of
-                true -> specula_utilities:deal_commit_deps(TxId, TxCommitTime);
-                false -> ok
-            end,
+            specula_utilities:deal_commit_deps(TxId, TxCommitTime),
             DepDict1 = local_cert_util:update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
                 PreparedTxs, DepDict, Partition, master),
             true = ets:delete(PreparedTxs, TxId),
