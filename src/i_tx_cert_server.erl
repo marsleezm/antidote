@@ -140,6 +140,8 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
 
 handle_call({certify_read, TxId, 0},  Sender, SD0) ->
     handle_call({certify, TxId, [], [], ignore},  Sender, SD0);
+handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, 0},  Sender, SD0) ->
+    handle_call({certify, TxId, LocalUpdates, RemoteUpdates, ignore, ignore},  Sender, SD0);
 handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, 0, _},  Sender, SD0) ->
     handle_call({certify, TxId, LocalUpdates, RemoteUpdates, ignore, ignore},  Sender, SD0);
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates, _, _},  Sender, SD0=#state{client_dict=ClientDict, last_commit_ts=LastCommitTs, total_repl_factor=TotalReplFactor}) ->
