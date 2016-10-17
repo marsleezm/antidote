@@ -184,15 +184,18 @@ handle_call({go_down},_Sender,SD0) ->
 
 handle_cast({prepare_specula, TxId, Part, WriteSet, TimeStamp}, 
 	    SD0=#state{cache_log=CacheLog}) ->
+    %lager:warning("Prepare specula ~w, ~w, WS is ~w", [TxId, Part, WriteSet]),
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
                     case ets:lookup(CacheLog, Key) of
                         [] ->
                             %% Putting TxId in the record to mark the transaction as speculative 
                             %% and for dependency tracking that will happen later
+                            %lager:warning("Here for  ~w", [Key]),
                             true = ets:insert(CacheLog, {Key, [{TimeStamp, Value, TxId}]}),
                             [Key|KS];
                         [{Key, ValueList}] ->
                             {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
+                            %lager:warning("Here for ~w, remain list is ~w", [Key, RemainList]),
                             true = ets:insert(CacheLog, {Key, [{TimeStamp, Value, TxId}|RemainList]}),
                             [Key|KS]
                     end end, [], WriteSet),
