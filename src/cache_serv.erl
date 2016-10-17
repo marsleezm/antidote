@@ -252,6 +252,8 @@ find_version([{TS, Value, TxId}|Rest], SnapshotTime) ->
     end.
 
 
+delete_version([], _TxId) -> 
+    [];
 delete_version([{_, _, TxId}|Rest], TxId) -> 
     Rest;
 delete_version([{TS, V, Tx}|Rest], TxId) -> 
