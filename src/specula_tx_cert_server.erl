@@ -536,7 +536,9 @@ handle_cast({pending_prepared, TxId, PrepareTime, _From},
 	    SD0=#state{dep_dict=DepDict, specula_length=SpeculaLength, client_dict=ClientDict, hit_counter=HitCounter,
          pending_txs=PendingTxs,rep_dict=RepDict}) ->  
     Client = TxId#tx_id.client_pid,
-    ClientState = dict:fetch(Client, ClientDict),
+    case dict:find(Client, ClientDict) of
+        error -> {noreply, SD0};
+        {ok, ClientState} ->
     Stage = ClientState#client_state.stage,
     MyTxId = ClientState#client_state.tx_id, 
     case (Stage == local_cert) and (MyTxId == TxId) of
@@ -585,13 +587,16 @@ handle_cast({pending_prepared, TxId, PrepareTime, _From},
             end;
         _ ->
             {noreply, SD0}
+    end
     end;
 
 handle_cast({solve_pending_prepared, TxId, PrepareTime, _From}, 
 	    SD0=#state{dep_dict=DepDict, client_dict=ClientDict}) ->
     %lager:warning("Got prepare for ~w from ~w", [TxId, From]),
     Client = TxId#tx_id.client_pid,
-    ClientState = dict:fetch(Client, ClientDict),
+    case dict:find(Client, ClientDict) of
+        error -> {noreply, SD0};
+        {ok, ClientState} ->
     Stage = ClientState#client_state.stage,
     MyTxId = ClientState#client_state.tx_id, 
 
@@ -613,6 +618,7 @@ handle_cast({solve_pending_prepared, TxId, PrepareTime, _From},
                 error ->
                     {noreply, SD0}
             end
+    end
     end;
 
 handle_cast({prepared, TxId, PrepareTime, _From}, 
@@ -620,7 +626,9 @@ handle_cast({prepared, TxId, PrepareTime, _From},
             client_dict=ClientDict, rep_dict=RepDict, pending_txs=PendingTxs}) ->
      %lager:warning("Got prepare for ~w, prepare time is ~w from ~w", [TxId, PrepareTime, From]),
     Client = TxId#tx_id.client_pid,
-    ClientState = dict:fetch(Client, ClientDict),
+    case dict:find(Client, ClientDict) of
+        error -> {noreply, SD0};
+        {ok, ClientState} ->
     Stage = ClientState#client_state.stage,
     Sender = ClientState#client_state.sender,
     MyTxId = ClientState#client_state.tx_id, 
@@ -690,6 +698,7 @@ handle_cast({prepared, TxId, PrepareTime, _From},
                 error ->
                     {noreply, SD0}
             end
+    end
     end;
 
 %handle_cast({prepared, _OtherTxId, _}, SD0=#state{stage=local_cert}) ->
