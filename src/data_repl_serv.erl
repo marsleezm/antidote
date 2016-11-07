@@ -249,6 +249,7 @@ handle_call({debug_read, Key, TxId}, _Sender,
 handle_call({read, Key, TxId, _Node}, Sender, 
 	    SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs,
                 specula_read=SpeculaRead}) ->
+   %lager:warning("Data repl reading ~w ~w", [TxId, Key]),
     case SpeculaRead of
         false ->
            %lager:warning("Specula rea on data repl and false!!??"),
