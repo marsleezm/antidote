@@ -31,11 +31,14 @@ create_tx_id(ClientClock, ClientPid) ->
     _A = ClientClock,
     TransactionId = #tx_id{snapshot_time=max(ClientClock, now_microsec()), server_pid=self(), client_pid=ClientPid},
     TransactionId.
+
+create_tx_id(ClientClock, ClientPid, {Type, TxnSeq}) ->
+    TransactionId = #tx_id{snapshot_time=max(ClientClock, now_microsec()), server_pid=self(), client_pid=ClientPid, txn_seq=TxnSeq, type=Type},
+    TransactionId;
 create_tx_id(ClientClock, ClientPid, TxnSeq) ->
     _A = ClientClock,
-    TransactionId = #tx_id{snapshot_time=max(ClientClock, now_microsec()), server_pid=self(), client_pid=ClientPid, txn_seq=TxnSeq},
+    TransactionId = #tx_id{snapshot_time=max(ClientClock, now_microsec()), server_pid=self(), client_pid=ClientPid, txn_seq=TxnSeq, type=up},
     TransactionId.
-
 
 %% @doc converts a tuple {MegaSecs,Secs,MicroSecs} into microseconds
 now_microsec() ->
