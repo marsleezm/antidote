@@ -156,10 +156,19 @@ handle_check_key_record(Key, Type, PreparedTxs, CommittedTxs) ->
 handle_if_prepared(TxId, Keys, PreparedTxs) ->
     Result = lists:all(fun(Key) ->
             case ets:lookup(PreparedTxs, Key) of
-                [{Key, [{TxId, _, _, _, _, _}|_]}] -> lager:info("Found sth for key ~w", [Key]), true;
+                [{Key, Versions}] -> check_versions(Versions, TxId);
                 _ -> lager:info("Nothing for key ~w", [Key]), false
             end end, Keys),
     Result.
+
+check_versions([{_, TxId, _, _, _, _, _, _}|_Rest], TxId) ->
+    true;
+check_versions([{_, TxId, _, _, _}|_Rest], TxId) ->
+    true;
+check_versions([{_, _OtherTxId, _, _, _}|Rest], TxId) ->
+    check_versions(Rest, TxId);
+check_versions(_, _TxId) -> %% It's a number!!
+    false.
 
 handle_command_check_tables_ready(Partition) ->
     Result = case ets:info(tx_utilities:get_table_name(Partition,prepared)) of

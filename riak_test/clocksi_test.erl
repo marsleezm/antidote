@@ -51,16 +51,16 @@ clocksi_test1(Nodes, PartList) ->
     receive_n_times(TxId1),
     lager:info("Waiting for second prep"),
     receive_n_times(TxId1),
-    {tx_id, SnapshotTime, _} = TxId1,
+    {tx_id, SnapshotTime, _, _, _} = TxId1,
     lager:info("Trying to commit first txn"),
     rpc:call(Node1, clocksi_vnode, commit, [[Part1, Part2], TxId1, SnapshotTime+10]), 
-    {ok, Result1} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, t1_key1, {tx_id, SnapshotTime+10, self()}]),
+    {ok, Result1} = rpc:call(Node1, clocksi_vnode, internal_read, [Part1, t1_key1, {tx_id, SnapshotTime+10, self(), self(), 0}]),
     ?assertEqual(Result1, 1),
-    {ok, Result2} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part2, t1_key3, {tx_id, SnapshotTime+11, self()}]),
+    {ok, Result2} = rpc:call(Node1, clocksi_vnode, internal_read, [Part2, t1_key3, {tx_id, SnapshotTime+11, self(), self(), 0}]),
     ?assertEqual(Result2, 3),
-    {ok, Result3} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, t1_key2, {tx_id, SnapshotTime, self()}]),
+    {ok, Result3} = rpc:call(Node1, clocksi_vnode, internal_read, [Part1, t1_key2, {tx_id, SnapshotTime, self(), self(), 0}]),
     ?assertEqual(Result3, []),
-    {ok, Result4} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part2, t1_key4, {tx_id, SnapshotTime+9, self()}]),
+    {ok, Result4} = rpc:call(Node1, clocksi_vnode, internal_read, [Part2, t1_key4, {tx_id, SnapshotTime+9, self(), self(), 0}]),
     ?assertEqual(Result4, []),
     pass.
 
@@ -77,13 +77,13 @@ clocksi_test2(Nodes, PartList) ->
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS1, TxId1, local, self()]),
     receive_n_times(TxId1),
     receive_n_times(TxId1),
-    {tx_id, SnapshotTime, _} = TxId1,
+    {tx_id, SnapshotTime, _, _, _} = TxId1,
     lager:info("Before reading ~w, TxId is ~w", [K1, TxId1]),
-    {ok, Result} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, K1, {tx_id, SnapshotTime, self()}]),
+    {ok, Result} = rpc:call(Node1, clocksi_vnode, internal_read, [Part1, K1, {tx_id, SnapshotTime, self()}]),
     ?assertEqual(Result, []),
     lager:info("Got result1 is ~w", [Result]),
-    spawn(clocksi_test, spawn_receive, [self(), Node1, clocksi_vnode, read_data_item, [Part1, K1, {tx_id, SnapshotTime+9, self()}]]),
-    spawn(clocksi_test, spawn_receive, [self(), Node1, clocksi_vnode, read_data_item, [Part2, K3, {tx_id, SnapshotTime+10, self()}]]),
+    spawn(clocksi_test, spawn_receive, [self(), Node1, clocksi_vnode, internal_read, [Part1, K1, {tx_id, SnapshotTime+9, self()}]]),
+    spawn(clocksi_test, spawn_receive, [self(), Node1, clocksi_vnode, internal_read, [Part2, K3, {tx_id, SnapshotTime+10, self()}]]),
     receive
         Result0 ->
             lager:info("Received ~w", [Result0])
@@ -115,7 +115,7 @@ clocksi_test3(Nodes, PartList) ->
     Part1 = hd(PartList),
     Part2 = lists:nth(2, PartList),
     TxId1 = rpc:call(Node1, tx_utilities, create_tx_id, [0]),
-    {tx_id, SnapshotTime, _} = TxId1,
+    {tx_id, SnapshotTime, _, _, _} = TxId1,
     lager:info("TxId 1 is ~w", [TxId1]),
     TxId2 = {tx_id, SnapshotTime+10, self()}, 
     lager:info("TxId 2 is ~w", [TxId2]),
@@ -137,7 +137,7 @@ clocksi_test3(Nodes, PartList) ->
     receive_n_times(TxId2),
 
     %% Deps got aborted 
-    TxId3 = {tx_id, SnapshotTime+15, self()}, 
+    TxId3 = {tx_id, SnapshotTime+15, self(), 0, 0}, 
     lager:info("TxId 3 is ~w, ws2p2 is ~w", [TxId3, WS2P2]),
     rpc:call(Node1, clocksi_vnode, debug_prepare, [WS2P2, TxId3, local, self()]),
     rpc:call(Node1, clocksi_vnode, commit, [[Part1, Part2], TxId2, SnapshotTime+16]),
@@ -148,7 +148,7 @@ clocksi_test3(Nodes, PartList) ->
     end,
 
     %% Concurrency test.. Two concurrent transaction sending reads, one wait and the other abort, so no deadlock can happen
-    TxId4 = {tx_id, SnapshotTime+20, self()}, 
+    TxId4 = {tx_id, SnapshotTime+20, self(), self(), 0}, 
     TxId5 = {tx_id, SnapshotTime+25, self()}, 
     WS4P1 = [{Part1, [{K1,41}, {K2,41}]}], 
     WS4P2 = [{Part2, [{K3,43}, {K4,44}]}],
@@ -212,9 +212,9 @@ clocksi_test3(Nodes, PartList) ->
     lager:info("Before receive n2"),
     receive_n_times(TxId8),
     rpc:call(Node1, clocksi_vnode, commit, [[Part1, Part2], TxId8, SnapshotTime+45]),
-    {ok, Result8} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, K1, {tx_id, SnapshotTime+45, self()}]),
+    {ok, Result8} = rpc:call(Node1, clocksi_vnode, internal_read, [Part1, K1, {tx_id, SnapshotTime+45, self()}]),
     ?assertEqual(Result8, 81),
-    {ok, Result9} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part2, K3, {tx_id, SnapshotTime+45, self()}]),
+    {ok, Result9} = rpc:call(Node1, clocksi_vnode, internal_read, [Part2, K3, {tx_id, SnapshotTime+45, self()}]),
     ?assertEqual(Result9, 83),
     pass.
 
@@ -254,13 +254,13 @@ clocksi_test4(Nodes, PartList) ->
     rpc:call(Node1, clocksi_vnode, commit, [[Part1], TxId3, SnapshotTime+20]),
     receive_n_times(TxId4),
     rpc:call(Node1, clocksi_vnode, commit, [[Part1, Part2], TxId4, SnapshotTime+25]),
-    {ok, Result1} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, K1, {tx_id, SnapshotTime+24, self()}]),
+    {ok, Result1} = rpc:call(Node1, clocksi_vnode, internal_read, [Part1, K1, {tx_id, SnapshotTime+24, self()}]),
     ?assertEqual(Result1, 11),
-    {ok, Result2} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, K1, {tx_id, SnapshotTime+25, self()}]),
+    {ok, Result2} = rpc:call(Node1, clocksi_vnode, internal_read, [Part1, K1, {tx_id, SnapshotTime+25, self()}]),
     ?assertEqual(Result2, 41),
-    {ok, Result3} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, K3, {tx_id, SnapshotTime+24, self()}]),
+    {ok, Result3} = rpc:call(Node1, clocksi_vnode, internal_read, [Part1, K3, {tx_id, SnapshotTime+24, self()}]),
     ?assertEqual(Result3, []),
-    {ok, Result4} = rpc:call(Node1, clocksi_vnode, read_data_item, [Part1, K3, {tx_id, SnapshotTime+25, self()}]),
+    {ok, Result4} = rpc:call(Node1, clocksi_vnode, internal_read, [Part1, K3, {tx_id, SnapshotTime+25, self()}]),
     ?assertEqual(Result4, 43),
     lager:info("Should receive prepared!!!"),
     pass.

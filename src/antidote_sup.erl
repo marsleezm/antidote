@@ -60,8 +60,6 @@ init(_Args) ->
     ets:new(meta_info,
         [set,public,named_table,{read_concurrency,true},{write_concurrency,false}]),
     lager:info("Cdf started!"),
-    ets:new(cdf,
-        [set,public,named_table,{read_concurrency,false},{write_concurrency,true}]),
     ets:new(dependency,
         [bag,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
     ets:new(anti_dep,

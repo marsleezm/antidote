@@ -56,15 +56,16 @@ load(WPerDc) ->
                 _ -> timer:sleep(4000)
     end,
     try
-        ets:delete(tpcc_load)
+        ets:delete(load_info)
     catch
         error:badarg ->  lager:warning("Ets table already deleted!")
     end,
-    ets:new(tpcc_load, [named_table, public, set]),
+    ets:new(load_info, [named_table, public, set]),
     Part1 = get_partition("COMMIT_TIME", FullPartList, HashLength),
-    {ok, COMMIT_TIME} = clocksi_vnode:read_data_item(Part1, "COMMIT_TIME", tx_utilities:create_tx_id(0)),
+    lager:warning("Part1 is ~w!!!", [Part1]),
+    {ok, COMMIT_TIME} = clocksi_vnode:internal_read(Part1, "COMMIT_TIME", tx_utilities:create_tx_id(0)),
     %lager:info("Got commit, is ~w", [COMMIT_TIME]),
-    ets:insert(tpcc_load, {"COMMIT_TIME", COMMIT_TIME}),
+    ets:insert(load_info, {"COMMIT_TIME", COMMIT_TIME}),
     
     ToPopulateParts = [{DcId, server}|MyReps],
     lists:foreach(fun({Id, Server}) -> 
@@ -76,7 +77,7 @@ load(WPerDc) ->
                 end,
         spawn(tpcc_load, thread_load, [Id, Tables, WPerDc, PartList, NumDcs, self()]) end, ToPopulateParts),
     lists:foreach(fun(_) ->  receive {done, I, S} -> ok, lager:info("Receive a reply from ~w, ~w", [I, S]) end end, ToPopulateParts), 
-    ets:delete(tpcc_load),
+    ets:delete(load_info),
     EndTime = os:timestamp(),
     lager:info("Population finished.. used ~w", [timer:now_diff(EndTime, StartTime)/1000000]).
 
@@ -151,9 +152,9 @@ populate_district(TxServer, WarehouseId, DistrictId, PartList, WPerDc) ->
     put_to_node(TxServer, DcId, PartList, YtdKey, DYtd).
 
 populate_customer_orders(TxServer, WarehouseId, DistrictId, PartList, WPerDc) ->
-    lager:info("Warehouse ~w, district ~w: Populating orders from 1 to ~w", [WarehouseId, DistrictId, 
-                ?NB_MAX_ORDER]),
     NumUniqueNames = ?NUM_NAMES *?NUM_NAMES*?NUM_NAMES, 
+    lager:info("Warehouse ~w, district ~w: Populating orders from 1 to ~w, customers to ~w then to ~w", [WarehouseId, DistrictId, 
+                ?NB_MAX_ORDER, NumUniqueNames, ?NB_MAX_CUSTOMER]),
     FCustomerSeq = lists:seq(1, NumUniqueNames),
     SCustomerSeq = lists:seq(NumUniqueNames+1, ?NB_MAX_CUSTOMER),
     %% Randomize the list of all combination of names
@@ -164,7 +165,7 @@ populate_customer_orders(TxServer, WarehouseId, DistrictId, PartList, WPerDc) ->
     OrderSeq = lists:seq(1, ?NB_MAX_ORDER),
     RandOrders = [X||{_,X} <- lists:sort([ {random:uniform(), N} || N <- OrderSeq])],
     {FRandOrders, SRandOrders} = lists:split(NumUniqueNames, RandOrders),
-    [{"COMMIT_TIME", CommitTime}] = ets:lookup(tpcc_load, "COMMIT_TIME"),
+    [{"COMMIT_TIME", CommitTime}] = ets:lookup(load_info, "COMMIT_TIME"),
     %% Magic number, assume that the order is created 1 sec ago.
     DcId = to_dc(WarehouseId, WPerDc),
     add_customer_order(1, FNameRandSeq, FRandOrders, TxServer, WPerDc, DcId, PartList, WarehouseId, DistrictId, CommitTime, defer),
@@ -179,7 +180,7 @@ add_customer_order(CustomerId, [NameNum|RestName], [RandOrder|RestOrder], TxServ
 
     CLast = tpcc_tool:name_by_num(NameNum),
     OrderId = RandOrder, 
-    %lager:info("Customer id is ~w, order is ~w, clast is ~p", [CustomerId, RandOrder, CLast]),
+    %lager:info("Customer id is ~w", [CustomerId]),
     Customer = tpcc_tool:create_customer(WarehouseId, DistrictId, CustomerId, CLast, CustomerTime, OrderId),
     CKey = tpcc_tool:get_key(Customer),
     put_to_node(TxServer, DcId, PartList, CKey, Customer),
@@ -273,7 +274,7 @@ get_partition(Key, PartList, HashLength) ->
     lists:nth(Num, PartList).
     
 put_to_node(Tabs, _DcId, _PartList, Key, Value) ->
-    [{"COMMIT_TIME", CommitTime}] = ets:lookup(tpcc_load, "COMMIT_TIME"),
+    [{"COMMIT_TIME", CommitTime}] = ets:lookup(load_info, "COMMIT_TIME"),
     case is_list(Tabs) of
         true -> %% Is clocksi table
             Index = crypto:bytes_to_integer(erlang:md5(Key)) rem length(Tabs) + 1,
@@ -292,7 +293,7 @@ put_to_node(Tabs, _DcId, _PartList, Key, Value) ->
 %multi_put(TxServer, DcId, PartList, WriteSet) ->
 %    {_, L} = lists:nth(DcId, PartList%),
 %    DictList = dict:to_list(WriteSet),
-%    [{"COMMIT_TIME", CommitTime}] = ets:lookup(tpcc_load, "COMMIT_TIME"),
+%    [{"COMMIT_TIME", CommitTime}] = ets:lookup(load_info, "COMMIT_TIME"),
 %    lists:foreach(fun({Index, KeyValues}) ->
 %            Part = lists:nth(Index, L),    
 %            put(TxServer, Part, KeyValues, CommitTime)

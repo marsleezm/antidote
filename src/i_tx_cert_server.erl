@@ -79,29 +79,16 @@ init([Name]) ->
     %PendingMetadata = tx_utilities:open_private_table(pending_metadata),
     [{_, Replicas}] = ets:lookup(meta_info, node()),
     TotalReplFactor = length(Replicas)+1,
-    %Cdf = case antidote_config:get(cdf, false) of
-    %            true -> [];
-    %            _ -> false
-    %        end,
     {ok, #state{do_repl=antidote_config:get(do_repl), name=Name, total_repl_factor=TotalReplFactor, last_commit_ts=0, rep_dict=RepDict, client_dict=dict:new()}}.
 
 handle_call({get_cdf}, _Sender, SD0) ->
-    %case Cdf of false -> ok;
-    %            _ ->
-    %                case Cdf of [] -> ok;
-    %                            _ ->
-    %                                FinalFileName = atom_to_list(Name) ++ "final-latency",
-    %                                {ok, FinalFile} = file:open(FinalFileName, [raw, binary, write]),
-    %                                lists:foreach(fun(Lat) -> file:write(FinalFile,  io_lib:format("~w\n", [Lat]))
-    %                                              end, Cdf),
-    %                                file:close(FinalFile)
-    %                end
-    %end,
-    %{reply, ok, SD0};
     {reply, ok, SD0};
 
 handle_call({get_stat}, _Sender, SD0) ->
     {reply, [0, 0, 0, 0, 0, 0, 0], SD0};
+
+handle_call({get_hitcounter}, _Sender, SD0) ->
+    {reply, 0, SD0};
 
 handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
     clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
@@ -138,7 +125,7 @@ handle_call({read, Key, TxId, Node}, Sender, SD0) ->
 
 handle_call({certify_read, TxId, 0},  Sender, SD0) ->
     handle_call({certify, TxId, [], [], ignore},  Sender, SD0);
-handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, 0},  Sender, SD0) ->
+handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, 0, ignore},  Sender, SD0) ->
     handle_call({certify, TxId, LocalUpdates, RemoteUpdates, ignore},  Sender, SD0);
 handle_call({certify, TxId, LocalUpdates, RemoteUpdates, _},  Sender, SD0=#state{client_dict=ClientDict, last_commit_ts=LastCommitTs, total_repl_factor=TotalReplFactor}) ->
     {Client, _} = Sender,

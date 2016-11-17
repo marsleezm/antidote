@@ -8,6 +8,8 @@
 -export([delete_1/2, delete_2/2, check_length1/2, check_time/1, check_length2/2,
          lookup_1/2, lookup_2/2, get_my_range/4, dict2/2,
          check_node/1, check_list/1, test_hash/2, ets2/2,
+         bs/1, dict_store/3, dict_delete/2,
+         ets_store/3, ets_delete/2, ets_das/1,
          pass1/1, pass2/1, set1/2, set2/2, set3/2]).
 
 check_time(N) ->
@@ -96,6 +98,64 @@ set3(N, S) ->
     lists:foreach(fun(_) ->
             lists:foldl(fun(M,Se) -> sets:del_element(M,Se) end, Set1, Seq)
             end, SeqN),
+    Diff = timer:now_diff(os:timestamp(), T),
+    io:format("Diff is ~w ~n", [Diff]).
+
+dict_store(S, Time, Lookup) ->
+    Times = lists:seq(1, Time),
+    T = os:timestamp(),
+    lists:foreach(fun(_) -> 
+    Seq = lists:seq(1, S),
+    Dict1 = lists:foldl(fun(M,Set) -> dict:store(M, finished, Set) end, dict:new(), Seq),
+    L = lists:seq(1, Lookup),
+    lists:foreach(fun(_) -> dict:find(1, Dict1) end, L)
+    end, Times),
+    Diff = timer:now_diff(os:timestamp(), T),
+    io:format("Diff is ~w sec ~n", [Diff / 1000000]).
+
+dict_delete(S, R) ->
+    Seq = lists:seq(1, S),
+    SeqR = lists:seq(1, R),
+    T = os:timestamp(),
+    Set1 = lists:foldl(fun(M,Set) -> dict:store(M, finished, Set) end, dict:new(), Seq),
+    lists:foreach(fun(_) ->
+            lists:foldl(fun(M,Set) -> dict:erase(M, Set)  end, Set1, Seq)
+            end, SeqR),
+    Diff = timer:now_diff(os:timestamp(), T),
+    io:format("Diff is ~w ~n", [Diff]).
+
+ets_store(S, Time, Lookup) ->
+    Times = lists:seq(1, Time),
+    T = os:timestamp(),
+    lists:foreach(fun(_) -> 
+    Table = ets:new(haha, [set]),
+    Seq = lists:seq(1, S),
+    _Dict1 = lists:foldl(fun(M,_Set) -> ets:insert(Table, {M, finished}) end, dict:new(), Seq),
+    L = lists:seq(1, Lookup),
+    lists:foreach(fun(_) -> ets:lookup(Table, 1) end, L), 
+    ets:delete(Table)
+    end, Times), 
+    Diff = timer:now_diff(os:timestamp(), T),
+    io:format("Diff is ~w sec ~n", [Diff / 1000000]).
+
+ets_das(S) ->
+    Table = ets:new(haha, [set]),
+    Seq = lists:seq(1, S),
+    T = os:timestamp(),
+    _Dict1 = lists:foldl(fun(M,_Set) -> ets:insert(Table, {M, finished}) end, dict:new(), Seq),
+    Diff = timer:now_diff(os:timestamp(), T),
+    ets:delete(Table),
+    io:format("Diff is ~w ~n", [Diff]).
+
+ets_delete(S, R) ->
+    Table = ets:new(haha, [set]),
+    Seq = lists:seq(1, S),
+    SeqR = lists:seq(1, R),
+    T = os:timestamp(),
+    Set1 = lists:foldl(fun(M,_Set) -> ets:insert(Table, {M, finished}) end, dict:new(), Seq),
+    lists:foreach(fun(_) ->
+            lists:foldl(fun(M,_Set) -> ets:delete(Table, M)  end, Set1, Seq)
+            end, SeqR),
     Diff = timer:now_diff(os:timestamp(), T),
     io:format("Diff is ~w ~n", [Diff]).
 
@@ -228,6 +288,56 @@ fun2(_) ->
     ets:lookup(table,2),
     ok.
 
+bs(_) ->
+    Sml = 0,
+    Big = 8,
+    Dict = dict:new(),
+    NewDict = lists:foldl(fun(N, D) ->
+                dict:store(N, inf, D)
+                end, Dict, lists:seq(Sml, Big)),
+    T1 = 300,
+    T2 = 200,
+    T3 = 400,
+    T4 = 200,
+    T5 = 300,
+    D1 = dict:store(Sml, T1, NewDict),
+    {S1, B1, M1} = int_bs(D1, Sml, Big, Sml, inf),
+    io:format("~w, ~w, ~w ~n", [S1, B1, M1]),
+    D2 = dict:store(M1, T2, D1),
+    {S2, B2, M2} = int_bs(D2, S1, B1, M1, T2),
+    io:format("~w, ~w, ~w ~n", [S2, B2, M2]),
+    D3 = dict:store(M2, T3, D2),
+    {S3, B3, M3} = int_bs(D3, S2, B2, M2, T3),
+    io:format("~w, ~w, ~w ~n", [S3, B3, M3]),
+
+    D4 = dict:store(M3, T4, D3),
+    {S4, B4, M4} = int_bs(D4, S3, B3, M3, T4),
+    io:format("~w, ~w, ~w ~n", [S4, B4, M4]),
+
+    D5 = dict:store(M4, T5, D4),
+    {S5, B5, M5} = int_bs(D5, S4, B4, M4, T5),
+
+    io:format("~w, ~w, ~w ~n", [S5, B5, M5]).
+
+int_bs(Dict, Small, Big, Mid, Throughput) ->
+    SmallTh = dict:fetch(Small, Dict),
+    io:format("Small th is ~w, th is ~w ~n", [SmallTh, Throughput]),
+    case Throughput > SmallTh of
+        true ->
+            S1 = Mid,
+            M1 = (S1 + Big) div 2,
+            case M1 of 
+                Mid -> {S1, Big, Big};
+                _ -> {S1, Big, M1}
+            end;
+        false ->
+            B1 = Mid,
+            M1 = (Small + B1) div 2,
+            case M1 of 
+                Mid -> {Small, B1, Small};
+                _ -> {Small, B1, M1}
+            end
+    end.
 
 check1(Key, Times, Dict) ->
     Seq = lists:seq(1, Times),
@@ -254,4 +364,5 @@ random_string(Len) ->
     ChrsSize = size(Chrs),
     F = fun(_, R) -> [element(random:uniform(ChrsSize), Chrs) | R] end,
     lists:foldl(F, "", lists:seq(1, Len)).
+
 

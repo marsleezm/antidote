@@ -63,7 +63,7 @@ read(Key) ->
 -spec read(Node::preflist(), Key::key()) -> {ok, val()} | {error, reason()}.
 read(Node, Key) ->
     TxId = tx_utilities:create_tx_id(0),
-    clocksi_vnode:read_data_item(Node, Key, TxId).
+    clocksi_vnode:internal_read(Node, Key, TxId).
 
 replica_read(Node, Key, TxId) ->
     ReplName = list_to_atom(atom_to_list(node())++"repl"++Node),
@@ -74,7 +74,7 @@ debug_read(PartIndex, Key) ->
     Node = hash_fun:get_local_vnode_by_id(PartIndex),
     lager:info("Node is ~w", [Node]),
     TxId = tx_utilities:create_tx_id(0),
-    clocksi_vnode:read_data_item(Node, Key, TxId).
+    clocksi_vnode:internal_read(Node, Key, TxId).
 
 -spec prepare(ThreadId::non_neg_integer(), TxId::txid(), 
         Updates::[{key(), []}], Updates::[{key(), []}]) -> {ok, val()} | {error, reason()}.
@@ -99,7 +99,7 @@ read(Node, Key, TxId) ->
     %    [{_, true}] ->
     %        clocksi_vnode:read_data_item(Node, Key, TxId);
     %    [{_, false}] ->
-            clocksi_vnode:read_data_item(Node, Key, TxId).
+            clocksi_vnode:internal_read(Node, Key, TxId).
     %end.
 
 %% Clock SI API

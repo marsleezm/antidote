@@ -47,10 +47,12 @@
 %% States
 -export([
         prepare_specula/4,
-        commit_specula/3,
-        abort_specula/2,
+        commit/3,
+        specula_commit/3,
+        abort/2,
         if_prepared/2,
         num_specula_read/0,
+        local_certify/3,
         read/4,
         read/2,
         read/3]).
@@ -58,7 +60,8 @@
 %% Spawn
 
 -record(state, {
-        cache_log :: cache_id(),
+        prepared_txs :: cache_id(),
+        dep_dict :: dict(),
         delay :: non_neg_integer(),
         specula_read :: boolean(),
         num_specula_read :: non_neg_integer(),
@@ -91,11 +94,17 @@ if_prepared(TxId, Keys) ->
 prepare_specula(TxId, Partition, WriteSet, PrepareTime) ->
     gen_server:cast(node(), {prepare_specula, TxId, Partition, WriteSet, PrepareTime}).
 
-abort_specula(TxId, Partition) -> 
-    gen_server:cast(node(), {abort_specula, TxId, Partition}).
+abort(TxId, Partition) -> 
+    gen_server:cast(node(), {abort, TxId, Partition}).
 
-commit_specula(TxId, Partition, CommitTime) -> 
-    gen_server:cast(node(), {commit_specula, TxId, Partition, CommitTime}).
+commit(TxId, Partition, CommitTime) -> 
+    gen_server:cast(node(), {commit, TxId, Partition, CommitTime}).
+
+local_certify(TxId, Partition, WriteSet) ->
+    gen_server:cast(node(), {local_certify, TxId, Partition, WriteSet, self()}).
+
+specula_commit(TxId, Partition, SpeculaCommitTs) ->
+    gen_server:cast(node(), {specula_commit, TxId, Partition, SpeculaCommitTs}).
 
 %%%===================================================================
 %%% Internal
@@ -103,10 +112,10 @@ commit_specula(TxId, Partition, CommitTime) ->
 
 init([]) ->
     lager:info("Cache server inited"),
-    CacheLog = tx_utilities:open_private_table(cache_log),
+    PreparedTxs = tx_utilities:open_private_table(prepared_txs),
     SpeculaRead = antidote_config:get(specula_read),
-    {ok, #state{specula_read = SpeculaRead,
-                cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}}.
+    {ok, #state{specula_read = SpeculaRead, dep_dict=dict:new(),
+                prepared_txs = PreparedTxs, num_specula_read=0, num_attempt_read=0}}.
 
 handle_call({num_specula_read}, _Sender, 
 	    SD0=#state{num_specula_read=NumSpeculaRead, num_attempt_read=NumAttemptRead}) ->
@@ -115,47 +124,33 @@ handle_call({num_specula_read}, _Sender,
 handle_call({get_pid}, _Sender, SD0) ->
         {reply, self(), SD0};
 
+handle_call({clean_data}, _Sender, SD0=#state{prepared_txs=PreparedTxs}) ->
+    ets:delete_all_objects(PreparedTxs),
+    {reply, ok, SD0#state{num_specula_read=0, num_attempt_read=0}};
+
 handle_call({read, Key, TxId, Node}, Sender, 
 	    SD0=#state{specula_read=false}) ->
     ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
     {noreply, SD0};
 
-handle_call({clean_data}, _Sender, SD0=#state{cache_log=OldCacheLog}) ->
-    ets:delete(OldCacheLog),
-    CacheLog = tx_utilities:open_private_table(cache_log),
-    {reply, ok, SD0#state{cache_log = CacheLog, num_specula_read=0, num_attempt_read=0}};
-
-handle_call({read, Key, TxId, Node}, Sender, 
-	    SD0=#state{cache_log=CacheLog, specula_read=true
-            }) ->
+handle_call({read, Key, TxId, {Partition, _}=Node}, Sender, 
+	    SD0=#state{prepared_txs=PreparedTxs, specula_read=true}) ->
     %lager:warning("Cache specula read ~w of ~w", [Key, TxId]), 
-    case ets:lookup(CacheLog, Key) of
-        [] ->
-            %lager:info("Relaying read to ~w", [Node]),
-            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
-            %lager:info("Well, from clocksi_vnode"),
-            %lager:info("Nothing!"),
+    case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, {relay, Sender}}) of
+        not_ready->
+            %lager:warning("Read blocked!"),
             {noreply, SD0};
-        [{Key, ValueList}] ->
-            %lager:info("Value list is ~w", [ValueList]),
-            MyClock = TxId#tx_id.snapshot_time,
-            case find_version(ValueList, MyClock) of
-                {SpeculaTxId, Value} ->
-                    ets:insert(dependency, {SpeculaTxId, TxId}),         
-                    ets:insert(anti_dep, {TxId, SpeculaTxId}),        
-                    %lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
-                    %{reply, {{specula, SpeculaTxId}, Value}, SD0};
-                    {reply, {ok, Value}, SD0};
-                [] ->
-                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
-                    %lager:info("Well, from clocksi_vnode"),
-                    {noreply, SD0}
-            end
+        {specula, Value} ->
+            {reply, {ok, Value}, SD0};
+        ready ->
+            %lager:warning("Read finished!"),
+            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
+            {noreply, SD0}
     end;
 
 handle_call({read, Key, TxId}, _Sender,
-        SD0=#state{cache_log=CacheLog}) ->
-    case ets:lookup(CacheLog, Key) of
+        SD0=#state{prepared_txs=PreparedTxs}) ->
+    case ets:lookup(PreparedTxs, Key) of
         [] ->
             {reply, {ok, []}, SD0};
         [{Key, ValueList}] ->
@@ -171,59 +166,95 @@ handle_call({read, Key, TxId}, _Sender,
             end
     end;
 
-
-handle_call({if_prepared, TxId, Keys}, _Sender, SD0=#state{cache_log=CacheLog}) ->
-    Result = lists:all(fun(Key) ->
-                    case ets:lookup(CacheLog, Key) of
-                        [{Key, [{_, _, TxId}|_]}] -> true;
-                        _ -> false
-                    end end, Keys),
+handle_call({if_prepared, TxId, Keys}, _Sender, SD0=#state{prepared_txs=PreparedTxs}) ->
+    Result = helper:handle_if_prepared(TxId, Keys, PreparedTxs),
     {reply, Result, SD0};
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
 handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp}, 
-	    SD0=#state{cache_log=CacheLog}) ->
+	    SD0=#state{prepared_txs=PreparedTxs}) ->
     KeySet = lists:foldl(fun({Key, Value}, KS) ->
-                    case ets:lookup(CacheLog, Key) of
+                    PartKey = {Partition, Key},
+                    case ets:lookup(PreparedTxs, PartKey) of
                         [] ->
                             %% Putting TxId in the record to mark the transaction as speculative 
                             %% and for dependency tracking that will happen later
-                            true = ets:insert(CacheLog, {Key, [{TimeStamp, Value, TxId}]}),
+                            true = ets:insert(PreparedTxs, {PartKey, [{TimeStamp, Value, TxId}]}),
                             [Key|KS];
-                        [{Key, ValueList}] ->
+                        [{PartKey, ValueList}] ->
                             {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-                            true = ets:insert(CacheLog, {Key, [{TimeStamp, Value, TxId}|RemainList]}),
+                            true = ets:insert(PreparedTxs, {PartKey, [{TimeStamp, Value, TxId}|RemainList]}),
                             [Key|KS]
                     end end, [], WriteSet),
-    ets:insert(CacheLog, {{TxId, Partition}, KeySet}),
+    ets:insert(PreparedTxs, {{TxId, Partition}, KeySet}),
     {noreply, SD0};
+
+%% Need to certify here
+handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
+        SD0=#state{prepared_txs=PreparedTxs, dep_dict=DepDict}) ->
+   %lager:warning("cache server local certify for [~w, ~w]", [TxId, Partition]),
+    Result = local_cert_util:prepare_for_other_part(TxId, Partition, WriteSet, ignore, PreparedTxs, TxId#tx_id.snapshot_time, cache),
+    case Result of
+        {ok, PrepareTime} ->
+            %UsedTime = tx_utilities:now_microsec() - PrepareTime,
+            %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
+            gen_server:cast(Sender, {prepared, TxId, PrepareTime, self()}),
+            {noreply, SD0};
+        {wait, PendPrepDep, _PrepDep, PrepareTime} ->
+            NewDepDict =
+                case PendPrepDep of
+                    0 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime, self()}), DepDict;
+                    _ -> dict:store(TxId, {PendPrepDep, PrepareTime, Sender}, DepDict)
+                end,
+            {noreply, SD0#state{dep_dict=NewDepDict}};
+        {error, write_conflict} ->
+            gen_server:cast(Sender, {aborted, TxId}),
+            {noreply, SD0}
+    end;
+
+handle_cast({specula_commit, TxId, Partition, SpeculaCommitTime}, State=#state{prepared_txs=PreparedTxs,
+        dep_dict=DepDict}) ->
+   %lager:warning("specula commit for [~w, ~w]", [TxId, Partition]),
+    case ets:lookup(PreparedTxs, {TxId, Partition}) of
+        [{{TxId, Partition}, Keys}] ->
+            DepDict1 = local_cert_util:specula_commit(Keys, TxId, SpeculaCommitTime, ignore, PreparedTxs, DepDict, Partition, cache),
+            {noreply, State#state{dep_dict=DepDict1}};
+        [] ->
+            lager:error("Prepared record of ~w has disappeared!", [TxId]),
+            error
+    end;
 
 %% Where shall I put the speculative version?
 %% In ets, faster for read.
-handle_cast({abort_specula, TxId, Partitions}, 
-	    SD0=#state{cache_log=CacheLog}) ->
-    lists:foreach(fun(Partition) ->
-            case ets:lookup(CacheLog, {TxId, Partition}) of 
+handle_cast({abort, TxId, Partitions}, 
+	    SD0=#state{prepared_txs=PreparedTxs, dep_dict=DepDict}) ->
+   %lager:warning("Abort ~w in cache", [TxId]),
+    DepDict1 = lists:foldl(fun(Partition, D) ->
+            case ets:lookup(PreparedTxs, {TxId, Partition}) of 
                 [{{TxId, Partition}, KeySet}] -> 
-                    delete_keys(CacheLog, KeySet, TxId);
-                _ -> ok
-            end end, Partitions),
+                    ets:delete(PreparedTxs, {TxId, Partition}),
+                    local_cert_util:clean_abort_prepared(PreparedTxs, KeySet, TxId, ignore, D, Partition, cache);
+                _ -> D 
+            end end, DepDict, Partitions),
     specula_utilities:deal_abort_deps(TxId),
-    {noreply, SD0};
+    {noreply, SD0#state{dep_dict=DepDict1}};
     
-handle_cast({commit_specula, TxId, Partitions, CommitTime}, 
-	    SD0=#state{cache_log=CacheLog}) ->
-    lists:foreach(fun(Partition) ->
-            case ets:lookup(CacheLog, {TxId, Partition}) of
+handle_cast({commit, TxId, Partitions, CommitTime}, 
+	    SD0=#state{prepared_txs=PreparedTxs, dep_dict=DepDict}) ->
+   %lager:warning("Commit ~w in cache", [TxId]),
+    DepDict1 = lists:foldl(fun(Partition, D) ->
+            case ets:lookup(PreparedTxs, {TxId, Partition}) of
                 [{{TxId, Partition}, KeySet}] ->
-                    delete_keys(CacheLog, KeySet, TxId);
+                    ets:delete(PreparedTxs, {TxId, Partition}),
+                    local_cert_util:update_store(KeySet, TxId, CommitTime, ignore, ignore, PreparedTxs,
+                        D, Partition, cache);
                 _ ->
-                    ok
-            end end, Partitions),
+                    D
+            end end, DepDict, Partitions),
     specula_utilities:deal_commit_deps(TxId, CommitTime),
-    {noreply, SD0};
+    {noreply, SD0#state{dep_dict=DepDict1}};
 
 handle_cast(_Info, StateData) ->
     {noreply,StateData}.
@@ -252,21 +283,3 @@ find_version([{TS, Value, TxId}|Rest], SnapshotTime) ->
             find_version(Rest, SnapshotTime)
     end.
 
-
-delete_version([{_, _, TxId}|Rest], TxId) -> 
-    Rest;
-delete_version([{TS, V, Tx}|Rest], TxId) -> 
-    [{TS, V, Tx}|delete_version(Rest, TxId)].
-
-delete_keys(Table, KeySet, TxId) ->
-    lists:foreach(fun(Key) ->
-                    case ets:lookup(Table, Key) of
-                        [] -> %% TODO: this can not happen 
-                            ok;
-                        [{Key, ValueList}] ->
-                            %lager:info("Delete version ~w, key is ~w, list is ~p", [TxId, Key, ValueList]),
-                            NewValueList = delete_version(ValueList, TxId), 
-                            %lager:info("after deletion list is ~p", [NewValueList]),
-                            ets:insert(Table, {Key, NewValueList})
-                    end 
-                  end, KeySet).
