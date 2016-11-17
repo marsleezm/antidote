@@ -551,10 +551,12 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
             lager:warning("SC commit for ~w, ~p, prepnum are ~w", [TxId, Key, _PrepNum]),
             case find_prepare_record(RecordList, TxId) of
                 [] -> 
+                    lager:warning("Did not find record! Record list is ~w", [RecordList]),
                     specula_commit(Rest, TxId, SCTime, InMemoryStore, 
                           PreparedTxs, DepDict, Partition, PartitionType);
                 {Prev, {TxId, TxPrepTime, TxSCValue, PendingReaders}, RestRecords} ->
                     {First, RemainRecords, AbortedReaders, DepDict1, _} = deal_pending_records(Prev, LastOne, SCTime, DepDict, MyNode, [], PartitionType, 1, specula_commit),
+                    lager:warning("Found record! Prev is ~w, RestRecords is ~w", [Prev, RestRecords]),
                     {StillPend, ToPrev} = reply_specula_commit(PartitionType, PendingReaders++AbortedReaders, Key, SCTime, TxSCValue),
                     AfterReadRecord = multi_read_version(Key, RestRecords, ToPrev, InMemoryStore),
                     true = TxPrepTime =< SCTime,
