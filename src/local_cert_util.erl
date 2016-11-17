@@ -555,8 +555,9 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
                     specula_commit(Rest, TxId, SCTime, InMemoryStore, 
                           PreparedTxs, DepDict, Partition, PartitionType);
                 {Prev, {TxId, TxPrepTime, TxSCValue, PendingReaders}, RestRecords} ->
-                    {First, RemainRecords, AbortedReaders, DepDict1, _} = deal_pending_records(Prev, LastOne, SCTime, DepDict, MyNode, [], PartitionType, 1, specula_commit),
                     lager:warning("Found record! Prev is ~w, RestRecords is ~w", [Prev, RestRecords]),
+                    {First, RemainRecords, AbortedReaders, DepDict1, _} = deal_pending_records(Prev, LastOne, SCTime, DepDict, MyNode, [], PartitionType, 1, specula_commit),
+                    lager:warning("Found record! First is ~w, RemainRecords is ~w", [First, RemainRecords]),
                     {StillPend, ToPrev} = reply_specula_commit(PartitionType, PendingReaders++AbortedReaders, Key, SCTime, TxSCValue),
                     AfterReadRecord = multi_read_version(Key, RestRecords, ToPrev, InMemoryStore),
                     true = TxPrepTime =< SCTime,
