@@ -383,7 +383,7 @@ handle_command({read_all}, _Sender, SD0=#state{
 %% This read serves for all normal cases.
 handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
-    lager:warning("Relaying read for ~p ~w", [Key, TxId]),
+     lager:warning("Relaying read for ~p ~w", [Key, TxId]),
     case SpeculaRead of
         false ->
             case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Reader}}) of

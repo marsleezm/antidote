@@ -874,7 +874,9 @@ ready_or_block(TxId, Key, PreparedTxs, SenderInfo) ->
                 false ->
                     case SnapshotTime >= PrepareTime of
                         true ->
-                            ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, FirstPrepTime, CanSC, Value, [SenderInfo|PendingReader]}| PendingPrepare]});
+                            ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, FirstPrepTime, CanSC, Value, [SenderInfo|PendingReader]}| PendingPrepare]}),
+                            not_ready;
+
                         false ->
                             Record = insert_pend_reader(PendingPrepare, SnapshotTime, SenderInfo),
                             ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, FirstPrepTime, CanSC, Value, PendingReader}|Record]}),
