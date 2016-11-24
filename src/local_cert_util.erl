@@ -68,7 +68,7 @@ prepare_for_other_part(TxId, Partition, TxWriteSet, CommittedTxs, PreparedTxs, I
             {error, write_conflict};
         %% Directly prepare
         {0, 0, PrepareTime} ->
-            lager:warning("~p passed prepare with ~p, KeySet is ~w", [TxId, PrepareTime, KeySet]),
+            lager:warning("~p passed prepare with ~p, KeySet is ~p", [TxId, PrepareTime, KeySet]),
             lists:foreach(fun({K, V}) ->
                     InsertKey = case PartitionType of cache -> {Partition, K}; slave -> K end,
                     ets:insert(PreparedTxs, {InsertKey, [{prepared, TxId, PrepareTime, PrepareTime, PrepareTime, 1, V, []}]})
@@ -863,14 +863,14 @@ insert_prepare(PreparedTxs, TxId, Partition, WriteSet, TimeStamp, Sender) ->
               lists:foreach(fun({Key, Value}) ->
                           case ets:lookup(PreparedTxs, Key) of
                               [] ->
-                                  lager:warning("Inserted prepare for ~w ~w having nothing", [TxId, Key]),
+                                  lager:warning("Inserted prepare for ~w ~p having nothing", [TxId, Key]),
                                   true = ets:insert(PreparedTxs, {Key, [{repl_prepare, TxId, ToPrepTS, ToPrepTS, ToPrepTS, 1, Value, []}]});
                               [{Key, [{_, _, _, _, _, _, _, _}|_Rest]=L}] ->
                                   NewList = add_to_list(TxId, ToPrepTS, Value, L),
                                   lager:warning("Key:~w, PrevList is ~w, after list is ~w", [Key, L, NewList]),
                                   true = ets:insert(PreparedTxs, {Key, NewList});
                               [{Key, _}] -> 
-                                  lager:warning("Inserted prepare for ~w ~w having nothing", [TxId, Key]),
+                                  lager:warning("Inserted prepare for ~w ~p having nothing", [TxId, Key]),
                                   true = ets:insert(PreparedTxs, {Key, [{repl_prepare, TxId, ToPrepTS, ToPrepTS, ToPrepTS, 1, Value, []}]})
               end end,  WriteSet),
               lager:warning("Got repl prepare for ~p, propose ~p and replied", [TxId, ToPrepTS]),
