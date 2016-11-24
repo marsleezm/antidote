@@ -189,7 +189,7 @@ update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedT
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PartitionType) ->
       lager:warning("Trying to insert key ~p with for ~p, commit time is ~p", [Key, TxId, TxCommitTime]),
     case ets:lookup(PreparedTxs, Key) of
-        [{Key, [{Type, TxId, _PrepareTime, LRTime, FirstPrepTime, PrepNum, Value, PendingReaders}|Others]}] ->
+        [{Key, [{Type, TxId, _PrepareTime, LRTime, _FirstPrepTime, PrepNum, Value, PendingReaders}|Others]}] ->
             lager:warning("~p Pending readers are ~p! Others are ~p", [TxId, PendingReaders, Others]),
              lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p, RPrepNum is ~p", [Key, TxId, Type, PrepNum, TxCommitTime, PrepNum]),
             case PartitionType of
@@ -223,18 +223,15 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                             end end,
                         PendingReaders)
             end,
-            lager:warning("Others is ~w, prep num is ~w", [Others, PrepNum]),
+            lager:warning("Others is ~p, prep num is ~w", [Others, PrepNum]),
             case Others of
                 [] ->
                     case Type of prepared -> PrepNum=1; repl_prepare -> PrepNum=1; pre_commit -> PrepNum=0 end,
                     ets:insert(PreparedTxs, {Key, max(TxCommitTime, LRTime)}),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
                         DepDict, Partition, PartitionType);
-                [{RType, RTxId, RPrepTime, RValue, RReaders}|OtherRest] ->
-                    case RType of prepared -> RType = error; _ -> ok end,
-                    RPrepNum = case Type of pre_commit -> PrepNum; _ -> PrepNum-1 end,
-                    ets:insert(PreparedTxs, {Key, [{RType, RTxId, RPrepTime, max(TxCommitTime, LRTime), FirstPrepTime, 
-                        RPrepNum, RValue, RReaders}|OtherRest]}),
+                _ ->
+                    ets:insert(PreparedTxs, {Key, max(TxCommitTime, LRTime)}),
                     update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
                         DepDict, Partition, PartitionType)
             end; 
