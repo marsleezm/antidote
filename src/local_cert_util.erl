@@ -192,6 +192,8 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
         [{Key, [{Type, TxId, _PrepareTime, LRTime, _FirstPrepTime, PrepNum, Value, PendingReaders}|Others]}] ->
             lager:warning("~p Pending readers are ~p! Others are ~p", [TxId, PendingReaders, Others]),
              lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p, RPrepNum is ~p", [Key, TxId, Type, PrepNum, TxCommitTime, PrepNum]),
+            AllPendingReaders = lists:foldl(fun({_, _, _, _ , Readers}, CReaders) ->
+                                       Readers++CReaders end, PendingReaders), 
             case PartitionType of
                 cache ->  
                     lists:foreach(fun({ReaderTxId, Node, Sender}) ->
@@ -201,7 +203,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                                 false ->
                                     {_, RealKey} = Key,
                                     clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false)
-                            end end, PendingReaders);
+                            end end, AllPendingReaders);
                 _ ->
                     Values = case ets:lookup(InMemoryStore, Key) of
                                 [] ->
@@ -221,20 +223,12 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                                 false ->
                                     reply(Sender, {ok, hd(Values)})
                             end end,
-                        PendingReaders)
+                        AllPendingReaders)
             end,
             lager:warning("Others is ~p, prep num is ~w", [Others, PrepNum]),
-            case Others of
-                [] ->
-                    case Type of prepared -> PrepNum=1; repl_prepare -> PrepNum=1; pre_commit -> PrepNum=0 end,
-                    ets:insert(PreparedTxs, {Key, max(TxCommitTime, LRTime)}),
-                    update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
-                        DepDict, Partition, PartitionType);
-                _ ->
-                    ets:insert(PreparedTxs, {Key, max(TxCommitTime, LRTime)}),
-                    update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
-                        DepDict, Partition, PartitionType)
-            end; 
+            ets:insert(PreparedTxs, {Key, max(TxCommitTime, LRTime)}),
+            update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
+                DepDict, Partition, PartitionType);
         [{Key, [First|Others]}] ->
             lager:warning("First is ~p, Others are ~p, PartitionType is ~p", [First, Others, PartitionType]),
             DepDict2 = delete_and_read(commit, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, Partition, Others, TxId, [], First, 0),
