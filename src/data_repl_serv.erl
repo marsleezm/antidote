@@ -65,7 +65,7 @@
         debug_read/3,
         prepare_specula/5,
         local_certify/4,
-        specula_commit/4,
+        pre_commit/4,
         %commit_specula/4,
         %abort_specula/3,
         if_prepared/3,
@@ -153,8 +153,8 @@ local_certify(Name, TxId, Partition, WriteSet) ->
 read_all(Name) ->
     gen_server:cast({global, Name}, {get_size}).
 
-specula_commit(Name, TxId, Partition, SpeculaCommitTs) ->
-    gen_server:cast({global, Name}, {specula_commit, TxId, Partition, SpeculaCommitTs}).
+pre_commit(Name, TxId, Partition, SpeculaCommitTs) ->
+    gen_server:cast({global, Name}, {pre_commit, TxId, Partition, SpeculaCommitTs}).
 
 relay_read(Name, Key, TxId, Reader) ->
     gen_server:cast({global, Name}, {relay_read, Key, TxId, Reader}).
@@ -406,12 +406,12 @@ handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
             {noreply, SD0}
     end;
 
-handle_cast({specula_commit, TxId, Partition, SpeculaCommitTime}, State=#state{prepared_txs=PreparedTxs,
+handle_cast({pre_commit, TxId, Partition, SpeculaCommitTime}, State=#state{prepared_txs=PreparedTxs,
         inmemory_store=InMemoryStore, dep_dict=DepDict}) ->
    %lager:warning("Specula commit for ~w ", [Partition]),
     case ets:lookup(PreparedTxs, {TxId, Partition}) of
         [{{TxId, Partition}, Keys}] ->
-            DepDict1 = local_cert_util:specula_commit(Keys, TxId, SpeculaCommitTime, InMemoryStore, PreparedTxs, DepDict, Partition, slave),
+            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, InMemoryStore, PreparedTxs, DepDict, Partition, slave),
             {noreply, State#state{dep_dict=DepDict1}};
         [] ->
             lager:error("Prepared record of ~w, ~w has disappeared!", [TxId, Partition]),
