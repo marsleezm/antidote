@@ -760,7 +760,7 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
                     DepDict1
             end;
         [{TType, TTxId, TSCTime, TValue, TPendReaders}|TT] -> 
-            lager:warning("After read is ~w ~w", [TxId, AfterReadRecord]),
+            %lager:warning("After read is ~w ~w", [TxId, AfterReadRecord]),
             case First of
                 {LastReaderTime, FirstPrepTime, RemainPrepNum} ->
                     case RemainPrev of
@@ -778,7 +778,7 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
 delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, MyNode, [Current|Rest], TxId, Prev, FirstOne, CAbortPrep) ->
     delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, MyNode, Rest, TxId, [Current|Prev], FirstOne, CAbortPrep);
 delete_and_read(abort, _PreparedTxs, _InMemoryStore, _TxCommitTime, _Key, DepDict, _PartitionType, _MyNode, [], _TxId, _Prev, _Whatever, 0) ->
-    lager:warning("Abort but got nothing"),
+    %lager:warning("Abort but got nothing"),
     DepDict.
 
 read_appr_version(_ReaderTxId, _Key, [], _Prev, _SenderInfo) ->
@@ -860,7 +860,7 @@ insert_prepare(PreparedTxs, TxId, Partition, WriteSet, TimeStamp, Sender) ->
               ets:insert(PreparedTxs, {{TxId, Partition}, KeySet}),
               gen_server:cast(Sender, {solve_pending_prepared, TxId, ToPrepTS, self()});
           _R ->
-              lager:warning("Not replying for ~p, ~p because already prepard, Record is ~p", [TxId, Partition, _R]),
+              %lager:warning("Not replying for ~p, ~p because already prepard, Record is ~p", [TxId, Partition, _R]),
               ok
       end.
 
