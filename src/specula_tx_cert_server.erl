@@ -266,7 +266,7 @@ handle_call({certify_read, TxId, ClientMsgId, Client}, Sender, SD0=#state{min_co
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
                                     committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                             DepDict1 = dict:erase(TxId, DepDict),
-                            {reply, {aborted, {[TxId|AbortedReads], rev(CommittedUpdates), lists:sort(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
+                            {reply, {aborted, {[AbortedReads], rev(CommittedUpdates), lists:sort(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                         AbortedTxId ->
                             %lager:warning("Cascade aborted aborted txid is ~w, TxId is  ~w", [AbortedTxId, TxId]),
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
