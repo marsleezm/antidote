@@ -193,7 +193,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             lager:warning("~p Pending readers are ~p! Others are ~p", [TxId, PendingReaders, Others]),
              lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p, RPrepNum is ~p", [Key, TxId, Type, PrepNum, TxCommitTime, PrepNum]),
             AllPendingReaders = lists:foldl(fun({_, _, _, _ , Readers}, CReaders) ->
-                                       Readers++CReaders end, PendingReaders), 
+                                       Readers++CReaders end, PendingReaders, Others), 
             case PartitionType of
                 cache ->  
                     lists:foreach(fun({ReaderTxId, Node, Sender}) ->
