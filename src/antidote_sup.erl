@@ -64,6 +64,8 @@ init(_Args) ->
         [bag,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
     ets:new(anti_dep,
         [bag,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
+    ets:new(dep_length,
+        [bag,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
 
          case antidote_config:get(do_specula) of
             true -> 
@@ -92,11 +94,6 @@ init(_Args) ->
     %                []},
     %                permanent, 5000, worker, [stat_server]},
 
-    DepServer = {dep_server,
-                    {dep_server,  start_link,
-                    []},
-                    permanent, 5000, worker, [dep_server]},
-
     CertSup = {tx_cert_sup,
                     {tx_cert_sup,  start_link, []},
                     permanent, 5000, worker, [tx_cert_sup]},
@@ -106,5 +103,4 @@ init(_Args) ->
      {{one_for_one, 5, 10},
       [VnodeMaster,
        ReplFsmSup,
-       CertSup,
-       DepServer]}}.
+       CertSup]}}.

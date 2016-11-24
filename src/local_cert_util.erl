@@ -671,6 +671,8 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
                     %% Read current version
                     case (Type == pre_commit) and sc_by_local(TxId) of
                         true ->
+                            [{TxId, Len, LenList}] = ets:lookup(dep_len, TxId),
+                            case 
                             add_read_dep(TxId, PreparedTxId, Key),
                              lager:warning("~p finally reading specula version ~p, pend prep num is ~w", [TxId, Value, PendPrepNum]),
                             {specula, Value};
