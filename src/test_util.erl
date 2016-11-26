@@ -10,7 +10,34 @@
          check_node/1, check_list/1, test_hash/2, ets2/2,
          bs/1, dict_store/3, dict_delete/2,
          ets_store/3, ets_delete/2, ets_das/1,
+         spawn_use_ets/1, spawn_pass/1,
          pass1/1, pass2/1, set1/2, set2/2, set3/2]).
+
+spawn_use_ets(N) ->
+    Haha = ets:new(haha, [set,public]),
+    Num = 100,
+    ets:insert(Haha, {len, 10}),
+    Seq = lists:seq(1, N),
+    Self = self(),
+    Start = now(),
+    Pids = [ spawn_link(fun() -> ets:lookup(Haha, len), ets:lookup(Haha, Num), Self ! ok end)
+            || _ <- Seq ],
+    [ receive ok -> ok end || _ <- Pids ], 
+    End = now(),
+    io:format("Diff is ~w ~n", [timer:now_diff(End, Start)]).
+
+spawn_pass(N) ->
+    Haha = ets:new(haha, [set,public]),
+    Num = 100,
+    Seq = lists:seq(1, N),
+    Self = self(),
+    Start = now(),
+    Pids = [ spawn_link(fun() -> ets:lookup(Haha, Num), Self ! ok end)
+            || _ <- Seq ],
+    [ receive ok -> ok end || _ <- Pids ], 
+    End = now(),
+    io:format("Diff is ~w ~n", [timer:now_diff(End, Start)]).
+
 
 check_time(N) ->
     S = lists:seq(1, N),

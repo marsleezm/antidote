@@ -384,8 +384,9 @@ handle_command({read_all}, _Sender, SD0=#state{
 handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
     %lager:warning("Relaying read for ~p ~w", [Key, TxId]),
-    case SpeculaRead of
-        false ->
+    [{length, LenLimit}] = ets:lookup(meta_info, length),
+    case (SpeculaRead == false) or (LenLimit == 0) of
+        true ->
             case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Reader}}) of
                 not_ready->
                     %lager:warning("Read for ~p of ~w blocked!", [Key, TxId]),
@@ -397,8 +398,8 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
     		        %T2 = os:timestamp(),
                     {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
-        true ->
-            case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Reader}}) of
+        false ->
+            case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Reader}}, LenLimit) of
                 not_ready->
                     %lager:warning("Read blocked!"),
                     {noreply, SD0};
@@ -407,7 +408,8 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
     		        %T2 = os:timestamp(),
                      %lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
                     {noreply, SD0};
-				        %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
+                specula_wait ->
+                    {noreply, SD0};
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
                     gen_server:reply(Reader, Result), 

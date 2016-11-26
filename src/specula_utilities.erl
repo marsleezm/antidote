@@ -31,13 +31,15 @@
 
 -export([should_specula/3, make_prepared_specula/4, speculate_and_read/4, generate_snapshot/4, 
             coord_should_specula/1, finalize_version_and_reply/5, add_specula_meta/4,
-            finalize_dependency/5, deal_commit_deps/2, deal_abort_deps/1]).
+            finalize_dependency/5, deal_commit_deps/2, deal_abort_deps/1, recursive_reduce_dep/3]).
 
 deal_commit_deps(TxId, CommitTime) ->
     case ets:lookup(dependency, TxId) of
         [] ->
             ok; %% No read dependency was created!
         List ->
+            lager:warning("Committing tx ~w, list is ~w!", [TxId, List]),
+            [{length, MaxLen}] = ets:lookup(meta_info, length),
             lists:foreach(fun({TId, DependTxId}) ->
                             ets:delete_object(dependency, {TId, DependTxId}),
                             case DependTxId#tx_id.snapshot_time >= CommitTime of
@@ -47,7 +49,11 @@ deal_commit_deps(TxId, CommitTime) ->
                                 false ->
                                     %lager:info("Calling read invalid by ts of ~w, from ~w", [DependTxId, TId]),
                                     gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, CommitTime, DependTxId})
-                          end end, List)
+                          end end, List),
+            AffectedCoord = recursive_reduce_dep([{0, List}], MaxLen, sets:new()),
+            lists:foreach(fun({ClientId, ServerId}) ->
+                gen_server:cast(ServerId, {try_specula_commit, ClientId})
+                end, sets:to_list(AffectedCoord))
     end.
 
 deal_abort_deps(TxId) ->
@@ -125,6 +131,72 @@ make_prepared_specula(Key, PreparedRecord, PreparedTxs, _InMemoryStore) ->
     %lager:info("Trying to make prepared specula ~w for ~w",[Key, TxId]),
     true = ets:insert(PreparedTxs, {Key, {specula, TxId, PrepareTime, Value, PendingReaders}}),
     {TxId, Value}.
+
+recursive_reduce_dep([], _MaxLen, OACoord) ->
+    OACoord; 
+recursive_reduce_dep(FullDepList, MaxLen, OACoord) ->
+    {NewList, AffectedCoord}= lists:foldl(
+        fun({MyLen, DepList}, {Acc, AccCoord}) ->
+            lager:warning("DepList is ~w, len is ~w", [DepList, MyLen]),
+            lists:foldl(fun({TxId, DepTxId}, {Acc1, AccCoord1}) ->
+                lager:warning("Trying to look for list for ~w", [DepTxId]),
+                case ets:lookup(dep_len, DepTxId) of
+                    [] -> {Acc1, AccCoord1}; %% Mean it has not even specula-committed or has aborted already...
+                    [{_DepTxId, _Len, _BlockedValue, []}] ->
+                        {Acc1, AccCoord1};
+                    [{DepTxId, Len, BlockedValue, DependingList}] ->
+                        lager:warning("OldLen is ~w, OldList is ~w, BlockedValue ~w, Maxlen ~w", [Len, DependingList, BlockedValue, MaxLen]),
+                        case remove_from_dep_list(DependingList, TxId, MyLen, 0, []) of
+                            [] -> {Acc1, AccCoord1};
+                            {NewLen, NewList} ->
+                                lager:warning("NewLen is ~w, NewList is ~w", [NewLen, NewList]),
+                                case BlockedValue of
+                                    spec_commit ->
+                                        NewLen1 = NewLen + 1,
+                                        ets:insert(dep_len, {DepTxId, NewLen1, BlockedValue, NewList}),
+                                        case Len > NewLen1 of
+                                            true ->
+                                                case ets:lookup(dependency, DepTxId) of
+                                                    [] -> {Acc1, sets:add_element({DepTxId#tx_id.client_pid, DepTxId#tx_id.server_pid}, AccCoord1)};
+                                                    L -> {[{NewLen1, L}]++Acc1, 
+                                                            sets:add_element({DepTxId#tx_id.client_pid, DepTxId#tx_id.server_pid}, AccCoord1)}
+                                                end;
+                                            false -> {Acc1, AccCoord1}
+                                        end;
+                                    {Reader, Value} ->
+                                        case NewLen =< MaxLen of
+                                            true ->
+                                                lager:warning("Haha, replying!"),
+                                                local_cert_util:reply(Reader, Value),
+                                                ets:insert(dep_len, {DepTxId, NewLen, [], NewList});
+                                            false ->
+                                                ets:insert(dep_len, {DepTxId, NewLen, BlockedValue, NewList})
+                                        end,
+                                        {Acc1, AccCoord1};
+                                    [] ->
+                                        ets:insert(dep_len, {DepTxId, NewLen, [], NewList}),
+                                        {Acc1, AccCoord1}
+                                end
+                        end
+                end end, {Acc, AccCoord}, DepList)
+        end, {[], OACoord}, FullDepList),
+    recursive_reduce_dep(NewList, MaxLen, AffectedCoord).
+
+remove_from_dep_list([], done, _MyLen, 0, []) ->
+    {0, []};
+remove_from_dep_list([], done, _MyLen, NewMaxLen, NewList) ->
+    {NewMaxLen, NewList};
+remove_from_dep_list([], _Key, _,  _, _) ->
+    lager:warning("So dep is concurrently removed, I'd better do nothing"),
+    [];
+remove_from_dep_list([{Key, _Len}|Rest], Key, 0, NewMaxLen, NewList) ->
+    remove_from_dep_list(Rest, done, 0, NewMaxLen, NewList);
+remove_from_dep_list([{Key, Len}|Rest], Key, MyLen, NewMaxLen, NewList) ->
+    true = Len > MyLen,
+    remove_from_dep_list(Rest, done, MyLen, max(NewMaxLen, MyLen), [{Key, MyLen}|NewList]);
+remove_from_dep_list([{OtherKey, Len}|Rest], Key, MyLen, NewMaxLen, NewList) ->
+    remove_from_dep_list(Rest, Key, MyLen, max(NewMaxLen, Len), [{OtherKey, Len}|NewList]).
+
 
 
 %%%%%%%%%%%%%%%%  Private function %%%%%%%%%%%%%%%%%

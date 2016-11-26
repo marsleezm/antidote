@@ -136,12 +136,15 @@ handle_call({read, Key, TxId, Node}, Sender,
 handle_call({read, Key, TxId, {Partition, _}=Node}, Sender, 
 	    SD0=#state{prepared_txs=PreparedTxs, specula_read=true}) ->
     %lager:warning("Cache specula read ~w of ~w", [Key, TxId]), 
-    case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, {relay, Sender}}) of
+    [{length, LenLimit}] = ets:lookup(meta_info, length),
+    case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, {relay, Sender}}, LenLimit) of
         not_ready->
             %lager:warning("Read blocked!"),
             {noreply, SD0};
         {specula, Value} ->
             {reply, {ok, Value}, SD0};
+        specula_wait ->
+            {noreply, SD0};
         ready ->
             %lager:warning("Read finished!"),
             ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),

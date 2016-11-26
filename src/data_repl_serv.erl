@@ -250,10 +250,10 @@ handle_call({read, Key, TxId, _Node}, Sender,
 	    SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs,
                 specula_read=SpeculaRead}) ->
    %lager:warning("Data repl reading ~w ~w", [TxId, Key]),
-    case SpeculaRead of
-        false ->
+    [{length, LenLimit}] = ets:lookup(meta_info, length),
+    case (SpeculaRead == false) or (LenLimit == 0) of
+        true ->
            %lager:warning("Specula rea on data repl and false!!??"),
-            SpeculaRead = true,
             case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {relay, Sender}) of
                 not_ready-> {noreply, SD0};
                 ready ->
@@ -262,15 +262,17 @@ handle_call({read, Key, TxId, _Node}, Sender,
                     %T2 = os:timestamp(),
                     {reply, Result, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
-        true ->
+        false ->
             %lager:warning("Specula read!!"),
-            case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Sender}}) of
+            case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Sender}}, LenLimit) of
                 not_ready->
                     %lager:warning("Read blocked!"),
                     {noreply, SD0};
                 {specula, Value} ->
                     {reply, {ok, Value}, SD0};
                         %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
+                specula_wait ->
+                    {noreply, SD0};
                 ready ->
                     %lager:warning("Read finished!"),
                     Result = read_value(Key, TxId, InMemoryStore),
@@ -505,6 +507,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
   %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
    DepDict1 = lists:foldl(fun(Partition, D) ->
                     [{{TxId, Partition}, KeySet}] = ets:lookup(PreparedTxs, {TxId, Partition}), 
+                    %lager:warning("~w: ~w keys are ~p", [TxId, Partition, KeySet]),
                     ets:delete(PreparedTxs, {TxId, Partition}),
                     local_cert_util:update_store(KeySet, TxId, CommitTime, InMemoryStore, CommittedTxs, PreparedTxs, 
                         D, Partition, slave)

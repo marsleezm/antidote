@@ -62,10 +62,9 @@ init(_Args) ->
     lager:info("Cdf started!"),
     ets:new(dependency,
         [bag,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
-    ets:new(anti_dep,
-        [bag,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
-    ets:new(dep_length,
-        [bag,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
+    ets:new(dep_len,
+        [set,public,named_table,{read_concurrency,true},{write_concurrency,true}]),
+    ets:insert(meta_info, {length, 5}),
 
          case antidote_config:get(do_specula) of
             true -> 
