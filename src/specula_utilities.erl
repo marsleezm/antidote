@@ -39,7 +39,7 @@ deal_commit_deps(TxId, CommitTime) ->
             ok; %% No read dependency was created!
         List ->
             lager:warning("Committing tx ~w, list is ~w!", [TxId, List]),
-            [{length, MaxLen}] = ets:lookup(meta_info, length),
+            %[{length, MaxLen}] = ets:lookup(meta_info, length),
             lists:foreach(fun({TId, DependTxId}) ->
                             ets:delete_object(dependency, {TId, DependTxId}),
                             case DependTxId#tx_id.snapshot_time >= CommitTime of
@@ -50,10 +50,11 @@ deal_commit_deps(TxId, CommitTime) ->
                                     %lager:info("Calling read invalid by ts of ~w, from ~w", [DependTxId, TId]),
                                     gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, CommitTime, DependTxId})
                           end end, List),
-            AffectedCoord = recursive_reduce_dep([{0, List}], MaxLen, sets:new()),
-            lists:foreach(fun({ClientId, ServerId}) ->
-                gen_server:cast(ServerId, {try_specula_commit, ClientId})
-                end, sets:to_list(AffectedCoord))
+            dep_server:remove_dep(List, [], [])
+            %AffectedCoord = recursive_reduce_dep([{0, List}], MaxLen, sets:new()),
+            %lists:foreach(fun({ClientId, ServerId}) ->
+            %    gen_server:cast(ServerId, {try_specula_commit, ClientId})
+            %    end, sets:to_list(AffectedCoord))
     end.
 
 deal_abort_deps(TxId) ->
@@ -67,7 +68,6 @@ deal_abort_deps(TxId) ->
                             gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, -1, DependTxId})
                           end, List)
     end.
-
 
 coord_should_specula(Aborted) ->
     %case TxnMetadata#txn_metadata.final_committed of

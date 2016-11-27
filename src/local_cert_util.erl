@@ -227,6 +227,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                             end end,
                         AllPendingReaders)
             end,
+            %% This is problematic! If commits arrive out-of-order, need to use a queue to store it
             ets:insert(PreparedTxs, {Key, max(TxCommitTime, LRTime)}),
             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs,
                 DepDict, Partition, PartitionType);
@@ -595,14 +596,14 @@ pre_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Partit
             %R = 2
     end.
 
-reply_pre_commit(PartitionType, PendingReaders, Key, SCTime, Value, TxId) ->
+reply_pre_commit(PartitionType, PendingReaders, Key, SCTime, Value, _TxId) ->
     case PartitionType of
         cache ->
               lists:foreach(fun({ReaderTxId, Node, {relay, Sender}}) ->
                         SnapshotTime = ReaderTxId#tx_id.snapshot_time,
                         case SnapshotTime >= SCTime of
                             true ->
-                                lager:warning("~w Dangerous read from ~w!!!!", [ReaderTxId, TxId]),
+                               lager:warning("~w Dangerous read from ~w!!!!", [ReaderTxId, _TxId]),
                                 reply({relay, Sender}, {ok, Value});
                             false ->
                                 {_, RealKey} = Key,
@@ -616,7 +617,7 @@ reply_pre_commit(PartitionType, PendingReaders, Key, SCTime, Value, TxId) ->
                     true ->
                         case sc_by_local(ReaderTxId) of
                             true ->
-                                lager:warning("~w dangerous read from!!!! ~w", [ReaderTxId, TxId]),
+                               lager:warning("~w dangerous read from!!!! ~w", [ReaderTxId, _TxId]),
                                 reply(Sender, {ok, Value}),
                                 {Pend, ToPrev};
                             false ->
@@ -679,30 +680,33 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo, LenLimit) ->
                     case (Type == pre_commit) and sc_by_local(TxId) of
                         true ->
                             case ets:lookup(dep_len, PreparedTxId) of
-                                [] ->
-                                    ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, max(SnapshotTime, LastReaderTime), FirstPrepTime, PendPrepNum, Value, [SenderInfo|PendingReader]}| PendingPrepare]}),
-                                    not_ready;
-                                [{PreparedTxId, PrepLen, IfSpecCommit, Dep}] ->
-                                    Entry = ets:lookup(dep_len, TxId),
-                                    case IfSpecCommit of
-                                        [] -> ets:insert(dep_len, {PreparedTxId, PrepLen, spec_commit, Dep});
-                                        _ -> ok
-                                    end,
+                                [{PreparedTxId, PrepLen, spec_commit, _, _Dep}] ->
+                                    %Entry = ets:lookup(dep_len, TxId),
+                                    %case IfSpecCommit of
+                                    %    [] -> ets:insert(dep_len, {PreparedTxId, PrepLen, spec_commit, Dep});
+                                    %    _ -> ok
+                                    %end,
                                     case PrepLen < LenLimit of
                                         true -> 
-                                            NewEntry = add_to_entry(Entry, TxId, PrepLen+1, PreparedTxId, []),
-                                            lager:warning("~p reading specula ~p, pend prep num is ~w, entry is ~w, new entry is ~w", [TxId, Value, PendPrepNum, Entry, NewEntry]),
-                                            ets:insert(dep_len, NewEntry), 
+                                            %NewEntry = add_to_entry(Entry, TxId, PrepLen+1, PreparedTxId, []),
+                                            % lager:warning("~p reading specula ~p, pend prep num is ~w, entry is ~w, new entry is ~w", [TxId, Value, PendPrepNum, Entry, NewEntry]),
+                                            %ets:insert(dep_len, NewEntry), 
+                                            lager:warning("~w reads from ~w, add dep len to ~w now" , [TxId, PreparedTxId, PrepLen+1]),
+                                            dep_server:add_dep(TxId, PreparedTxId),
                                             ets:insert(dependency, {PreparedTxId, TxId}),
                                             {specula, Value};
                                         false ->
                                             {_ReaderTxId, ignore, Sender} = SenderInfo,
-                                            NewEntry = add_to_entry(Entry, TxId, PrepLen+1, PreparedTxId, {Sender, {ok, Value}}),
-                                            ets:insert(dep_len, NewEntry), 
-                                            lager:warning("~p reading specula ~p, pend prep num is ~w, but blocked! LenLimit is ~w, new entry is ~w", [TxId, Value, PendPrepNum, LenLimit, NewEntry]),
+                                            %NewEntry = add_to_entry(Entry, TxId, PrepLen+1, PreparedTxId, {Sender, {ok, Value}}),
+                                            lager:warning("~w reads from ~w, add dep block len to ~w now" , [TxId, PreparedTxId, PrepLen+1]),
+                                            dep_server:add_block_dep(TxId, PreparedTxId, {Sender, {ok, Value}}),
+                                            %ets:insert(dep_len, NewEntry), 
                                             ets:insert(dependency, {PreparedTxId, TxId}),
                                             specula_wait
-                                    end
+                                    end;
+                                _ ->
+                                    ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, max(SnapshotTime, LastReaderTime), FirstPrepTime, PendPrepNum, Value, [SenderInfo|PendingReader]}| PendingPrepare]}),
+                                    not_ready
                             end;
                         false ->
                              lager:warning("~p can not read this version, not by local or not specula commit, Type is ~p, PrepTx is ~p, PendPrepNum is ~w", [TxId, Type, PreparedTxId, PendPrepNum]),
@@ -749,20 +753,10 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo, LenLimit) ->
             ready
     end.
 
-add_to_entry([], TxId, Len, Key, WaitValue) ->
-    lager:warning("Len is ~w, Key is ~w", [Len, Key]),
-    {TxId, Len, WaitValue, [{Key, Len}]};
-add_to_entry([{TxId, OldLen, [], List}], TxId, Len, Key, WaitValue) ->
-    lager:warning("Len is ~w, Key is ~w", [Len, Key]),
-    {TxId, max(Len, OldLen), WaitValue, add_to_lim_list(List, Key, Len)}.
-
-add_to_lim_list([], Key, Len) ->
-    [{Key, Len}];
-add_to_lim_list([{Key, MyLen}|Rest], Key, Len) ->
-    [{Key, max(MyLen, Len)}|Rest];
-add_to_lim_list([H|Rest], Key, Len) ->
-    [H|add_to_lim_list(Rest, Key, Len)].
-
+%% What wans to delete/commit is not found, This is problematic! If commits arrive out-of-order, need to use a queue to store it
+delete_and_read(_DeleteType, _, _, _, _Key, DepDict, _, _, [], _TxId, _, _, _) ->
+    lager:warning("Want to ~w ~w for key ~w, but arrived already", [_DeleteType, _TxId, _Key]),
+    DepDict;
 delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, Partition, [{Type, TxId, _Time, Value, PendingReaders}|Rest], TxId, Prev, FirstOne, 0) ->
     %% If can read previous version: read
     %% If can not read previous version: add to previous pending
@@ -845,29 +839,31 @@ read_appr_version(ReaderTxId, _Key, [{Type, SCTxId, SCTime, SCValue, SCPendingRe
             {not_ready, lists:reverse(Prev)++[{Type, SCTxId, SCTime, SCValue, [SenderInfo|SCPendingReaders]}|Rest]};
         pre_commit ->
             DepLen = ets:lookup(dep_len, SCTxId),
-            case (sc_by_local(ReaderTxId) == false) or (DepLen == []) of
-                true ->
-                    {not_ready, lists:reverse(Prev)++[{Type, SCTxId, SCTime, SCValue, [SenderInfo|SCPendingReaders]}|Rest]};
-                false ->
-                    [{SCTxId, PrepLen, _, _}] = DepLen,
-                    Entry = ets:lookup(dep_len, ReaderTxId),
+            case {sc_by_local(ReaderTxId), DepLen} of
+                {true, [{SCTxId, PrepLen, spec_commit, _, _}]} ->
+                    [{SCTxId, PrepLen, spec_commit, _, _}] = DepLen,
+                    %Entry = ets:lookup(dep_len, ReaderTxId),
                     case PrepLen < LenLimit of
                         true ->
-                            NewEntry = add_to_entry(Entry, ReaderTxId, PrepLen+1, SCTxId, []),
-                            ets:insert(dep_len, NewEntry),
+                            %NewEntry = add_to_entry(Entry, ReaderTxId, PrepLen+1, SCTxId, []),
+                            %ets:insert(dep_len, NewEntry),
+                            lager:warning("~w reads from ~w, add dep len to ~w now" , [ReaderTxId, SCTxId, PrepLen+1]),
+                            dep_server:add_dep(ReaderTxId, SCTxId),
                             ets:insert(dependency, {SCTxId, ReaderTxId}),
                             lager:warning("Inserting anti_dep from ~p to ~p", [ReaderTxId, SCTxId]),
-                            lager:warning("~p reading specula ~p, new entry is ~p", [ReaderTxId, SCValue, NewEntry]),
                             {specula, SCValue};
                         false ->
                             {_ReaderTxId, ignore, Sender} = SenderInfo,
-                            NewEntry = add_to_entry(Entry, ReaderTxId, PrepLen+1, SCTxId, {Sender, {ok, SCValue}}),
-                            ets:insert(dep_len, NewEntry),
-                            lager:warning("~p reading specula ~p, but blocked! LenLimit is ~w, NewEntry is ~p", [ReaderTxId, SCValue, LenLimit, NewEntry]),
+                            %NewEntry = add_to_entry(Entry, ReaderTxId, PrepLen+1, SCTxId, {Sender, {ok, SCValue}}),
+                            lager:warning("~w reads from ~w, add dep block len to ~w now" , [ReaderTxId, SCTxId, PrepLen+1]),
+                            dep_server:add_block_dep(ReaderTxId, SCTxId, {Sender, {ok, SCValue}}),
+                            %ets:insert(dep_len, NewEntry),
                             ets:insert(dependency, {SCTxId, ReaderTxId}),
                             lager:warning("Inserting anti_dep from ~p to ~p", [ReaderTxId, SCTxId]),
                             {specula_wait, []}
-                    end
+                    end;
+                _ ->
+                    {not_ready, lists:reverse(Prev)++[{Type, SCTxId, SCTime, SCValue, [SenderInfo|SCPendingReaders]}|Rest]}
             end
     end;
 read_appr_version(ReaderTxId, Key, [H|Rest], Prev, SenderInfo, LenLmit) -> 
@@ -894,35 +890,36 @@ multi_read_version(Key, [{pre_commit, SCTxId, SCTime, SCValue, SCPendingReaders}
             case (ReaderTxId#tx_id.snapshot_time >= SCTime)  and sc_by_local(ReaderTxId) of
                 true ->
                     case ets:lookup(dep_len, SCTxId) of
-                      [] ->
-                          Entry = ets:lookup(dep_len, ReaderTxId),
-                          lager:warning("ReaderTx is ~w, Entry is ~w", [ReaderTxId, Entry]),
-                          NewEntry = add_to_entry(Entry, ReaderTxId, 1, SCTxId, []),
-                          lager:warning("NewEntry is ~w", [NewEntry]),
-                          ets:insert(dep_len, NewEntry),
-                          ets:insert(dependency, {SCTxId, ReaderTxId});
-                      [{SCTxId, PrepLen, IfSpecCommit, Dep}] ->
-                          Entry = ets:lookup(dep_len, ReaderTxId),
-                          case IfSpecCommit of
-                              [] -> ets:insert(dep_len, {SCTxId, PrepLen, spec_commit, Dep});
-                              _ -> ok
-                          end,
+                      [{SCTxId, PrepLen, spec_commit, _, _Dep}] ->
+                          %Entry = ets:lookup(dep_len, ReaderTxId),
+                          %case IfSpecCommit of
+                          %    [] -> ets:insert(dep_len, {SCTxId, PrepLen, spec_commit, Dep});
+                          %    _ -> ok
+                          %end,
                           case PrepLen < MaxLen of
                               true ->
-                                  lager:warning("~p reading specula ~p, entry is ~w", [ReaderTxId, SCValue, Entry]),
-                                  ets:insert(dep_len, add_to_entry(Entry, ReaderTxId, PrepLen+1, SCTxId, [])),
+                                  %ets:insert(dep_len, add_to_entry(Entry, ReaderTxId, PrepLen+1, SCTxId, [])),
+                                  lager:warning("~w reads from ~w, add dep len to ~w now" , [ReaderTxId, SCTxId, PrepLen+1]),
+                                  dep_server:add_dep(ReaderTxId, SCTxId),
                                   ets:insert(dependency, {SCTxId, ReaderTxId}),
                                   reply(Sender, {ok, SCValue});
                               false ->
                                   lager:warning("~p reading specula ~p, but blocked! LenLimit is ~w", [ReaderTxId, SCValue, MaxLen]),
-                                  ets:insert(dep_len, add_to_entry(Entry, ReaderTxId, PrepLen+1, SCTxId, {Sender, {ok, SCValue}})),
+                                  %ets:insert(dep_len, add_to_entry(Entry, ReaderTxId, PrepLen+1, SCTxId, {Sender, {ok, SCValue}})),
+                                  lager:warning("~w reads from ~w, add dep block len to ~w now" , [ReaderTxId, SCTxId, PrepLen+1]),
+                                  dep_server:add_block_dep(ReaderTxId, SCTxId, {Sender, {ok, SCValue}}),
                                   ets:insert(dependency, {SCTxId, ReaderTxId})
-                          end;
-                      Whatever ->
-                          lager:error("Got some dep_len weird ~w", [Whatever]),
-                          Whatever = error
-                    end,
-                    Pend;
+                          end,
+                          Pend;
+                      _ ->
+                          %Entry = ets:lookup(dep_len, ReaderTxId),
+                          %NewEntry = add_to_entry(Entry, ReaderTxId, 1, SCTxId, []),
+                          %ets:insert(dep_len, NewEntry),
+                          [{ReaderTxId, ignore, Sender}|Pend] 
+                      %Whatever ->
+                      %    lager:error("Got some dep_len weird ~w", [Whatever]),
+                      %    Whatever = error
+                    end;
                 false ->
                     [{ReaderTxId, ignore, Sender}|Pend] 
             end end, [], SenderInfos),

@@ -48,6 +48,7 @@
         repl_abort/3,
         abort/2,
         commit/3,
+        remove_dep/3,
         read_valid/3,
         read_invalid/3,
         if_applied/2,
@@ -77,6 +78,9 @@ init([]) ->
 
 if_applied(Param, Result) ->
     gen_server:call(test_fsm, {if_applied, Param, Result}).
+
+remove_dep(_, _, _) ->
+    ok.
 
 repl_commit(UpdatedParts, TxId, CommitTime, _) ->
     gen_server:cast(test_fsm, {repl_commit, TxId, UpdatedParts, CommitTime}).
