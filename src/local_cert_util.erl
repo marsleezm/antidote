@@ -547,48 +547,53 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
         [{Key, [{prepared, TxId, _PrepareTime, LastReaderTime, LastPrepTime, PrepNum, Value, PendingReaders}|Deps] }] ->
             {Head, Record, DepDict1, AbortedReaders, _, AbortPrep} = deal_pending_records(Deps, SCTime, DepDict, MyNode, [], false, PartitionType, 0),
            %lager:warning("SC commit for ~w, ~p, prepnum are ~w, AbortPrep is ~w, replying to ~w, ~w", [TxId, Key, PrepNum, AbortPrep, PendingReaders, AbortedReaders]),
-            case Head == [] of
-                true -> Record = [],
-                true = ets:insert(PreparedTxs, {Key, [{specula_commit, TxId, SCTime, LastReaderTime, max(SCTime, LastPrepTime), 0, Value, []}]});
-                false ->
-                true = ets:insert(PreparedTxs, {Key, [{specula_commit, TxId, SCTime, LastReaderTime, max(SCTime, LastPrepTime), PrepNum-1-AbortPrep, Value, []}|[Head|Record]]})
-            end,
-            DepDict2 = case Head of
-                [] -> DepDict1;
-                {repl_prepare, _, _, _, _} -> DepDict1;
-                {prepared, HTxId, _HPTime, _HValue, _HReaders} -> unblock_prepare(HTxId, DepDict1, Partition, convert_to_pd)
-            end,
-            case PartitionType of
+            AllPendReaders = case PartitionType of
                 cache ->
                       lists:foreach(fun({ReaderTxId, Node, {relay, Sender}}) ->
                                 SnapshotTime = ReaderTxId#tx_id.snapshot_time,
                                 case SnapshotTime >= SCTime of
                                     true ->
+                                        add_read_dep(ReaderTxId, TxId, Key),
                                         reply({relay, Sender}, {ok, Value});
                                     false ->
                                         {_, RealKey} = Key,
                                         clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false)
                                 end end,
-                            AbortedReaders++PendingReaders);
+                            AbortedReaders++PendingReaders),
+                        [];
                 _ ->
-                    lists:foldl(fun({ReaderTxId, ignore, Sender}, PrevCommittedVal) ->
-                              case ReaderTxId#tx_id.snapshot_time >= SCTime of
-                                  true ->
-                                      reply(Sender, {ok, Value}), PrevCommittedVal;
-                                  false ->
-                                      ToReplyVal = case PrevCommittedVal of
-                                                        ignore ->
-                                                            case ets:lookup(InMemoryStore, Key) of
-                                                                [{Key, ValList}] ->
-                                                                    {_, LastCommittedVal} = hd(ValList),
-                                                                    LastCommittedVal;
-                                                                [] -> []
-                                                            end;
-                                                        _ -> PrevCommittedVal
-                                                   end,
-                                      reply(Sender, {ok, ToReplyVal}),
-                                      ToReplyVal
-                              end end, ignore, PendingReaders ++ AbortedReaders)
+                    ToReplyVal = case ets:lookup(InMemoryStore, Key) of
+                                     [{Key, ValList}] ->
+                                         {_, LastCommittedVal} = hd(ValList),
+                                         LastCommittedVal;
+                                     [] -> []
+                                  end,
+                    lists:foldl(fun({ReaderTxId, ignore, Sender}=ReaderInfo, PendReaders) ->
+                                case ReaderTxId#tx_id.snapshot_time >= SCTime of
+                                    true ->
+                                        case sc_by_local(ReaderTxId) of
+                                            true ->
+                                                add_read_dep(ReaderTxId, TxId, Key),
+                                                reply(Sender, {ok, Value}),
+                                                PendReaders;
+                                            false ->
+                                                [ReaderInfo|PendReaders]
+                                        end;
+                                    false ->
+                                        reply(Sender, {ok, ToReplyVal}),
+                                        PendReaders
+                                end end, [], PendingReaders ++ AbortedReaders)
+                end,
+            case Head == [] of
+                true -> Record = [],
+                true = ets:insert(PreparedTxs, {Key, [{specula_commit, TxId, SCTime, LastReaderTime, max(SCTime, LastPrepTime), 0, Value, AllPendReaders}]});
+                false ->
+                true = ets:insert(PreparedTxs, {Key, [{specula_commit, TxId, SCTime, LastReaderTime, max(SCTime, LastPrepTime), PrepNum-1-AbortPrep, Value, AllPendReaders}|[Head|Record]]})
+            end,
+            DepDict2 = case Head of
+                [] -> DepDict1;
+                {repl_prepare, _, _, _, _} -> DepDict1;
+                {prepared, HTxId, _HPTime, _HValue, _HReaders} -> unblock_prepare(HTxId, DepDict1, Partition, convert_to_pd)
             end,
             specula_commit(Rest, TxId, SCTime, InMemoryStore, 
                   PreparedTxs, DepDict2, Partition, PartitionType);
@@ -612,7 +617,8 @@ specula_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Pa
                                           %lager:warning("Relaying read of ~w to ~w", [ReaderTxId, Node]),
                                           clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false)
                                   end end,
-                              AbortedReaders++PendingReaders);
+                              AbortedReaders++PendingReaders),
+                              [];
                         _ ->
                             lists:foldl(fun({ReaderTxId, ignore, Sender}, PrevSCValue) ->
                                     case ReaderTxId#tx_id.snapshot_time >= SCTime of
@@ -664,6 +670,7 @@ find_prepare_record([Record|Rest], TxId, Prev) ->
 
 %% TODO: allowing all speculative read now! Maybe should not be so aggressive
 specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
+   %lager:warning("TxId is ~w", [TxId]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
