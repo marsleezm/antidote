@@ -442,6 +442,8 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
     end;
 
 handle_call({read, Key, TxId, Node}, Sender, SD0=#state{specula_read=SpeculaRead}) ->
+    handle_call({read, Key, TxId, Node, SpeculaRead}, Sender, SD0);
+handle_call({read, Key, TxId, Node, SpeculaRead}, Sender, SD0) ->
     ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, SpeculaRead),
     {noreply, SD0};
 
