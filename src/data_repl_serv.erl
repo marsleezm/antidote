@@ -253,8 +253,7 @@ handle_call({read, Key, TxId, _Node}, Sender,
     case SpeculaRead of
         false ->
            %lager:warning("Specula rea on data repl and false!!??"),
-            SpeculaRead = true,
-            case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {relay, Sender}) of
+            case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Sender}}) of
                 not_ready-> {noreply, SD0};
                 ready ->
                     %lager:warning("Read finished!"),
@@ -392,12 +391,12 @@ handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
             %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
-            gen_server:cast(Sender, {prepared, TxId, PrepareTime, self()}),
+            gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
             {noreply, SD0};
         {wait, PendPrepDep, _PrepDep, PrepareTime} ->
             NewDepDict = 
                 case PendPrepDep of 
-                    0 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime, self()}), DepDict;
+                    0 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}), DepDict;
                     _ -> dict:store(TxId, {PendPrepDep, PrepareTime, Sender}, DepDict)
                 end,
             {noreply, SD0#state{dep_dict=NewDepDict}};

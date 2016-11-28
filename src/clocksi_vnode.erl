@@ -439,10 +439,11 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                 false ->
                     %case RepMode of local -> ok;
                     %                _ ->
+                   %lager:warning("Here, trying to reply to coord of ~w", [TxId]),
                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
                     %end,
-                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, self()}),
+                    gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
                     {noreply, State};
                 true ->
                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
@@ -451,18 +452,24 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     {noreply, State}
             end;
         {wait, PendPrepDep, PrepDep, PrepareTime} ->
-            IfSpecula = true,
-            NewDepDict 
-                = case (PendPrepDep == 0) and (RepMode == local) of
-                    true ->  
-                        gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime, self()}),
-                        RepMsg = {Sender, pending_prepared, WriteSet, PrepareTime},
-                        repl_fsm:repl_prepare(Partition, prepared, TxId, RepMsg),
-                        dict:store(TxId, {0, PrepDep, PrepareTime, Sender, RepMode}, DepDict);
-                    _ ->
-                        dict:store(TxId, {PendPrepDep, PrepDep, PrepareTime, Sender, RepMode, WriteSet}, DepDict)
-                  end, 
-            {noreply, State#state{dep_dict=NewDepDict}};
+            case IfSpecula of
+                true ->
+                    NewDepDict 
+                        = case (PendPrepDep == 0) and (RepMode == local) of
+                            true ->  
+                                gen_server:cast(Sender, {pending_prepared, TxId, PrepareTime}),
+                                RepMsg = {Sender, pending_prepared, WriteSet, PrepareTime},
+                                repl_fsm:repl_prepare(Partition, prepared, TxId, RepMsg),
+                                dict:store(TxId, {0, PrepDep, PrepareTime, Sender, RepMode}, DepDict);
+                            _ ->
+                                dict:store(TxId, {PendPrepDep, PrepDep, PrepareTime, Sender, RepMode, WriteSet}, DepDict)
+                          end, 
+                    {noreply, State#state{dep_dict=NewDepDict}};
+                false ->
+                    PrepDep = 0,
+                    NewDepDict = dict:store(TxId, {PendPrepDep, 0, PrepareTime, Sender, RepMode, WriteSet}, DepDict),
+                    {noreply, State#state{dep_dict=NewDepDict}}
+            end;
         {error, write_conflict} ->
     %DepDict1 = dict:store(success_wait, 0, DepDict),
             %lager:warning("~w: ~w cerfify abort", [Partition, TxId]),

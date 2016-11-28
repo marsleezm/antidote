@@ -532,7 +532,7 @@ handle_cast({clean_data, Sender}, #state{name=Name}) ->
 %%  Current transaction that has not finished local cert phase
 %%  Transaction that has already cert_aborted.
 %% Has to add local_cert here, because may receive pending_prepared, prepared from the same guy.
-handle_cast({pending_prepared, TxId, PrepareTime, _From}, 
+handle_cast({pending_prepared, TxId, PrepareTime}, 
 	    SD0=#state{dep_dict=DepDict, specula_length=SpeculaLength, client_dict=ClientDict, hit_counter=HitCounter,
          pending_txs=PendingTxs,rep_dict=RepDict}) ->  
     Client = TxId#tx_id.client_pid,
@@ -550,7 +550,7 @@ handle_cast({pending_prepared, TxId, PrepareTime, _From},
             LocalParts = ClientState#client_state.local_updates, 
             RemoteUpdates = ClientState#client_state.remote_updates, 
             PendingPrepares = ClientState#client_state.pending_prepares, 
-            %lager:warning("Speculative receive pending_prepared for ~w from ~w, current pp is ~w", [TxId, _From, PendingPrepares+1]),
+            %lager:warning("Speculative receive pending_prepared for ~w, current pp is ~w", [TxId, PendingPrepares+1]),
             case dict:find(TxId, DepDict) of
                 %% Maybe can commit already.
                 {ok, {1, ReadDepTxs, OldPrepTime}} ->
@@ -593,7 +593,7 @@ handle_cast({pending_prepared, TxId, PrepareTime, _From},
     end
     end;
 
-handle_cast({solve_pending_prepared, TxId, PrepareTime, _From}, 
+handle_cast({solve_pending_prepared, TxId, PrepareTime}, 
 	    SD0=#state{dep_dict=DepDict, client_dict=ClientDict}) ->
     %lager:warning("Got solve pending prepare for ~w from ~w", [TxId, _From]),
     Client = TxId#tx_id.client_pid,
@@ -624,7 +624,7 @@ handle_cast({solve_pending_prepared, TxId, PrepareTime, _From},
     end
     end;
 
-handle_cast({prepared, TxId, PrepareTime, _From}, 
+handle_cast({prepared, TxId, PrepareTime}, 
 	    SD0=#state{dep_dict=DepDict, specula_length=SpeculaLength, hit_counter=HitCounter, 
             client_dict=ClientDict, rep_dict=RepDict, pending_txs=PendingTxs}) ->
     Client = TxId#tx_id.client_pid,
@@ -640,7 +640,7 @@ handle_cast({prepared, TxId, PrepareTime, _From},
 
     case (Stage == local_cert) and (MyTxId == TxId) of
         true -> 
-           %lager:warning("Got prepare for ~w, prepare time is ~w from ~w for local", [TxId, PrepareTime, _From]),
+           %lager:warning("Got prepare for ~w, prepare time is ~w for local", [TxId, PrepareTime]),
             PendingList = ClientState#client_state.pending_list,
             LocalParts = ClientState#client_state.local_updates, 
             RemoteUpdates = ClientState#client_state.remote_updates, 

@@ -149,7 +149,7 @@ handle_call({read, Key, TxId, {Partition, _}=Node}, Sender,
     end;
 
 handle_call({read, Key, TxId}, _Sender,
-        SD0=#state{prepared_txs=PreparedTxs}) ->
+        SD0=#state{prepared_txs=PreparedTxs, specula_read=false}) ->
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             {reply, {ok, []}, SD0};
@@ -200,12 +200,12 @@ handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
             %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
-            gen_server:cast(Sender, {prepared, TxId, PrepareTime, self()}),
+            gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
             {noreply, SD0};
         {wait, PendPrepDep, _PrepDep, PrepareTime} ->
             NewDepDict =
                 case PendPrepDep of
-                    0 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime, self()}), DepDict;
+                    0 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}), DepDict;
                     _ -> dict:store(TxId, {PendPrepDep, PrepareTime, Sender}, DepDict)
                 end,
             {noreply, SD0#state{dep_dict=NewDepDict}};
