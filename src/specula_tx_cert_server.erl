@@ -373,7 +373,9 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                                 false ->
                                     [{length, MaxLen}] = ets:lookup(meta_info, length),
                                     {ListLen, LastTxn} = last_and_len(PendingList),
-                                    case (ListLen >= SpeculaLength) or (txn_dep(LastTxn)+1 > MaxLen) of
+                                    NewDepLen = txn_dep(LastTxn)+1,
+                                    lager:warning("ListLen is ~w, MaxLen is ~w, SpeculaLength is ~w, prev_txn is ~w", [ListLen, MaxLen, SpeculaLength, NewDepLen]),
+                                    case (ListLen >= SpeculaLength) or (NewDepLen > MaxLen) of
                                         true -> %% Wait instead of speculate.
                                             DepDict1 = dict:store(TxId, 
                                                     {0, ReadDepTxs--B, LastCommitTs+1}, DepDict),
@@ -552,6 +554,7 @@ handle_cast({pending_prepared, TxId, PrepareTime, _From},
                     [{length, MaxLen}] = ets:lookup(meta_info, length),
                     {ListLen, LastTxn} = last_and_len(PendingList),
                     NewDepLen = txn_dep(LastTxn) + 1,
+                    lager:warning("ListLen is ~w, MaxLen is ~w, SpeculaLength is ~w, prev_txn is ~w", [ListLen, MaxLen, SpeculaLength, NewDepLen]),
                     case (ListLen >= SpeculaLength) or (NewDepLen > MaxLen) of
                         true ->
                              %lager:warning("Pending prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
@@ -632,7 +635,9 @@ handle_cast({try_specula_commit, Client}, SD0=#state{client_dict=ClientDict, min
             PendingList = CState#client_state.pending_list,
             [{length, MaxLen}] = ets:lookup(meta_info, length),
             {ListLen, LastTxn} = last_and_len(PendingList),
-            case {Stage, (ListLen >= SpeculaLength) or (txn_dep(LastTxn)+1 > MaxLen)} of
+            NewDepLen = txn_dep(LastTxn)+1,
+            lager:warning("ListLen is ~w, MaxLen is ~w, SpeculaLength is ~w, prev_txn is ~w", [ListLen, MaxLen, SpeculaLength, NewDepLen]),
+            case {Stage, (ListLen >= SpeculaLength) or (NewDepLen > MaxLen)} of
                 {local_cert, true} ->
                     gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs, {rev(CState#client_state.aborted_reads), rev(CState#client_state.committed_updates), CState#client_state.committed_reads}}}),
                     RemoteParts = [P || {P, _} <- CState#client_state.remote_updates],
