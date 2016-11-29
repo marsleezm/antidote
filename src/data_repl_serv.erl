@@ -59,6 +59,7 @@
         read_all/1,
 	    check_key/2,
         get_ts/4,
+        set_length/2,
         clean_data/2,
 	    check_table/1,
         verify_table/2,
@@ -85,6 +86,7 @@
         dep_dict :: dict(),
         delay :: non_neg_integer(),
         table_size = 0,
+        max_len :: non_neg_integer(),
         %init_ts_dict=false :: boolean(),
         ts :: non_neg_integer(),
         num_specula_read=0 :: non_neg_integer(),
@@ -150,6 +152,9 @@ prepare_specula(Name, TxId, Partition, WriteSet, PrepareTime) ->
 local_certify(Name, TxId, Partition, WriteSet) ->
     gen_server:cast({global, Name}, {local_certify, TxId, Partition, WriteSet, self()}).
 
+set_length(Name, Length) ->
+    gen_server:cast({global, Name}, {set_length, Length}).
+
 read_all(Name) ->
     gen_server:cast({global, Name}, {get_size}).
 
@@ -190,7 +195,8 @@ init([Name, _Parts]) ->
     %            dict:store(Part, 0, Acc) end, dict:new(), Parts),
     %lager:info("Parts are ~w, TsDict is ~w", [Parts, dict:to_list(TsDict)]),
     %lager:info("Concurrent is ~w, num partitions are ~w", [Concurrent, NumPartitions]),
-    {ok, #state{name=Name, set_size=SetSize, specula_read=SpeculaRead,
+    [{length, MaxLen}] = ets:lookup(meta_info, length),
+    {ok, #state{name=Name, set_size=SetSize, specula_read=SpeculaRead, max_len=MaxLen,
                 prepared_txs = PreparedTxs, current_dict = dict:new(), committed_txs=CommittedTxs, dep_dict=dict:new(), 
                 backup_dict = dict:new(), inmemory_store = InMemoryStore}}.
 
@@ -248,13 +254,12 @@ handle_call({debug_read, Key, TxId}, _Sender,
 %% The real key is be read as {Part, Key} 
 handle_call({read, Key, TxId, _Node}, Sender, 
 	    SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs,
-                specula_read=SpeculaRead}) ->
+                specula_read=SpeculaRead, max_len=MaxLen}) ->
    %lager:warning("Data repl reading ~w ~w", [TxId, Key]),
-    [{length, LenLimit}] = ets:lookup(meta_info, length),
-    case (SpeculaRead == false) or (LenLimit == 0) of
+    case (SpeculaRead == false) or (MaxLen == 0) of
         true ->
            %lager:warning("Specula rea on data repl and false!!??"),
-            case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {relay, Sender}) of
+            case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Sender}}) of
                 not_ready-> {noreply, SD0};
                 ready ->
                     %lager:warning("Read finished!"),
@@ -264,7 +269,7 @@ handle_call({read, Key, TxId, _Node}, Sender,
             end;
         false ->
             %lager:warning("Specula read!!"),
-            case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Sender}}, LenLimit) of
+            case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Sender}}, MaxLen) of
                 not_ready->
                     %lager:warning("Read blocked!"),
                     {noreply, SD0};
@@ -409,11 +414,11 @@ handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
     end;
 
 handle_cast({pre_commit, TxId, Partition, SpeculaCommitTime}, State=#state{prepared_txs=PreparedTxs,
-        inmemory_store=InMemoryStore, dep_dict=DepDict}) ->
+        inmemory_store=InMemoryStore, dep_dict=DepDict, max_len=MaxLen}) ->
    %lager:warning("Specula commit for ~w ", [Partition]),
     case ets:lookup(PreparedTxs, {TxId, Partition}) of
         [{{TxId, Partition}, Keys}] ->
-            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, InMemoryStore, PreparedTxs, DepDict, Partition, slave),
+            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, InMemoryStore, PreparedTxs, DepDict, Partition, slave, MaxLen),
             {noreply, State#state{dep_dict=DepDict1}};
         [] ->
             lager:error("Prepared record of ~w, ~w has disappeared!", [TxId, Partition]),
@@ -545,6 +550,10 @@ handle_cast({repl_abort, TxId, Partitions, local},
         _ -> ok
     end,
     {noreply, SD0#state{dep_dict=DepDict1}};
+
+handle_cast({set_length, Length}, State=#state{name=_Name}) ->
+    lager:warning("Data repl ~w got new len! is ~w", [_Name, Length]),
+    {noreply, State#state{max_len=Length}};
 
 handle_cast({repl_abort, TxId, Partitions}, 
 	    SD0=#state{prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, specula_read=SpeculaRead, current_dict=CurrentDict, dep_dict=DepDict, set_size=SetSize, table_size=TableSize}) ->

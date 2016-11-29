@@ -41,7 +41,7 @@
         terminate/2]).
 
 %% States
--export([add_dep/2, add_block_dep/3, remove_dep/3, specula_commit/2]).
+-export([add_dep/2, add_block_dep/2, remove_dep/2, remove_entry/1, specula_commit/2, set_length/1]).
 
 %% Spawn
 -record(state, {max_len :: non_neg_integer()}).
@@ -57,11 +57,17 @@ start_link() ->
 add_dep(ReaderTxId, WriterTxId) ->
     gen_server:cast(dep_server, {add_dep, ReaderTxId, WriterTxId}).
 
-add_block_dep(ReaderTxId, WriterTxId, Value) ->
-    gen_server:cast(dep_server, {add_block_dep, ReaderTxId, WriterTxId, Value}).
+add_block_dep(WriterTxId, Value) ->
+    gen_server:cast(dep_server, {add_block_dep, WriterTxId, Value}).
 
-remove_dep(List, SCList, NotReply) ->
-    gen_server:cast(dep_server, {remove_dep, List, SCList, NotReply}).
+remove_dep(TxId, SCList) ->
+    gen_server:cast(dep_server, {remove_dep, TxId, SCList}).
+
+remove_entry(TxId) ->
+    gen_server:cast(dep_server, {remove_entry, TxId}).
+
+set_length(Length) ->
+    gen_server:cast(dep_server, {set_length, Length}).
 
 specula_commit(PrevTxn, MyTxn) ->
     gen_server:cast(dep_server, {specula_commit, PrevTxn, MyTxn}).
@@ -72,88 +78,83 @@ specula_commit(PrevTxn, MyTxn) ->
 
 
 init([]) ->
-    {ok, #state{max_len=5}}.
+    {ok, #state{max_len=0}}.
 
 handle_call({go_down},_Sender,SD0) ->
     {stop,shutdown,ok,SD0}.
 
-handle_cast({add_dep, ReaderTxId, WriterTxId}, SD0=#state{max_len=_MaxLen}) ->
-    case ets:lookup(dep_len, WriterTxId) of
-        [] -> lager:warning("The dep from ~w to ~w is invalid, writer aborted!", [ReaderTxId, WriterTxId]),
-            ok;
-        [{WriterTxId, Len, spec_commit, _,  _}] ->
-            case ets:lookup(dep_len, ReaderTxId) of
-                [] -> lager:warning("Reader ~w Aborted! Cancel!", [ReaderTxId]);
-                Entry -> 
-                    NewEntry = add_to_entry(Entry, ReaderTxId, Len+1, WriterTxId), 
-                    lager:warning("Add readerDep :~w, ~w", [Entry, NewEntry]),
-                    case NewEntry of
-                        {} -> ok;
-                   %lager:warning("~p reading, added dep, limit is ~w, new entry is ~w", [ReaderTxId, _MaxLen, NewEntry]),
-                        _ -> ets:insert(dep_len, NewEntry) 
-                    end
-            end
-    end,
-    {noreply, SD0};
-
-handle_cast({add_block_dep, ReaderTxId, WriterTxId, {Reader, Value}=BlockedValue}, SD0=#state{max_len=MaxLen}) ->
+handle_cast({add_block_dep, WriterTxId, {Reader, Value}=BlockedValue}, SD0=#state{max_len=MaxLen}) ->
     case ets:lookup(dep_len, WriterTxId) of
         [] ->
-            lager:warning("The dep from ~w to ~w is invalid, writer aborted!", [ReaderTxId, WriterTxId]),
+           %lager:warning("The dep from ~w to ~w is invalid, writer aborted!", [ReaderTxId, WriterTxId]),
             local_cert_util:reply(Reader, Value);
-        [{WriterTxId, Len, spec_commit, _, _}] ->
-            case ets:lookup(dep_len, ReaderTxId) of
-                [] -> lager:warning("Reader ~w Aborted! Cancel!", [ReaderTxId]);
-                Entry -> 
-                    NewEntry = case Len+1 > MaxLen of
-                                   true -> add_to_wait_entry(Entry, ReaderTxId, Len+1, WriterTxId, BlockedValue); 
-                                   false -> local_cert_util:reply(Reader, Value),
-                                           add_to_entry(Entry, ReaderTxId, Len+1, WriterTxId)
-                               end,
-                    lager:warning("Add block readerDep :~w, ~w", [Entry, NewEntry]),
-                    case NewEntry of
-                        {} -> ok;
-                        _ -> ets:insert(dep_len, NewEntry)
-                    end,
-                   lager:warning("~p reading specula ~p, but blocked! LenLimit is ~w, new entry is ~w", [ReaderTxId, Value, MaxLen, NewEntry]),
-                    ok
+        [{WriterTxId, Len, BlockedRead, DepList}] ->
+            case Len > MaxLen of
+                true ->
+                    ets:insert(dep_len, {WriterTxId, Len, [BlockedValue|BlockedRead], DepList});
+                false ->
+                    local_cert_util:reply(Reader, Value)
             end
     end,
     {noreply, SD0};
 
 handle_cast({specula_commit, PrevTxn, MyTxn}, SD0) ->
+    AntiDeps = ets:lookup(anti_dep, MyTxn), 
+    ets:delete(anti_dep, MyTxn),
     case ets:lookup(dep_len, MyTxn) of
         [] ->
-            ok;
-        [{MyTxn, Len, [], 0, DepList}] ->
-            case ets:lookup(dep_len, PrevTxn) of
-                [] -> 
-                    lager:warning("Specula committing ~w, DepList is ~w", [MyTxn, DepList]),
-                    ets:insert(dep_len, {PrevTxn, max(1, Len), spec_commit, 1, DepList});
-                [{_, PrevLen, _, _, _}] ->
-                    lager:warning("Specula committing ~w, DepList is ~w", [MyTxn, DepList]),
-                    ets:insert(dep_len, {PrevTxn, max(PrevLen+1, Len), spec_commit, PrevLen+1, DepList})
-            end
+            {Len0, DepList0} = lists:foldl(fun({_, T}, {ML, L}) ->
+                                case ets:lookup(dep_len, T) of
+                                    [] -> {ML, L};
+                                    [{T, Len, _, _}] -> {max(ML,Len), [{T, Len}|L]}
+                                end end, {0, []}, AntiDeps),
+            {MaxLen, DepList} = case PrevTxn of
+                                    ignore -> {Len0, DepList0};
+                                    _ -> case ets:lookup(dep_len, PrevTxn) of
+                                            [] -> {Len0, DepList0};
+                                            [{PrevTxn, Len1, _, _}] -> 
+                                                ets:insert(dependency, {PrevTxn, MyTxn}),
+                                                {max(Len0,Len1), [{PrevTxn, Len1}|DepList0]}
+                                         end
+                                end,
+            ets:insert(dep_len, {MyTxn, MaxLen, [], DepList})
     end,
     {noreply, SD0};
 
-handle_cast({remove_dep, List, SCList, MyClientCoord}, SD0=#state{max_len=MaxLen}) ->
-    lager:warning("Removing dep, list is ~w, sclist is ~w", [List, SCList]),
-    ReduceList = reduce_sc_dep(SCList, 0, []),
-    AffectedCoord = recursive_reduce_dep([{0, List}|ReduceList], MaxLen, sets:new()),
-    case MyClientCoord of
-        ignore ->
-            lists:foreach(fun({ClientId, ServerId}) ->
-                        gen_server:cast(ServerId, {try_specula_commit, ClientId})
-                        end, sets:to_list(AffectedCoord));
-        _ ->
-            lists:foreach(fun({ClientId, ServerId}=ToCall) ->
-                case ToCall of
-                    MyClientCoord -> ok;
-                    _ -> gen_server:cast(ServerId, {try_specula_commit, ClientId})
-                end
-                end, sets:to_list(AffectedCoord))
+handle_cast({set_length, Length}, SD0) ->
+   %lager:warning("Removing entry for ~w", [TxId]),
+    {noreply, SD0#state{max_len=Length}};
+
+handle_cast({remove_entry, TxId}, SD0) ->
+   %lager:warning("Removing entry for ~w", [TxId]),
+    ets:delete(anti_dep, TxId),
+    case ets:lookup(dep_len, TxId) of
+        [{TxId, _Len1, BlockedRead, _}] ->
+            lists:foreach(fun({Reader, Value}) -> 
+                local_cert_util:reply(Reader, Value)
+                end, BlockedRead)
     end,
+    ets:delete(dep_len, TxId),
+    {noreply, SD0};
+
+handle_cast({remove_dep, TxId, List}, SD0=#state{max_len=MaxLen}) ->
+   %lager:warning("Removing dep, list is ~w", [List]),
+    AffectedCoord = recursive_reduce_dep([{0, List}], MaxLen, sets:new()),
+    ets:delete(anti_dep, TxId),
+    case ets:lookup(dep_len, TxId) of
+        [{TxId, _Len1, BlockedRead, _}] ->
+            lists:foreach(fun({Reader, Value}) ->
+                local_cert_util:reply(Reader, Value)
+                end, BlockedRead)
+    end,
+    ets:delete(dep_len, TxId),
+    MyClientCoord = {TxId#tx_id.server_pid, TxId#tx_id.client_pid},
+    lists:foreach(fun({ClientId, ServerId}=ToCall) ->
+        case ToCall of
+            MyClientCoord -> ok;
+            _ -> gen_server:cast(ServerId, {try_specula_commit, ClientId})
+        end
+    end, sets:to_list(AffectedCoord)),
     {noreply, SD0};
 
 handle_cast(_Info, StateData) ->
@@ -173,105 +174,39 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 terminate(_Reason, _SD) ->
     ok.
 
-add_to_entry([], TxId, Len, Key) ->
-   %lager:warning("Len is ~w, Key is ~w", [Len, Key]),
-    {TxId, Len, [], 0, [{Key, Len}]};
-add_to_entry([{TxId, OldLen, WaitValue, SCLen, List}], TxId, Len, Key) ->
-   %lager:warning("Len is ~w, Key is ~w", [Len, Key]),
-    case add_to_lim_list(List, Key, Len, []) of
-        no_need -> {};
-        L -> {TxId, max(Len, OldLen), WaitValue, SCLen, L}
-    end.
-
-add_to_wait_entry([], TxId, Len, Key, WaitValue) ->
-   %lager:warning("Len is ~w, Key is ~w", [Len, Key]),
-    {TxId, Len, WaitValue, 0, [{Key, Len}]};
-add_to_wait_entry([{TxId, OldLen, _, SCLen, List}], TxId, Len, Key, WaitValue) ->
-   %lager:warning("Len is ~w, Key is ~w", [Len, Key]),
-    case add_to_lim_list(List, Key, Len, []) of
-        no_need -> {};
-        L -> {TxId, max(Len, OldLen), WaitValue, SCLen, L}
-    end.
-
-add_to_lim_list([], Key, Len, Acc) ->
-    [{Key, Len}|Acc];
-add_to_lim_list([{Key, MyLen}|Rest], Key, Len, Acc) ->
-    case Len =< MyLen of
-        true -> no_need;
-        false -> [{Key, Len}|Rest] ++ Acc
-    end;
-add_to_lim_list([H|Rest], Key, Len, Acc) ->
-    add_to_lim_list(Rest, Key, Len, [H|Acc]).
-
-reduce_sc_dep([], _MyLen, ReduceList) ->
-    ReduceList;
-reduce_sc_dep([H|T], MyLen, ReduceList) ->
-    case ets:lookup(dep_len, H) of
-        [] -> ReduceList;
-        [{H, OldLen, BlockedValue, SCLen, DependingList}] -> 
-            case MyLen+1 >= SCLen of
-                true -> ReduceList;
-                false ->
-                    case MyLen+1 >= OldLen of
-                        true -> ReduceList;
-                        false -> 
-                            lager:warning("Reduce sc dep for ~w, inserting ~w, depending list is ~w", [H, BlockedValue, DependingList]),
-                            ets:insert(dep_len, {H, MyLen+1, BlockedValue, MyLen+1, DependingList}),
-                            case ets:lookup(dependency, H) of
-                                [] -> reduce_sc_dep(T, MyLen+1, ReduceList); 
-                                L -> reduce_sc_dep(T, MyLen+1, [{MyLen+1, L}|ReduceList])
-                            end
-                    end
-            end
-    end.
-
 recursive_reduce_dep([], _MaxLen, OACoord) ->
     OACoord;
 recursive_reduce_dep(FullDepList, MaxLen, OACoord) ->
     {NewList, AffectedCoord}= lists:foldl(
         fun({MyLen, DepList}, {Acc, AccCoord}) ->
-           lager:warning("DepList is ~w, len is ~w", [DepList, MyLen]),
+          %lager:warning("DepList is ~w, len is ~w", [DepList, MyLen]),
             lists:foldl(fun({TxId, DepTxId}, {Acc1, AccCoord1}) ->
-               lager:warning("Trying to look for list for ~w", [DepTxId]),
+              %lager:warning("Trying to look for list for ~w", [DepTxId]),
                 case ets:lookup(dep_len, DepTxId) of
                     [] -> {Acc1, AccCoord1}; %% Mean it has been aborted already...
-                    [{_DepTxId, _Len, _BlockedValue, _SCLen, []}] -> 
-                        lager:warning("Skipping tx id ~w, because no dep, len is ~w", [DepTxId, _Len]), 
-                        {Acc1, AccCoord1};
-                    [{DepTxId, Len, BlockedValue, SCLen, DependingList}]= Entry ->
-                        lager:warning("MyLen is ~w, entry is ~w", [MyLen, Entry]),
+                    [{DepTxId, Len, BlockedValue, DependingList}]= _Entry ->
+                       %lager:warning("MyLen is ~w, entry is ~w", [MyLen, _Entry]),
                         case MyLen > Len of
                             true -> {Acc1, AccCoord1};
                             false -> 
                                 case remove_from_dep_list(DependingList, TxId, MyLen, 0, []) of
                                     [] -> 
-                                        lager:warning("Can not remove ~w from dep list ~w for ~w", [TxId, DependingList, DepTxId]),
+                                       %lager:warning("Can not remove ~w from dep list ~w for ~w", [TxId, DependingList, DepTxId]),
                                         {Acc1, AccCoord1};
                                     {NewLen, NewList} ->
-                                        lager:warning("For ~w: NewLen is ~w, NewList is ~w", [DepTxId, NewLen, NewList]),
-                                        case BlockedValue of
-                                            spec_commit ->
-                                                NewLen1 = max(SCLen, NewLen + 1),
-                                                ets:insert(dep_len, {DepTxId, NewLen1, BlockedValue, SCLen, NewList}),
-                                                case ets:lookup(dependency, DepTxId) of
-                                                    [] -> {Acc1, sets:add_element({DepTxId#tx_id.client_pid, DepTxId#tx_id.server_pid}, AccCoord1)};
-                                                    L -> {[{NewLen1, L}]++Acc1,
-                                                            sets:add_element({DepTxId#tx_id.client_pid, DepTxId#tx_id.server_pid}, AccCoord1)}
-                                                end;
-                                            {Reader, Value} ->
-                                                SCLen = 0,
-                                                case NewLen =< MaxLen of
-                                                    true ->
-                                                        local_cert_util:reply(Reader, Value),
-                                                        ets:insert(dep_len, {DepTxId, NewLen, [], 0, NewList});
-                                                    false ->
-                                                        ets:insert(dep_len, {DepTxId, NewLen, BlockedValue, 0, NewList})
-                                                end,
-                                                {Acc1, AccCoord1};
-                                            [] ->
-                                                SCLen = 0,
-                                                ets:insert(dep_len, {DepTxId, NewLen, [], 0, NewList}),
-                                                {Acc1, AccCoord1}
+                                       %lager:warning("For ~w: NewLen is ~w, NewList is ~w", [DepTxId, NewLen, NewList]),
+                                        case Len > MaxLen of
+                                            true ->
+                                                ets:insert(dep_len, {DepTxId, NewLen, BlockedValue, NewList});
+                                            false ->
+                                                lists:foreach(fun({Reader, Value}) -> local_cert_util:reply(Reader, Value)
+                                                            end, BlockedValue),
+                                                ets:insert(dep_len, {DepTxId, NewLen, [], NewList})
+                                        end,
+                                        case ets:lookup(dependency, DepTxId) of
+                                            [] -> {Acc1, sets:add_element({DepTxId#tx_id.client_pid, DepTxId#tx_id.server_pid}, AccCoord1)};
+                                            L -> {[{NewLen+1, L}]++Acc1,
+                                                    sets:add_element({DepTxId#tx_id.client_pid, DepTxId#tx_id.server_pid}, AccCoord1)}
                                         end
                                 end
                         end

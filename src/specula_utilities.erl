@@ -50,7 +50,7 @@ deal_commit_deps(TxId, CommitTime) ->
                                     %lager:info("Calling read invalid by ts of ~w, from ~w", [DependTxId, TId]),
                                     gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, CommitTime, DependTxId})
                           end end, List),
-            dep_server:remove_dep(List, [], [])
+            dep_server:remove_dep(TxId, List)
             %AffectedCoord = recursive_reduce_dep([{0, List}], MaxLen, sets:new()),
             %lists:foreach(fun({ClientId, ServerId}) ->
             %    gen_server:cast(ServerId, {try_specula_commit, ClientId})

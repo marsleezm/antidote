@@ -50,6 +50,7 @@
         commit/3,
         pre_commit/3,
         abort/2,
+        set_length/1,
         if_prepared/2,
         num_specula_read/0,
         local_certify/3,
@@ -62,6 +63,7 @@
 -record(state, {
         prepared_txs :: cache_id(),
         dep_dict :: dict(),
+        max_len :: non_neg_integer(),
         delay :: non_neg_integer(),
         specula_read :: boolean(),
         num_specula_read :: non_neg_integer(),
@@ -74,7 +76,7 @@
 
 start_link(Name) ->
     gen_server:start_link({local, Name},
-             ?MODULE, [], []).
+             ?MODULE, [Name], []).
 
 read(Name, Key, TxId, Node) ->
     gen_server:call(Name, {read, Key, TxId, Node}).
@@ -94,6 +96,9 @@ if_prepared(TxId, Keys) ->
 prepare_specula(TxId, Partition, WriteSet, PrepareTime) ->
     gen_server:cast(node(), {prepare_specula, TxId, Partition, WriteSet, PrepareTime}).
 
+set_length(Length) ->
+    gen_server:cast(node(), {set_length, Length}).
+
 abort(TxId, Partition) -> 
     gen_server:cast(node(), {abort, TxId, Partition}).
 
@@ -110,11 +115,12 @@ pre_commit(TxId, Partition, SpeculaCommitTs) ->
 %%% Internal
 %%%===================================================================
 
-init([]) ->
-    lager:info("Cache server inited"),
+init([Name]) ->
+    lager:info("Cache server inited with name ~w", [Name]),
     PreparedTxs = tx_utilities:open_private_table(prepared_txs),
     SpeculaRead = antidote_config:get(specula_read),
-    {ok, #state{specula_read = SpeculaRead, dep_dict=dict:new(),
+    [{length, MaxLen}] = ets:lookup(meta_info, length),
+    {ok, #state{specula_read = SpeculaRead, dep_dict=dict:new(), max_len=MaxLen,
                 prepared_txs = PreparedTxs, num_specula_read=0, num_attempt_read=0}}.
 
 handle_call({num_specula_read}, _Sender, 
@@ -134,10 +140,9 @@ handle_call({read, Key, TxId, Node}, Sender,
     {noreply, SD0};
 
 handle_call({read, Key, TxId, {Partition, _}=Node}, Sender, 
-	    SD0=#state{prepared_txs=PreparedTxs, specula_read=true}) ->
+	    SD0=#state{prepared_txs=PreparedTxs, specula_read=true, max_len=MaxLen}) ->
     %lager:warning("Cache specula read ~w of ~w", [Key, TxId]), 
-    [{length, LenLimit}] = ets:lookup(meta_info, length),
-    case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, {relay, Sender}}, LenLimit) of
+    case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, {relay, Sender}}, MaxLen) of
         not_ready->
             %lager:warning("Read blocked!"),
             {noreply, SD0};
@@ -194,6 +199,7 @@ handle_cast({prepare_specula, TxId, Partition, WriteSet, TimeStamp},
     ets:insert(PreparedTxs, {{TxId, Partition}, KeySet}),
     {noreply, SD0};
 
+
 %% Need to certify here
 handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
         SD0=#state{prepared_txs=PreparedTxs, dep_dict=DepDict}) ->
@@ -218,16 +224,20 @@ handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
     end;
 
 handle_cast({pre_commit, TxId, Partition, SpeculaCommitTime}, State=#state{prepared_txs=PreparedTxs,
-        dep_dict=DepDict}) ->
+        dep_dict=DepDict, max_len=MaxLen}) ->
    %lager:warning("specula commit for [~w, ~w]", [TxId, Partition]),
     case ets:lookup(PreparedTxs, {TxId, Partition}) of
         [{{TxId, Partition}, Keys}] ->
-            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, ignore, PreparedTxs, DepDict, Partition, cache),
+            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, ignore, PreparedTxs, DepDict, Partition, cache, MaxLen),
             {noreply, State#state{dep_dict=DepDict1}};
         [] ->
             lager:error("Prepared record of ~w has disappeared!", [TxId]),
             error
     end;
+
+handle_cast({set_length, Length}, State) ->
+    lager:warning("Cache got new len! is ~w", [Length]),
+    {noreply, State#state{max_len=Length}};
 
 %% Where shall I put the speculative version?
 %% In ets, faster for read.

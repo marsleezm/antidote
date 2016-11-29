@@ -33,6 +33,7 @@
         clean_data/2,
         async_send_msg/3,
 
+        set_length/2,
         pre_commit/3,
         set_debug/2,
         do_reply/2,
@@ -88,7 +89,8 @@
                 %r_abort_dict :: dict(),
                 %Statistics
                 %max_ts :: non_neg_integer(),
-                debug = false :: boolean()
+                debug = false :: boolean(),
+                max_len :: non_neg_integer()
                 %total_time :: non_neg_integer(),
                 %prepare_count :: non_neg_integer(),
 		        %relay_read :: {non_neg_integer(), non_neg_integer()},
@@ -141,6 +143,11 @@ get_size(Node) ->
 read_all(Node) ->
     riak_core_vnode_master:command(Node,
                                    {read_all}, self(),
+                                   ?CLOCKSI_MASTER).
+
+set_length(Node, Length) ->
+    riak_core_vnode_master:command(Node,
+                                   {set_length, Length}, self(),
                                    ?CLOCKSI_MASTER).
 
 clean_data(Node, From) ->
@@ -249,9 +256,11 @@ init([Partition]) ->
                 end,
     %LD = dict:new(),
     %RD = dict:new(),
+    [{length, MaxLen}] = ets:lookup(meta_info, length),
     {ok, #state{partition=Partition,
                 committed_txs=CommittedTxs,
                 prepared_txs=PreparedTxs,
+                max_len=MaxLen,
 		        %relay_read={0,0},
                 %l_abort_dict=LD,
                 %r_abort_dict=RD,
@@ -305,6 +314,10 @@ handle_command({check_key_record, Key, Type},_Sender,SD0=#state{prepared_txs=Pre
 handle_command({check_top_aborted, _},_Sender,SD0=#state{dep_dict=DepDict}) -> %=#state{l_abort_dict=LAbortDict, r_abort_dict=RAbortDict, dep_dict=DepDict}) ->
     R = helper:handle_check_top_aborted(DepDict),
     {reply, R, SD0};
+
+handle_command({set_length, Length}, _Sender, SD0=#state{partition=_Partition}) ->
+    lager:info("Partition ~w got length ~w", [_Partition, Length]),
+    {noreply, SD0};
 
 handle_command({do_reply, TxId}, _Sender, SD0=#state{prepared_txs=PreparedTxs, if_replicate=IfReplicate}) ->
     [{{pending, TxId}, Result}] = ets:lookup(PreparedTxs, {pending, TxId}),
@@ -485,12 +498,12 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
     end;
 
 handle_command({pre_commit, TxId, SpeculaCommitTime}, _Sender, State=#state{prepared_txs=PreparedTxs,
-        inmemory_store=InMemoryStore, dep_dict=DepDict, partition=Partition}) ->
+        inmemory_store=InMemoryStore, dep_dict=DepDict, partition=Partition, max_len=MaxLen}) ->
     %lager:warning("Got specula commit for ~w", [TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             %repl_fsm:repl_prepare(Partition, prepared, TxId, RepMsg),
-            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, InMemoryStore, PreparedTxs, DepDict, Partition, master),
+            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, InMemoryStore, PreparedTxs, DepDict, Partition, master, MaxLen),
             {noreply, State#state{dep_dict=DepDict1}};
         [] ->
             lager:error("Prepared record of ~w has disappeared!", [TxId]),

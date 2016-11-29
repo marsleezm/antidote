@@ -350,7 +350,18 @@ get_hitcounters() ->
     R.
 
 set_length(Length) ->
-    ets:insert(meta_info, [{length, Length}]).
+    lager:info("New length is ~w!", [Length]),
+    ets:insert(meta_info, {length, Length}),
+    [{repl_servers, Repls}] = ets:lookup(meta_info, repl_servers),
+    cache_serv:set_length(Length),
+    lists:foreach(fun(Serv) ->
+        data_repl_serv:set_length(Serv, Length)
+            end, Repls),
+    Partitions = hash_fun:get_partitions(),
+    lists:foreach(fun(Part) ->
+        clocksi_vnode:set_length(Part, Length)
+            end, Partitions),
+    dep_len:set_length(Length).
 
 get_pids(Names) ->
     AllPids = lists:foldl(fun(WorkerId, Acc) ->
