@@ -86,11 +86,12 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({add_block_dep, WriterTxId, {Reader, Value}=BlockedValue}, SD0=#state{max_len=MaxLen}) ->
     case ets:lookup(dep_len, WriterTxId) of
         [] ->
-           %lager:warning("The dep  to ~w is invalid, writer aborted!", [WriterTxId]),
+            lager:warning("The dep  to ~w is invalid, writer aborted!", [WriterTxId]),
             local_cert_util:reply(Reader, Value);
         [{WriterTxId, Len, BlockedRead, DepList}] ->
             case Len > MaxLen of
                 true ->
+                    lager:warning("~w: Adding dep to ~w!", [Reader, WriterTxId]),
                     ets:insert(dep_len, {WriterTxId, Len, [BlockedValue|BlockedRead], DepList});
                 false ->
                     local_cert_util:reply(Reader, Value)
@@ -99,7 +100,7 @@ handle_cast({add_block_dep, WriterTxId, {Reader, Value}=BlockedValue}, SD0=#stat
     {noreply, SD0};
 
 handle_cast({specula_commit, PrevTxn, MyTxn}, SD0) ->
-   %lager:warning("Specula commit for ~w", [MyTxn]),
+    lager:warning("Specula commit for ~w", [MyTxn]),
     AntiDeps = ets:lookup(anti_dep, MyTxn), 
     ets:delete(anti_dep, MyTxn),
     case ets:lookup(dep_len, MyTxn) of
@@ -126,22 +127,22 @@ handle_cast({set_length, Length}, SD0) ->
     {noreply, SD0#state{max_len=Length}};
 
 handle_cast({remove_entry, TxId}, SD0) ->
-   %lager:warning("Removing entry for ~w", [TxId]),
+    lager:warning("Removing entry for ~w", [TxId]),
     ets:delete(anti_dep, TxId),
     case ets:lookup(dep_len, TxId) of
         [{TxId, _Len1, BlockedRead, _}] ->
             lists:foreach(fun({Reader, Value}) -> 
                 local_cert_util:reply(Reader, Value)
-                end, BlockedRead)
+                end, BlockedRead),
+            ets:delete(dep_len, TxId)
     end,
-    ets:delete(dep_len, TxId),
     {noreply, SD0};
 
 handle_cast({remove_dep, TxId, List}, SD0=#state{max_len=MaxLen}) ->
-   %lager:warning("Removing dep, TxId is ~w, list is ~w", [TxId, List]),
+    lager:warning("Removing dep, TxId is ~w, list is ~w", [TxId, List]),
     AffectedCoord = recursive_reduce_dep([{0, List}], MaxLen, sets:new()),
     ets:delete(anti_dep, TxId),
-   %lager:warning("Here!!!!"),
+    lager:warning("Here!!!!"),
     case ets:lookup(dep_len, TxId) of
         [{TxId, _Len1, BlockedRead, _}] ->
             lists:foreach(fun({Reader, Value}) ->
@@ -181,25 +182,25 @@ recursive_reduce_dep([], _MaxLen, OACoord) ->
 recursive_reduce_dep(FullDepList, MaxLen, OACoord) ->
     {NewList, AffectedCoord}= lists:foldl(
         fun({MyLen, DepList}, {Acc, AccCoord}) ->
-          %lager:warning("DepList is ~w, len is ~w", [DepList, MyLen]),
+           lager:warning("DepList is ~w, len is ~w", [DepList, MyLen]),
             lists:foldl(fun({TxId, DepTxId}, {Acc1, AccCoord1}) ->
                 R = ets:lookup(dep_len, DepTxId),
-               %lager:warning("Trying to look for list for ~w, entry is ~w", [DepTxId, R]),
+                lager:warning("Trying to look for list for ~w, entry is ~w", [DepTxId, R]),
                 case R of
                     [] -> 
-                       %lager:warning("Here!"),
+                        lager:warning("Here!"),
                         {Acc1, AccCoord1}; %% Mean it has been aborted already...
                     [{DepTxId, Len, BlockedValue, DependingList}]= _Entry ->
-                       %lager:warning("MyLen is ~w, entry is ~w", [MyLen, _Entry]),
+                        lager:warning("MyLen is ~w, entry is ~w", [MyLen, _Entry]),
                         case MyLen > Len of
                             true -> {Acc1, AccCoord1};
                             false -> 
                                 case remove_from_dep_list(DependingList, TxId, MyLen, 0, []) of
                                     [] -> 
-                                       %lager:warning("Can not remove ~w from dep list ~w for ~w", [TxId, DependingList, DepTxId]),
+                                        lager:warning("Can not remove ~w from dep list ~w for ~w", [TxId, DependingList, DepTxId]),
                                         {Acc1, AccCoord1};
                                     {NewLen, NewList} ->
-                                       %lager:warning("For ~w: NewLen is ~w, NewList is ~w", [DepTxId, NewLen, NewList]),
+                                        lager:warning("For ~w: NewLen is ~w, NewList is ~w", [DepTxId, NewLen, NewList]),
                                         case Len > MaxLen of
                                             true ->
                                                 ets:insert(dep_len, {DepTxId, NewLen, BlockedValue, NewList});
@@ -224,7 +225,7 @@ remove_from_dep_list([], done, _MyLen, 0, []) ->
 remove_from_dep_list([], done, _MyLen, NewMaxLen, NewList) ->
     {NewMaxLen, NewList};
 remove_from_dep_list([], Key, _,  _, _) ->
-   %lager:warning("So dep is concurrently removed, I'd better do nothing"),
+    lager:warning("So dep is concurrently removed, I'd better do nothing"),
     Key = [];
 remove_from_dep_list([{Key, _Len}|Rest], Key, 0, NewMaxLen, NewList) ->
     remove_from_dep_list(Rest, done, 0, NewMaxLen, NewList);

@@ -374,7 +374,7 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                                     [{length, MaxLen}] = ets:lookup(meta_info, length),
                                     {ListLen, LastTxn} = last_and_len(PendingList),
                                     NewDepLen = txn_dep(LastTxn)+1,
-                                    lager:warning("ListLen is ~w, MaxLen is ~w, SpeculaLength is ~w, prev_txn is ~w", [ListLen, MaxLen, SpeculaLength, NewDepLen]),
+                                   %lager:warning("ListLen is ~w, MaxLen is ~w, SpeculaLength is ~w, prev_txn is ~w", [ListLen, MaxLen, SpeculaLength, NewDepLen]),
                                     case (ListLen >= SpeculaLength) or (NewDepLen > MaxLen) of
                                         true -> %% Wait instead of speculate.
                                             DepDict1 = dict:store(TxId, 
@@ -383,7 +383,7 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                                                 remote_updates=[], stage=remote_cert, sender=Sender}, ClientDict),
                                             {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                                         false -> %% Can speculate. After replying, removing TxId
-                                            lager:warning("Returning specula_commit for ~w, ReadDepTxs are ~w, B is ~w", [TxId, ReadDepTxs, B]),
+                                           %lager:warning("Returning specula_commit for ~w, ReadDepTxs are ~w, B is ~w", [TxId, ReadDepTxs, B]),
                                             gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs+1, {AbortedReads,
                                                       rev(CommittedUpdates), CommittedReads}}}),
                                             DepDict1 = dict:store(TxId, 
@@ -554,7 +554,7 @@ handle_cast({pending_prepared, TxId, PrepareTime, _From},
                     [{length, MaxLen}] = ets:lookup(meta_info, length),
                     {ListLen, LastTxn} = last_and_len(PendingList),
                     NewDepLen = txn_dep(LastTxn) + 1,
-                    lager:warning("ListLen is ~w, MaxLen is ~w, SpeculaLength is ~w, prev_txn is ~w", [ListLen, MaxLen, SpeculaLength, NewDepLen]),
+                   %lager:warning("ListLen is ~w, MaxLen is ~w, SpeculaLength is ~w, prev_txn is ~w", [ListLen, MaxLen, SpeculaLength, NewDepLen]),
                     case (ListLen >= SpeculaLength) or (NewDepLen > MaxLen) of
                         true ->
                              %lager:warning("Pending prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
@@ -571,7 +571,7 @@ handle_cast({pending_prepared, TxId, PrepareTime, _From},
                             PendingTxs1 = dict:store(TxId, {LocalParts, RemoteParts}, PendingTxs),
                             pre_commit(LocalParts, RemoteParts, TxId, NewMaxPrep, RepDict, LastTxn),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, NewMaxPrep, TxId, {remote, node()}),
-                            lager:warning("Returning specula_commit for ~w", [TxId]),
+                           %lager:warning("Returning specula_commit for ~w", [TxId]),
                             gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep, {AbortedReads,
                                                       rev(CommittedUpdates), CommittedReads}}}),
                             DepDict1 = dict:store(TxId, {PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
@@ -636,7 +636,7 @@ handle_cast({try_specula_commit, Client}, SD0=#state{client_dict=ClientDict, min
             [{length, MaxLen}] = ets:lookup(meta_info, length),
             {ListLen, LastTxn} = last_and_len(PendingList),
             NewDepLen = txn_dep(LastTxn)+1,
-            lager:warning("ListLen is ~w, MaxLen is ~w, SpeculaLength is ~w, prev_txn is ~w", [ListLen, MaxLen, SpeculaLength, NewDepLen]),
+           %lager:warning("ListLen is ~w, MaxLen is ~w, SpeculaLength is ~w, prev_txn is ~w", [ListLen, MaxLen, SpeculaLength, NewDepLen]),
             case {Stage, (ListLen >= SpeculaLength) or (NewDepLen > MaxLen)} of
                 {local_cert, true} ->
                     gen_server:reply(Sender, {ok, {specula_commit, LastCommitTs, {rev(CState#client_state.aborted_reads), rev(CState#client_state.committed_updates), CState#client_state.committed_reads}}}),
@@ -701,7 +701,7 @@ handle_cast({prepared, TxId, PrepareTime, _From},
                                     PendingTxs1 = dict:store(TxId, {LocalParts, RemoteParts}, PendingTxs),
                                     pre_commit(LocalParts, RemoteParts, TxId, NewMaxPrep, RepDict, LastTxn),
                                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, NewMaxPrep, TxId, {remote, node()}),
-                                     lager:warning("Returning specula_commit for ~w", [TxId]),
+                                    %lager:warning("Returning specula_commit for ~w", [TxId]),
                                     gen_server:reply(Sender, {ok, {specula_commit, NewMaxPrep, {rev(AbortedRead), rev(CommittedUpdated), CommittedReads}}}),
                                     DepDict1 = dict:store(TxId, {PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
                                     ClientDict1 = dict:store(Client, ClientState#client_state{pending_list=PendingList++[TxId], tx_id=?NO_TXN, 
