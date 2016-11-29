@@ -607,7 +607,7 @@ pre_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Partit
     end.
 
 reply_pre_commit(_, [], _, _, _, _, _) ->
-    [];
+    {[],[]};
 reply_pre_commit(PartitionType, PendingReaders, Key, SCTime, Value, TxId, MaxLen) ->
     PrepLen = case ets:lookup(dep_len, TxId) of
                [{TxId, Len, spec_commit, _, _Dep}] -> Len;
@@ -628,7 +628,7 @@ reply_pre_commit(PartitionType, PendingReaders, Key, SCTime, Value, TxId, MaxLen
                                         ets:insert(dependency, {TxId, ReaderTxId}),
                                         reply({relay, Sender}, {ok, Value});
                                     false ->
-                                        dep_server:add_block_dep(ReaderTxId, TxId, {Sender, {ok, Value}}),
+                                        dep_server:add_block_dep(TxId, {Sender, {ok, Value}}),
                                         ets:insert(anti_dep, {ReaderTxId, TxId}),
                                         ets:insert(dependency, {TxId, ReaderTxId})
                                 end;
@@ -652,7 +652,7 @@ reply_pre_commit(PartitionType, PendingReaders, Key, SCTime, Value, TxId, MaxLen
                                         ets:insert(dependency, {TxId, ReaderTxId}),
                                         reply({relay, Sender}, {ok, Value});
                                     false ->
-                                        dep_server:add_block_dep(ReaderTxId, TxId, {Sender, {ok, Value}}),
+                                        dep_server:add_block_dep(TxId, {Sender, {ok, Value}}),
                                         ets:insert(anti_dep, {ReaderTxId, TxId}),
                                         ets:insert(dependency, {TxId, ReaderTxId})
                                 end,
@@ -954,7 +954,7 @@ multi_read_version(Key, [{pre_commit, SCTxId, SCTime, SCValue, SCPendingReaders}
                                   lager:warning("~p reading specula ~p, but blocked! LenLimit is ~w", [ReaderTxId, SCValue, MaxLen]),
                                   %ets:insert(dep_len, add_to_entry(Entry, ReaderTxId, PrepLen+1, SCTxId, {Sender, {ok, SCValue}})),
                                   lager:warning("~w reads from ~w, add dep block len to ~w now" , [ReaderTxId, SCTxId, PrepLen+1]),
-                                  dep_server:add_block_dep(ReaderTxId, SCTxId, {Sender, {ok, SCValue}}),
+                                  dep_server:add_block_dep(SCTxId, {Sender, {ok, SCValue}}),
                                   ets:insert(anti_dep, {ReaderTxId, SCTxId}),
                                   ets:insert(dependency, {SCTxId, ReaderTxId})
                           end,
