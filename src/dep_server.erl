@@ -107,7 +107,7 @@ handle_cast({specula_commit, PrevTxn, MyTxn}, SD0) ->
             {Len0, DepList0} = lists:foldl(fun({_, T}, {ML, L}) ->
                                 case ets:lookup(dep_len, T) of
                                     [] -> {ML, L};
-                                    [{T, Len, _, _}] -> {max(ML,Len), [{T, Len}|L]}
+                                    [{T, Len, _, _}] -> {max(ML,Len+1), [{T, Len}|L]}
                                 end end, {0, []}, AntiDeps),
             {MaxLen, DepList} = case PrevTxn of
                                     ignore -> {Len0, DepList0};
@@ -115,7 +115,7 @@ handle_cast({specula_commit, PrevTxn, MyTxn}, SD0) ->
                                             [] -> {Len0, DepList0};
                                             [{PrevTxn, Len1, _, _}] -> 
                                                 ets:insert(dependency, {PrevTxn, MyTxn}),
-                                                {max(Len0,Len1), [{PrevTxn, Len1}|DepList0]}
+                                                {max(Len0,Len1+1), [{PrevTxn, Len1}|DepList0]}
                                          end
                                 end,
             ets:insert(dep_len, {MyTxn, MaxLen, [], DepList})
