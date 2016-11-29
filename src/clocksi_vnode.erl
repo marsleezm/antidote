@@ -414,16 +414,17 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
         false ->
             case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Reader}}, LenLimit) of
                 not_ready->
-                    %lager:warning("Read blocked!"),
+                    lager:warning("Read blocked!"),
                     {noreply, SD0};
                 {specula, Value} ->
                     gen_server:reply(Reader, {ok, Value}), 
     		        %T2 = os:timestamp(),
-                     %lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
+                    lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
                     {noreply, SD0};
                 specula_wait ->
                     {noreply, SD0};
                 ready ->
+                    lager:warning("Read the value!"),
                     Result = read_value(Key, TxId, InMemoryStore),
                     gen_server:reply(Reader, Result), 
     		        %T2 = os:timestamp(),

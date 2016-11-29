@@ -706,7 +706,7 @@ find_prepare_record([Record|Rest], TxId, Prev) ->
 
 %% TODO: allowing all speculative read now! Maybe should not be so aggressive
 specula_read(TxId, Key, PreparedTxs, SenderInfo, LenLimit) ->
-    lager:warning("~w trying to read", [TxId]),
+    lager:warning("~w trying to read ~w", [TxId, Key]),
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
         [] ->
