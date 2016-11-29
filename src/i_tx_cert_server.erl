@@ -100,6 +100,9 @@ handle_call({get_cdf}, _Sender, SD0) ->
     %{reply, ok, SD0};
     {reply, ok, SD0};
 
+handle_call({get_hitcounter}, _Sender, SD0) ->
+    {reply, 0, SD0};
+
 handle_call({get_stat}, _Sender, SD0) ->
     {reply, [0, 0, 0, 0, 0, 0, 0], SD0};
 
