@@ -37,7 +37,7 @@ load(WPerDc) ->
     %_PbPorts = basho_bench_config:get(antidote_pb_port),
     %% Choose the node using our ID as a modulus
 
-    {PartList, ReplList, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
+    {_, PartList, ReplList, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
     %lager:info("Part list is ~w, Replist is ~w", [PartList, ReplList]),
     AllDcs = [N || {N, _} <- PartList],
     MyNode = node(),

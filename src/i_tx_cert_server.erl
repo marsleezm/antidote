@@ -110,10 +110,6 @@ handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
 handle_call({get_pid}, _Sender, SD0) ->
       {reply, self(), SD0};
 
-handle_call({get_hash_fun}, _Sender, SD0) ->
-    L = hash_fun:get_hash_fun(),
-    {reply, L, SD0};
-
 handle_call({start_tx, _}, Sender, SD0) ->
     handle_call({start_tx}, Sender, SD0);
 handle_call({start_tx}, Sender, SD0=#state{last_commit_ts=LastCommitTS, client_dict=ClientDict}) ->

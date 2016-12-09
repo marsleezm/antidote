@@ -177,11 +177,12 @@ get_hash_fun() ->
                 PartList = lists:foldr(fun(N, L) ->
                                 [{N, dict:fetch(N, Dict1)}|L] 
                                 end, [], AllNodes),
+                SpeculaCommit = antidote_config:get(do_specula),
                 case antidote_config:get(do_repl) of
                     true ->
-                        {PartList, antidote_config:get(to_repl), antidote_config:get(num_dcs)};
+                        {SpeculaCommit, PartList, antidote_config:get(to_repl), antidote_config:get(num_dcs)};
                     false ->
-                        {PartList, [], antidote_config:get(num_dcs)}
+                        {SpeculaCommit, PartList, [], antidote_config:get(num_dcs)}
                 end.
             %end.
     %end.

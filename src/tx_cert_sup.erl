@@ -49,7 +49,7 @@ append_values(Name, Node, KeyValues, CommitTime) ->
     end.
 
 load(Type, Param) ->
-    {PartList, _, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
+    {_, PartList, _, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
     lager:info("Got load request, part list is ~w", [PartList]),
     AllDcs = [N || {N, _} <- PartList],
     StartTime = os:timestamp(),
