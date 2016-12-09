@@ -266,7 +266,7 @@ handle_call({certify_read, TxId, ClientMsgId, Client}, Sender, SD0=#state{min_co
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
                                     committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                             DepDict1 = dict:erase(TxId, DepDict),
-                            {reply, {aborted, {AbortedReads, rev(CommittedUpdates), lists:sort(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
+                            {reply, {aborted, {AbortedReads, rev(CommittedUpdates), CommittedReads}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                         AbortedTxId ->
                             %lager:warning("Cascade aborted aborted txid is ~w, TxId is  ~w", [AbortedTxId, TxId]),
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
@@ -325,6 +325,7 @@ handle_call({abort_txn, TxId, Client}, _Sender, SD0=#state{dep_dict=DepDict, cli
     CommittedUpdates = ClientState#client_state.committed_updates,
     ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
             committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
+   %lager:warning("Aborting ~w, committed updates are ~w", [TxId, CommittedUpdates]),
     {reply, {aborted, {AbortedReads, rev(CommittedUpdates), CommittedReads}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
 
 handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId, NewSpeculaLength}, Sender, SD0=#state{specula_length=SpeculaLength}) ->
@@ -597,7 +598,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
 
 handle_cast({solve_pending_prepared, TxId, PrepareTime}, 
 	    SD0=#state{dep_dict=DepDict, client_dict=ClientDict}) ->
-    %lager:warning("Got solve pending prepare for ~w from ~w", [TxId, _From]),
+    %lager:warning("Got solve pending prepare for ~w", [TxId]),
     Client = TxId#tx_id.client_pid,
     case dict:find(Client, ClientDict) of
         error -> {noreply, SD0};
@@ -691,7 +692,7 @@ handle_cast({prepared, TxId, PrepareTime},
                     {noreply, SD0}
             end;
         false ->
-           %lager:warning("Got prepare for ~w, prepare time is ~w from ~w not in local", [TxId, PrepareTime, _From]),
+           %lager:warning("Got prepare for ~w, prepare time is ~w  not in local", [TxId, PrepareTime]),
             case dict:find(TxId, DepDict) of
                 {ok, {1, [], OldPrepTime}} -> %% Maybe the transaction can commit 
                     NowPrepTime =  max(OldPrepTime, PrepareTime),

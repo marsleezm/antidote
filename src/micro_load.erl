@@ -35,7 +35,7 @@ load(Size) ->
     lager:info("Start tpcc load at ~w", [node()]),
     random:seed(now()), %now()),
 
-    {PartList, ReplList, _NumDcs} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
+    {_, PartList, ReplList, _NumDcs} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
     %lager:info("Part list is ~w, Replist is ~w", [PartList, ReplList]),
     AllDcs = [N || {N, _} <- PartList],
     MyNode = node(),

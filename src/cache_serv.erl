@@ -128,11 +128,8 @@ handle_call({clean_data}, _Sender, SD0=#state{prepared_txs=PreparedTxs}) ->
     ets:delete_all_objects(PreparedTxs),
     {reply, ok, SD0#state{num_specula_read=0, num_attempt_read=0}};
 
-handle_call({read, Key, TxId, Node}, Sender, 
-	    SD0=#state{specula_read=false}) ->
-    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
-    {noreply, SD0};
-
+handle_call({read, Key, TxId, _Node}, Sender, SD0=#state{specula_read=SpeculaRead}) ->
+    handle_call({read, Key, TxId, _Node, SpeculaRead}, Sender, SD0);
 handle_call({read, Key, TxId, {Partition, _}=Node, SpeculaRead}, Sender,
         SD0=#state{prepared_txs=PreparedTxs}) ->
     case SpeculaRead of

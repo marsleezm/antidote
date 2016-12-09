@@ -36,7 +36,7 @@ load(_) ->
     random:seed(now()), %now()),
     %% Choose the node using our ID as a modulus
 
-    {PartList, ReplList, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
+    {_, PartList, ReplList, _} =  hash_fun:get_hash_fun(), %gen_server:call({global, MyTxServer}, {get_hash_fun}),
     %lager:info("Part list is ~w, Replist is ~w", [PartList, ReplList]),
 
     %% Generate kinda hash function and distrbution
