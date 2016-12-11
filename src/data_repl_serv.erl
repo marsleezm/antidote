@@ -72,7 +72,7 @@
         if_bulk_prepared/3,
         num_specula_read/1,
         single_read/2,
-    
+        direct_read/4, 
         read/4]).
 
 %% Spawn
@@ -109,6 +109,9 @@ start_link(Name, Parts) ->
 
 read(Name, Key, TxId, Part) ->
     gen_server:call({global, Name}, {read, Key, TxId, Part}, ?READ_TIMEOUT).
+
+direct_read(Name, Key, TxId, Part) ->
+    gen_server:call(Name, {read, Key, TxId, Part}, ?READ_TIMEOUT).
 
 get_table(Name) ->
     gen_server:call({global, Name}, {get_table}, ?READ_TIMEOUT).

@@ -78,6 +78,8 @@
 
 -record(client_state, {
         tx_id =?NO_TXN :: txid(),
+        olc = {inf, []} :: atom(),
+        ffc = 0 :: non_neg_integer(),
         invalid_aborted=0 :: non_neg_integer(),
         specula_abort_count=0 :: non_neg_integer(),
         local_updates = []:: [],
@@ -442,10 +444,21 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
             %end
     end;
 
-handle_call({read, Key, TxId, Node}, Sender, SD0=#state{specula_read=SpeculaRead}) ->
-    handle_call({read, Key, TxId, Node, SpeculaRead}, Sender, SD0);
-handle_call({read, Key, TxId, Node, SpeculaRead}, Sender, SD0) ->
-    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, SpeculaRead),
+handle_call({read, Key, TxId, Type, Node}, Sender, SD0=#state{specula_read=SpeculaRead}) ->
+    handle_call({read, Key, TxId, Type, Node, SpeculaRead}, Sender, SD0);
+handle_call({read, Key, TxId, Type, Node, SpeculaRead}, Sender, SD0=#state{client_dict=ClientDict}) ->
+    %% Add logic to put SSS and LOC
+    ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
+    {OLC, _} = ClientState#client_state.olc,
+    FFC = ClientState#client_state.ffc,
+    case Type of
+        master ->
+            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, SpeculaRead, OLC, FFC);
+        cache ->
+            cache_serv:read(Key, TxId, Node, Sender, OLC, FFC);
+        _ ->
+            data_repl_serv:direct_read(Type, Key, TxId, Node, Sender, OLC, FFC)
+    end,
     {noreply, SD0};
 
 handle_call({get_oldest}, _Sender, SD0=#state{client_dict=ClientDict}) ->
@@ -495,6 +508,20 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     Sup ! done,
     lager:info("Replied!"),
     {noreply, SD0};
+
+handle_cast({return_value, Value, TxId, Sender, NewLOC, NewFFC}, SD0=#state{client_dict=ClientDict}) ->
+    Client = TxId#tx_id.client_pid, 
+    case NewLOC of
+        inf ->
+    case NewLOC >= NewFFC of
+        true ->
+            gen_server:reply(Sender, Value),
+            ClientState = dict:find(Client, ClientDict),
+            {OldLOC, OldLOCList} = ClientState
+            ClientDict1 = dict:store(Client, ClientState#client_state{})
+            {noreply, SD0#state{client_dict=ClientDict1};
+            
+            
 
 %handle_cast({trace, PrevTxs, TxId, Sender, InfoList}, SD0=#state{dep_dict=DepDict, pending_list=PendingList, client_dict=ClientDict}) ->
 %    case dict:find(TxId, DepDict) of
