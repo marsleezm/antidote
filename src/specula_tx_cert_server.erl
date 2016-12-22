@@ -83,7 +83,7 @@
         local_updates = []:: [],
         remote_updates =[] :: [],
         pending_list=[] :: [txid()],
-        spec_commit_time :: non_neg_integer(),
+        %spec_commit_time :: non_neg_integer(),
         %% New stat
         aborted_reads=[],
         committed_reads=[],
@@ -374,7 +374,7 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                             RemotePartitions = [P || {P, _} <- RemoteUpdates],
                             case (RemotePartitions == []) and (ReadDepTxs == B) and (PendingList == []) of
                                 true -> 
-                                    gen_server:reply(Sender, {ok, {committed, LastCommitTs, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads), os:timestamp()}}}),
+                                    gen_server:reply(Sender, {ok, {committed, LastCommitTs, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads)}}}),
                                     DepDict1 = dict:erase(TxId, DepDict),
                                     ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_reads=
                                           [], committed_updates=[], committed_reads=[]}, ClientDict),
@@ -389,7 +389,7 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                                             DepDict1 = dict:store(TxId, 
                                                     {ReplFactor*length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1}, DepDict),
                                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=TxId, local_updates=[], 
-                                                remote_updates=RemoteUpdates, stage=remote_cert, sender=Sender, spec_commit_time=os:timestamp()}, ClientDict),
+                                                remote_updates=RemoteUpdates, stage=remote_cert, sender=Sender}, ClientDict),
                                             {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                                         false -> %% Can speculate. After replying, removing TxId
                                             %% Update specula data structure, and clean the txid so we know current txn is already replied
@@ -546,7 +546,7 @@ handle_cast({pending_prepared, TxId, PrepareTime},
                             %lager:warning("Pending prep: decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                             DepDict1 = dict:store(TxId, {RemoteToAck*TotalReplFactor+PendingPrepares+1, ReadDepTxs, NewMaxPrep}, DepDict),
-                            ClientDict1 = dict:store(Client, ClientState#client_state{stage=remote_cert, spec_commit_time=os:timestamp()}, ClientDict),
+                            ClientDict1 = dict:store(Client, ClientState#client_state{stage=remote_cert}, ClientDict),
                             {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                         false ->
                              %lager:warning("Pending prep: decided to speculate ~w and prepare to ~w pending list is ~w!!", [TxId, RemoteUpdates, PendingList]),
@@ -648,7 +648,7 @@ handle_cast({prepared, TxId, PrepareTime},
                                    %lager:warning("Decided to wait and prepare ~w, pending list is ~w!!", [TxId, PendingList]),
                                     ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                                     DepDict1 = dict:store(TxId, {TotalReplFactor*RemoteToAck+PendingPrepares, ReadDepTxs, NewMaxPrep}, DepDict),
-                                    ClientDict1 = dict:store(Client, ClientState#client_state{stage=remote_cert, spec_commit_time=os:timestamp()}, ClientDict),
+                                    ClientDict1 = dict:store(Client, ClientState#client_state{stage=remote_cert}, ClientDict),
                                     {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                                 false ->
                                     %% Add dependent data into the table
@@ -783,7 +783,7 @@ try_solve_pending([], [], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, d
                                                             {DD1, NewMayCommit, NewToAbort, CD1} = commit_tx(TxId, SpeculaPrepTime, 
                                                                 LocalParts, RemoteParts, dict:erase(TxId, DD), RepDict, CD, waited),
                                                             CS1 = dict:fetch(Client, CD1),
-                                                            gen_server:reply(Sender, {ok, {committed, SpeculaPrepTime, {rev(CS1#client_state.aborted_reads), rev(CS1#client_state.committed_updates), CS1#client_state.committed_reads, CS1#client_state.spec_commit_time}}}),
+                                                            gen_server:reply(Sender, {ok, {committed, SpeculaPrepTime, {rev(CS1#client_state.aborted_reads), rev(CS1#client_state.committed_updates), CS1#client_state.committed_reads}}}),
                                                             CD2 = dict:store(Client, CS1#client_state{committed_updates=[], committed_reads=[], aborted_reads=[],
                                                                 pending_list=[], tx_id=?NO_TXN}, CD1),
                                                             {CD2, DD1, PD, MayCommit++NewMayCommit, ToAbort++NewToAbort, SpeculaPrepTime};
@@ -932,7 +932,7 @@ try_solve_pending([{NowPrepTime, PendingTxId}|Rest], [], SD0=#state{client_dict=
             {DepDict3, MayCommTxs, ToAbortTxs, ClientDict1} = commit_tx(PendingTxId, CurCommitTime, LocalParts, RemoteParts,
                 DepDict2, RepDict, ClientDict),
             CS = dict:fetch(Client, ClientDict1),
-            gen_server:reply(Sender, {ok, {committed, CurCommitTime, {AbortedReads, rev(CommittedUpdates), CS#client_state.committed_reads, CS#client_state.spec_commit_time}}}),
+            gen_server:reply(Sender, {ok, {committed, CurCommitTime, {AbortedReads, rev(CommittedUpdates), CS#client_state.committed_reads}}}),
             ClientDict2 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, pending_list=[], aborted_reads=[],
                     committed_updates=[], committed_reads=[], aborted_update=?NO_TXN}, ClientDict1),
             try_solve_pending(Rest++MayCommTxs, ToAbortTxs, SD0#state{min_commit_ts=CurCommitTime, dep_dict=DepDict3, 
