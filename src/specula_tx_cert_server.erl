@@ -374,7 +374,7 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                             RemotePartitions = [P || {P, _} <- RemoteUpdates],
                             case (RemotePartitions == []) and (ReadDepTxs == B) and (PendingList == []) of
                                 true -> 
-                                    gen_server:reply(Sender, {ok, {committed, LastCommitTs, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads), ClientState#client_state.spec_commit_time}}}),
+                                    gen_server:reply(Sender, {ok, {committed, LastCommitTs, {rev(AbortedReads), rev(CommittedUpdates), rev(CommittedReads), os:timestamp()}}}),
                                     DepDict1 = dict:erase(TxId, DepDict),
                                     ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_reads=
                                           [], committed_updates=[], committed_reads=[]}, ClientDict),
