@@ -26,6 +26,7 @@
 	    internal_read/3,
         debug_read/3,
 	    relay_read/5,
+        remote_read/4,
         abort_others/5,
         get_size/1,
         %set_prepared/5,
@@ -33,13 +34,13 @@
         clean_data/2,
         async_send_msg/3,
 
-        pre_commit/3,
+        pre_commit/5,
         set_debug/2,
         do_reply/2,
         debug_prepare/4,
         prepare/3,
         prepare/4,
-        commit/3,
+        commit/4,
         single_commit/2,
         append_value/5,
         append_values/4,
@@ -153,6 +154,11 @@ relay_read(Node, Key, TxId, Reader, From) ->
                                    {relay_read, Key, TxId, Reader, From}, self(),
                                    ?CLOCKSI_MASTER).
 
+remote_read(Node, Key, TxId, Reader) ->
+    riak_core_vnode_master:command(Node,
+                                   {remote_read, Key, TxId, Reader}, self(),
+                                   ?CLOCKSI_MASTER).
+
 %% @doc Sends a prepare request to a Node involved in a tx identified by TxId
 prepare(Updates, TxId, Type) ->
     ProposeTime = TxId#tx_id.snapshot_time+1,
@@ -174,10 +180,10 @@ prepare(Updates, CollectedTS, TxId, Type) ->
 						       ?CLOCKSI_MASTER)
 		end, Updates).
 
-pre_commit(Partitions, TxId, SpeculaCommitTime) ->
+pre_commit(Partitions, TxId, SpeculaCommitTime, LOC, FFC) ->
     lists:foreach(fun(Partition) ->
 			riak_core_vnode_master:command(Partition,
-						       {pre_commit, TxId, SpeculaCommitTime},
+						       {pre_commit, TxId, SpeculaCommitTime, LOC, FFC},
                                self(), ?CLOCKSI_MASTER)
             end, Partitions).
 
@@ -210,10 +216,10 @@ append_values(Node, KeyValues, CommitTime, _ToReply) ->
                                    ?CLOCKSI_MASTER, infinity).
 
 %% @doc Sends a commit request to a Node involved in a tx identified by TxId
-commit(UpdatedParts, TxId, CommitTime) ->
+commit(UpdatedParts, TxId, CommitTime, LOC) ->
     lists:foreach(fun(Node) ->
 			riak_core_vnode_master:command(Node,
-						       {commit, TxId, CommitTime},
+						       {commit, TxId, CommitTime, LOC},
 						       {server, undefined, self()},
 						       ?CLOCKSI_MASTER)
 		end, UpdatedParts).
@@ -345,24 +351,25 @@ handle_command({check_prepared_empty},_Sender,SD0=#state{prepared_txs=PreparedTx
 handle_command({check_servers_ready},_Sender,SD0) ->
     {reply, true, SD0};
 
-handle_command({debug_read, Key, TxId}, _Sender, SD0=#state{
+handle_command({debug_read, Key, TxId}, Sender, SD0=#state{
             inmemory_store=InMemoryStore, partition=_Partition}) ->
     %MaxTS1 = max(TxId#tx_id.snapshot_time, MaxTS), 
-    Result = read_value(Key, TxId, InMemoryStore),
-    {reply, Result, SD0};
+    local_cert_util:read_value(Key, TxId, Sender, InMemoryStore),
+    {noreply, SD0};
 
 %% Internal read is not specula
 handle_command({internal_read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBlocked, 
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=_Partition}) ->
+    {_, _, RealSender} = Sender,
    %lager:info("Got read for ~w", [Key]),
-    case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, Sender) of
+    case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, RealSender) of
         not_ready->
             %lager:info("Not ready for ~w", [Key]),
             {noreply, SD0};
         ready ->
-            Result = read_value(Key, TxId, InMemoryStore),
+            local_cert_util:read_value(Key, TxId, RealSender, InMemoryStore),
             %lager:info("Got value for ~w, ~w", [Key, Result]),
-            {reply, Result, SD0}
+            {noreply, SD0}
     end;
 
 handle_command({get_size}, _Sender, SD0=#state{
@@ -386,19 +393,19 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
     %lager:warning("Relaying read for ~p ~w", [Key, TxId]),
     case SpeculaRead of
         false ->
-            case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Reader}}) of
+            case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, Reader}) of
                 not_ready->
                     %lager:warning("Read for ~p of ~w blocked!", [Key, TxId]),
                     {noreply, SD0};
                 ready ->
-                    Result = read_value(Key, TxId, InMemoryStore),
-                    %lager:warning("Read for ~p of ~w finished, Result is ~p! Replying to ~w", [Key, TxId, Result, Reader]),
-                    gen_server:reply(Reader, Result), 
-    		        %T2 = os:timestamp(),
+                    local_cert_util:read_value(Key, TxId, Reader, InMemoryStore),
                     {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
-            case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Reader}}) of
+            case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, Reader}) of
+                wait ->
+                    %lager:warning("Read wait!"),
+                    {noreply, SD0};
                 not_ready->
                     %lager:warning("Read blocked!"),
                     {noreply, SD0};
@@ -409,14 +416,23 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
                     {noreply, SD0};
 				        %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
                 ready ->
-                    Result = read_value(Key, TxId, InMemoryStore),
-                    gen_server:reply(Reader, Result), 
+                    local_cert_util:read_value(Key, TxId, Reader, InMemoryStore),
     		        %T2 = os:timestamp(),
                     {noreply, SD0}
-				        %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end
     end;
 
+handle_command({remote_read, Key, TxId, Reader}, _Sender, SD0=#state{
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
+   %lager:warning("Remote read for ~p ~w", [Key, TxId]),
+    case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, {remote, Reader}}) of
+        not_ready->
+           %lager:warning("Read for ~p of ~w blocked!", [Key, TxId]),
+            {noreply, SD0};
+        ready ->
+            local_cert_util:remote_read_value(Key, TxId, Reader, InMemoryStore),
+            {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
+    end;
 %% RepMode:
 %%  local: local certification, needs to send prepare to all slaves
 %%  remote, AvoidNode: remote cert, do not need to send prepare to AvoidNode
@@ -489,13 +505,13 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
             end 
     end;
 
-handle_command({pre_commit, TxId, SpeculaCommitTime}, _Sender, State=#state{prepared_txs=PreparedTxs,
+handle_command({pre_commit, TxId, SpeculaCommitTime, LOC, FFC}, _Sender, State=#state{prepared_txs=PreparedTxs,
         inmemory_store=InMemoryStore, dep_dict=DepDict, partition=Partition}) ->
     %lager:warning("Got specula commit for ~w", [TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             %repl_fsm:repl_prepare(Partition, prepared, TxId, RepMsg),
-            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, InMemoryStore, PreparedTxs, DepDict, Partition, master),
+            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, InMemoryStore, PreparedTxs, DepDict, Partition, LOC, FFC, master),
             {noreply, State#state{dep_dict=DepDict1}};
         [] ->
             lager:error("Prepared record of ~w has disappeared!", [TxId]),
@@ -530,7 +546,7 @@ handle_command({append_values, KeyValues, CommitTime}, _Sender,
     %gen_fsm:reply(ToReply, {ok, {committed, CommitTime}}),
     {reply, {ok, committed}, State};
 
-handle_command({commit, TxId, TxCommitTime}, _Sender,
+handle_command({commit, TxId, LOC, TxCommitTime}, _Sender,
                #state{partition=Partition,
                       committed_txs=CommittedTxs,
                       %if_replicate=IfReplicate,
@@ -541,7 +557,7 @@ handle_command({commit, TxId, TxCommitTime}, _Sender,
                       if_specula=IfSpecula
                       } = State) ->
     %lager:warning("~w: Got commit req for ~w with ~w", [Partition, TxId, TxCommitTime]),
-    Result = commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula),
+    Result = commit(TxId, LOC, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula),
     case Result of
         {ok, committed, DepDict1} ->
             {noreply, State#state{dep_dict=DepDict1}};
@@ -624,12 +640,12 @@ async_send_msg(Delay, Msg, To) ->
 %    true = ets:insert(PreparedTxs, {Key, {TxId, Time, Value, [], []}}),
 %    set_prepared(PreparedTxs,Rest,TxId,Time, [Key|KeySet]).
 
-commit(TxId, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula)->
+commit(TxId, LOC, TxCommitTime, CommittedTxs, PreparedTxs, InMemoryStore, DepDict, Partition, IfSpecula)->
     %lager:warning("Before commit ~w", [TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, Keys}] ->
             case IfSpecula of
-                true -> specula_utilities:deal_commit_deps(TxId, TxCommitTime);
+                true -> specula_utilities:deal_commit_deps(TxId, LOC, TxCommitTime);
                 false -> ok
             end,
             DepDict1 = local_cert_util:update_store(Keys, TxId, TxCommitTime, InMemoryStore, CommittedTxs, 
@@ -686,24 +702,4 @@ abort_others(PPTime, [{_Type, TxId, _PTime, _Value, PendingReaders}|Rest]=NonAbo
             end;
         false ->
             {DepDict, NonAborted, Readers}
-    end.
-        
-
-read_value(Key, TxId, InMemoryStore) ->
-    case ets:lookup(InMemoryStore, Key) of
-        [] ->
-            {ok, []};
-        [{Key, ValueList}] ->
-            MyClock = TxId#tx_id.snapshot_time,
-            find_version(ValueList, MyClock)
-    end.
-
-find_version([],  _SnapshotTime) ->
-    {ok, []};
-find_version([{TS, Value}|Rest], SnapshotTime) ->
-    case SnapshotTime >= TS of
-        true ->
-            {ok, Value};
-        false ->
-            find_version(Rest, SnapshotTime)
     end.

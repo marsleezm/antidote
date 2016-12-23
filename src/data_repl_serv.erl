@@ -65,7 +65,7 @@
         debug_read/3,
         prepare_specula/5,
         local_certify/4,
-        pre_commit/4,
+        pre_commit/6,
         %commit_specula/4,
         %abort_specula/3,
         if_prepared/3,
@@ -156,8 +156,8 @@ local_certify(Name, TxId, Partition, WriteSet) ->
 read_all(Name) ->
     gen_server:cast({global, Name}, {get_size}).
 
-pre_commit(Name, TxId, Partition, SpeculaCommitTs) ->
-    gen_server:cast({global, Name}, {pre_commit, TxId, Partition, SpeculaCommitTs}).
+pre_commit(Name, TxId, Partition, SpeculaCommitTs, LOC, FFC) ->
+    gen_server:cast({global, Name}, {pre_commit, TxId, Partition, SpeculaCommitTs, LOC, FFC}).
 
 relay_read(Name, Key, TxId, Reader) ->
     gen_server:cast({global, Name}, {relay_read, Key, TxId, Reader}).
@@ -231,7 +231,7 @@ handle_call({check_key, Key}, _Sender, SD0=#state{inmemory_store=InMemoryStore})
     Result = ets:lookup(InMemoryStore, Key),
     {reply, Result, SD0};
 
-handle_call({debug_read, Key, TxId}, _Sender, 
+handle_call({debug_read, Key, TxId}, Sender, 
 	    SD0=#state{inmemory_store=InMemoryStore}) ->
     lager:info("Got debug read for ~w from ~p", [Key, TxId]),
     case ets:lookup(InMemoryStore, Key) of
@@ -240,12 +240,8 @@ handle_call({debug_read, Key, TxId}, _Sender,
             {reply, {ok, []}, SD0};
         [{Key, ValueList}] ->
             lager:info("Debug reading ~w, Value list is ~w", [Key, ValueList]),
-            MyClock = TxId#tx_id.snapshot_time,
-            case find_nonspec_version(ValueList, MyClock) of
-                Value ->
-                    lager:info("Found value is ~w", [Value]),
-                    {reply, {ok, Value}, SD0}
-            end
+            local_cert_util:read_value(Key, TxId, Sender, InMemoryStore),
+            {noreply, SD0}
     end;
 
 %% The real key is be read as {Part, Key} 
@@ -256,29 +252,29 @@ handle_call({read, Key, TxId, _Node, SpeculaRead}, Sender,
     case SpeculaRead of
         false ->
            %lager:warning("Specula rea on data repl and false!!??"),
-            case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Sender}}) of
+            case local_cert_util:ready_or_block(TxId, Key, PreparedTxs, {TxId, Sender}) of
                 not_ready-> {noreply, SD0};
                 ready ->
                     %lager:warning("Read finished!"),
-                    Result = read_value(Key, TxId, InMemoryStore),
-                    %T2 = os:timestamp(),
-                    {reply, Result, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
+                    local_cert_util:read_value(Key, TxId, Sender, InMemoryStore),
+                    {noreply, SD0}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
             %lager:warning("Specula read!!"),
-            case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, ignore, {relay, Sender}}) of
+            case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, Sender}) of
+                wait->
+                    lager:warning("Read wait!"),
+                    {noreply, SD0};
                 not_ready->
-                    %lager:warning("Read blocked!"),
+                    lager:warning("Read blocked!"),
                     {noreply, SD0};
                 {specula, Value} ->
                     {reply, {ok, Value}, SD0};
                         %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
                 ready ->
                     %lager:warning("Read finished!"),
-                    Result = read_value(Key, TxId, InMemoryStore),
-                    %T2 = os:timestamp(),
-                    {reply, Result, SD0}
-                        %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
+                    local_cert_util:read_value(Key, TxId, Sender, InMemoryStore),
+                    {noreply, SD0}
             end
     end;
 
@@ -346,18 +342,8 @@ handle_call({go_down},_Sender,SD0) ->
 handle_cast({relay_read, Key, TxId, Reader}, 
 	    SD0=#state{inmemory_store=InMemoryStore}) ->
       %lager:warning("~w, ~p data repl read", [TxId, Key]),
-    case ets:lookup(InMemoryStore, Key) of
-        [] ->
-              %lager:warning("Nothing for ~p!", [Key]),
-            gen_server:reply(Reader, {ok, []}),
-            {noreply, SD0};
-        [{Key, ValueList}] ->
-            MyClock = TxId#tx_id.snapshot_time,
-            Value = find_version(ValueList, MyClock),
-              %lager:warning("Got value for ~p", [ValueList, Key]),
-            gen_server:reply(Reader, Value),
-            {noreply, SD0}
-    end;
+    local_cert_util:read_value(Key, TxId, Reader, InMemoryStore),
+    {noreply, SD0};
 
 handle_cast({read_all}, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
@@ -408,12 +394,12 @@ handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
             {noreply, SD0}
     end;
 
-handle_cast({pre_commit, TxId, Partition, SpeculaCommitTime}, State=#state{prepared_txs=PreparedTxs,
+handle_cast({pre_commit, TxId, Partition, SpeculaCommitTime, LOC, FFC}, State=#state{prepared_txs=PreparedTxs,
         inmemory_store=InMemoryStore, dep_dict=DepDict}) ->
    %lager:warning("Specula commit for ~w ", [Partition]),
     case ets:lookup(PreparedTxs, {TxId, Partition}) of
         [{{TxId, Partition}, Keys}] ->
-            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, InMemoryStore, PreparedTxs, DepDict, Partition, slave),
+            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, InMemoryStore, PreparedTxs, DepDict, Partition, LOC, FFC, slave),
             {noreply, State#state{dep_dict=DepDict1}};
         [] ->
             lager:error("Prepared record of ~w, ~w has disappeared!", [TxId, Partition]),
@@ -501,7 +487,7 @@ handle_cast({repl_prepare, Type, TxId, Part, WriteSet, TimeStamp, Sender},
             {noreply, SD0}
     end;
 
-handle_cast({repl_commit, TxId, CommitTime, Partitions}, 
+handle_cast({repl_commit, TxId, LOC, CommitTime, Partitions}, 
 	    SD0=#state{inmemory_store=InMemoryStore, prepared_txs=PreparedTxs, specula_read=SpeculaRead, committed_txs=CommittedTxs,
         dep_dict=DepDict}) ->
   %lager:warning("Repl commit for ~w, ~w", [TxId, Partitions]),
@@ -513,7 +499,7 @@ handle_cast({repl_commit, TxId, CommitTime, Partitions},
                     %end
         end, DepDict, Partitions),
     case SpeculaRead of
-        true -> specula_utilities:deal_commit_deps(TxId, CommitTime); 
+        true -> specula_utilities:deal_commit_deps(TxId, LOC, CommitTime); 
         _ -> ok
     end,
     {noreply, SD0#state{dep_dict=DepDict1}};
@@ -600,120 +586,3 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 terminate(_Reason, _SD) ->
     ok.
 
-read_value(Key, TxId, InMemoryStore) ->
-    case ets:lookup(InMemoryStore, Key) of
-        [] ->
-            {ok, []};
-        [{Key, ValueList}] ->
-            MyClock = TxId#tx_id.snapshot_time,
-            find_version(ValueList, MyClock)
-    end.
-
-find_nonspec_version([],  _SnapshotTime) ->
-    [];
-find_nonspec_version([{TS, Value}|Rest], SnapshotTime) ->
-    case SnapshotTime >= TS of
-        true ->
-            Value;
-        false ->
-            find_version(Rest, SnapshotTime)
-    end;
-find_nonspec_version([{_, _, _}|Rest], SnapshotTime) ->
-    find_version(Rest, SnapshotTime).
-
-
-find_version([],  _SnapshotTime) ->
-    {ok, []};
-find_version([{TS, Value}|Rest], SnapshotTime) ->
-    case SnapshotTime >= TS of
-        true ->
-            {ok, Value};
-        false ->
-            find_version(Rest, SnapshotTime)
-    end;
-find_version([{TS, Value, TxId}|Rest], SnapshotTime) ->
-    case SnapshotTime >= TS of
-        true ->
-            {specula, TxId, Value};
-        false ->
-            find_version(Rest, SnapshotTime)
-    end.
-
-
-%append_by_parts(_, _, _, _, []) ->
-%    ok;
-%append_by_parts(PreparedTxs, InMemoryStore, TxId, CommitTime, [Part|Rest]) ->
-%    case ets:lookup(PreparedTxs, {TxId, Part}) of
-%        [{{TxId, Part}, {WriteSet, _}}] ->
-%             %lager:warning("For ~w ~w found writeset", [TxId, Part, WriteSet]),
-%            AppendFun = fun({Key, Value}) ->
-%                             %lager:warning("Adding ~p, ~p wth ~w of ~w into log", [Key, Value, CommitTime, TxId]),
-%                            case ets:lookup(InMemoryStore, Key) of
-%                                [] ->
-%                                    true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}]});
-%                                [{Key, ValueList}] ->
-%                                    {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-%                                    true = ets:insert(InMemoryStore, {Key, [{CommitTime, Value}|RemainList]})
-%                            end end,
-%            lists:foreach(AppendFun, WriteSet),
-%            ets:delete(PreparedTxs, {TxId, Part});
-%        [] ->
-%	     % %lager:warning("Commit ~w ~w arrived early! Committing with ~w", [TxId, Part, CommitTime]),
-%	        ets:insert(PreparedTxs, {{TxId, Part}, CommitTime})
-%    end,
-%    append_by_parts(PreparedTxs, InMemoryStore, TxId, CommitTime, Rest). 
-
-%abort_by_parts(_, _, [], Set) ->
-%    Set;
-%abort_by_parts(PreparedTxs, TxId, [Part|Rest], Set) ->
-%    case ets:lookup(PreparedTxs, {TxId, Part}) %of
-%	    [] ->
- %           Set1 = sets:add_element({TxId, Part}, Set),
- %           abort_by_parts(PreparedTxs, TxId, Rest, Set1); 
-%	    _ ->
- %   	    ets:delete(PreparedTxs, {TxId, Part}),
- %           abort_by_parts(PreparedTxs, TxId, Rest, Set) 
- %   end.
-
-
-%delete_version([{_, _, TxId}|Rest], TxId) -> 
-%    Rest;
-%delete_version([{C, V}|Rest], TxId) -> 
-%    [{C, V}|delete_version(Rest, TxId)];
-%delete_version([{TS, V, TId}|Rest], TxId) -> 
-%    [{TS, V, TId}|delete_version(Rest, TxId)].
-
-%replace_version([{_, Value, TxId}|Rest], TxId, CommitTime) -> 
-%    [{CommitTime, Value}|Rest];
-%replace_version([{C, V}|Rest], TxId, CommitTime) -> 
-%    [{C, V}|replace_version(Rest, TxId, CommitTime)];
-%replace_version([{TS, V, PrepTxId}|Rest], TxId, CommitTime) -> 
-%    [{TS, V, PrepTxId}|replace_version(Rest, TxId, CommitTime)].
-
-%%% A list that has timestamp in descending order
-%insert_version([], MyTxId, MyPrepTime, MyValue) -> 
-%    [{MyTxId, MyPrepTime, MyValue, []}];
-%insert_version([{_TxId, Timestamp, _Value, _Reader}|_Rest]=VList, MyTxId, MyPrepTime, MyValue) when MyPrepTime >= Timestamp -> 
-%    [{MyTxId, MyPrepTime, MyValue, []}| VList];
-%insert_version([{TxId, Timemstamp, Value, Reader}|Rest], MyTxId, MyPrepTime, MyValue) -> 
-%    [{TxId, Timemstamp, Value, Reader}|insert_version(Rest, MyTxId, MyPrepTime, MyValue)].
-
-
-%add_to_commit_tab(WriteSet, TxCommitTime, Tab) ->
-%    lists:foreach(fun({Key, Value}) ->
-%            case ets:lookup(Tab, Key) of
-%                [] ->
-%                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}]});
-%                [{Key, ValueList}] ->
-%                    {RemainList, _} = lists:split(min(?NUM_VERSIONS,length(ValueList)), ValueList),
-%                    true = ets:insert(Tab, {Key, [{TxCommitTime, Value}|RemainList]})
-%            end
-%    end, WriteSet).
-
-%find_parts_for_name(Partitions) ->
-%    Repls = antidote_config:get(to_repl),
-%    [ReplNodes] = [L || {N, L} <- Repls, N == node()],
-%    lists:foldl(fun(Node, List) ->
-%                PartList = [P || {P, N} <- Partitions, N == Node],
-%                PartList++List
-%                end, [], ReplNodes).

@@ -59,7 +59,7 @@
 -export([repl_prepare/4,
 	    check_table/0,
          repl_abort/3,
-         repl_commit/4,
+         repl_commit/5,
          %repl_abort/4,
          %repl_commit/5,
          quorum_replicate/7,
@@ -288,9 +288,9 @@ get_name(ReplName, N) ->
     end.
     
 %% No replication
-repl_commit([], _, _, _) ->
+repl_commit([], _, _, _, _) ->
     ok;
-repl_commit(UpdatedParts, TxId, CommitTime, RepDict) ->
+repl_commit(UpdatedParts, TxId, LOC, CommitTime, RepDict) ->
     NodeParts = build_node_parts(UpdatedParts),
     lists:foreach(fun({Node, Partitions}) ->
         Replicas = dict:fetch(Node, RepDict),
@@ -298,11 +298,11 @@ repl_commit(UpdatedParts, TxId, CommitTime, RepDict) ->
         lists:foreach(fun(R) ->
             case R of
                 cache ->
-                   ?CACHE_SERV:commit(TxId, Partitions, CommitTime);
+                   ?CACHE_SERV:commit(TxId, Partitions, LOC, CommitTime);
                 {rep, S} ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions});
+                    gen_server:cast({global, S}, {repl_commit, TxId, LOC, CommitTime, Partitions});
                 S ->
-                    gen_server:cast({global, S}, {repl_commit, TxId, CommitTime, Partitions})
+                    gen_server:cast({global, S}, {repl_commit, TxId, LOC, CommitTime, Partitions})
             end end,  Replicas) end,
             NodeParts).
 

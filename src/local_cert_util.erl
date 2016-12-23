@@ -23,7 +23,7 @@
 -include("include/antidote.hrl").
 
 -export([prepare_for_master_part/5, ready_or_block/4, prepare_for_other_part/7, update_store/9, clean_abort_prepared/7, 
-            pre_commit/8, specula_read/4, insert_prepare/6]).
+            pre_commit/10, specula_read/4, insert_prepare/6, read_value/4, remote_read_value/4]).
 
 -define(SPECULA_THRESHOLD, 0).
 
@@ -190,20 +190,21 @@ update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedT
     %dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PartitionType) ->
     case ets:lookup(PreparedTxs, Key) of
-        [{Key, [{_Type, TxId, _PrepareTime, LRTime, _FirstPrepTime, _PrepNum, Value, PendingReaders}|Others]}] ->
+        [{Key, [{Type, TxId, _PrepareTime, LRTime, _FirstPrepTime, _PrepNum, MValue, PendingReaders}|Others]}] ->
            %lager:warning("~p Pending readers are ~p! Others are ~p", [TxId, PendingReaders, Others]),
-            %lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p", [Key, TxId, _Type, _PrepNum, TxCommitTime]),
             AllPendingReaders = lists:foldl(fun({_, _, _, _ , Readers}, CReaders) ->
                                        Readers++CReaders end, PendingReaders, Others), 
+            Value = case Type of pre_commit -> {_, _, V}=MValue, V; _ -> MValue end,
+            %lager:warning("Trying to insert key ~p with for ~p, Type is ~p, prepnum is  is ~p, Commit time is ~p, MValue is ~w, pending readers are ~w", [Key, TxId, Type, _PrepNum, TxCommitTime, MValue, AllPendingReaders]),
             case PartitionType of
                 cache ->  
                     lists:foreach(fun({ReaderTxId, Node, Sender}) ->
                             SnapshotTime = ReaderTxId#tx_id.snapshot_time,
                             case SnapshotTime >= TxCommitTime of
-                                true -> reply(Sender, {ok, Value});
+                                true -> gen_server:reply(Sender, {ok, Value});
                                 false ->
                                     {_, RealKey} = Key,
-                                    clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false)
+                                    clocksi_vnode:remote_read(Node, RealKey, ReaderTxId, Sender)
                             end end, AllPendingReaders);
                 _ ->
                     Values = case ets:lookup(InMemoryStore, Key) of
@@ -217,12 +218,18 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                                     [First, Value]
                             end,
                     ets:insert(CommittedTxs, {Key, TxCommitTime}),
-                    lists:foreach(fun({ReaderTxId, ignore, Sender}) ->
-                            case ReaderTxId#tx_id.snapshot_time >= TxCommitTime of
-                                true ->
-                                    reply(Sender, {ok, lists:nth(2,Values)});
-                                false ->
-                                    reply(Sender, {ok, hd(Values)})
+                    lists:foreach(fun({ReaderTxId, Sender}) ->
+                            RValue = case ReaderTxId#tx_id.snapshot_time >= TxCommitTime of
+                                      true ->
+                                          lists:nth(2,Values);
+                                      false ->
+                                          hd(Values)
+                                    end,
+                            case Sender of
+                                {remote, Client} -> 
+                                   %lager:warning("For ~w of reader ~w, replying to its server", [TxId, Client]),
+                                    gen_server:cast(TxId#tx_id.server_pid, {rr_value, TxId, Client, TxCommitTime, RValue});
+                                _ -> gen_server:reply(Sender, {ok, RValue})
                             end end,
                         AllPendingReaders)
             end,
@@ -246,21 +253,26 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{Type, TxId, _PrepTime, LastReaderTime, FirstPPTime, PrepNum, _Value, PendingReaders}|RestRecords]}] ->
            %lager:warning("Aborting ~p for key ~p, PrepNum is ~w, Type is ~w", [TxId, Key, PrepNum, Type]),
-            case PartitionType of
-                cache -> 
-                    lists:foreach(fun({ReaderTxId, Node, {relay, Sender}}) -> 
-                            {_, RealKey} = Key,
-                            clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false) end,
-                              PendingReaders);
+            case PendingReaders of
+                [] -> ok;
                 _ ->
-                    lists:foldl(fun({_, ignore, Sender}, ToReturn) -> 
-                        case ToReturn of nil -> ToReturn1 = case ets:lookup(InMemoryStore, Key) of
-                                                                [{Key, ValueList}] -> {_, V} = hd(ValueList), V;
-                                                                [] -> []
-                                                            end,
-                                                reply(Sender, {ok, ToReturn1}), ToReturn1;
-                                        _ ->  reply(Sender, {ok, ToReturn}), ToReturn end end, 
-                    nil, PendingReaders)
+                    case PartitionType of
+                        cache -> 
+                            lists:foreach(fun({ReaderTxId, Node, Sender}) -> 
+                                    {_, RealKey} = Key,
+                                    clocksi_vnode:remote_read(Node, RealKey, ReaderTxId, Sender) end,
+                                      PendingReaders);
+                        _ ->
+                            {TS, RValue} = case ets:lookup(InMemoryStore, Key) of
+                                                  [{Key, ValueList}] -> hd(ValueList);
+                                                  [] -> {0, []}
+                                              end,
+                            lists:foreach(fun({RTx, Sender}) -> 
+                                case Sender of
+                                    {remote, Client} -> gen_server:cast(RTx#tx_id.server_pid, {rr_value, RTx, Client, TS, RValue}); 
+                                    _ -> gen_server:reply(Sender, {ok, RValue})
+                                end end, PendingReaders)
+                    end
             end,
             case RestRecords of
                 [] ->
@@ -513,36 +525,34 @@ unblock_prepare(TxId, DepDict, Partition, RemoveDepType) ->
             DepDict
     end.
 
-reply({relay, Sender}, Result) ->
-    gen_server:reply(Sender, Result);
-reply(Sender, Result) ->
-    riak_core_vnode:reply(Sender, Result).
+%reply(Sender, Result) ->
+%    riak_core_vnode:reply(Sender, Result).
 
-pre_commit([], _TxId, _SCTime, _InMemoryStore, _PreparedTxs, DepDict, _Partition, _PartitionType) ->
+pre_commit([], _TxId, _SCTime, _InMemoryStore, _PreparedTxs, DepDict, _Partition, _, _, _PartitionType) ->
     %dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+SCTime-PrepareTime, Cnt+1} end, DepDict);
     DepDict;
-pre_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Partition, PartitionType) ->
+pre_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Partition, LOC, FFC, PartitionType) ->
     MyNode = {Partition, node()},
     %lager:warning("Trying to insert key ~p with for ~p, specula commit time is ~p", [Key, TxId, SCTime]),
     case ets:lookup(PreparedTxs, Key) of
         %% If this one is prepared, no one else can be specula-committed already, so sc-time should be the same as prep time 
         [{Key, [{prepared, TxId, PrepareTime, LastReaderTime, LastPrepTime, PrepNum, Value, PendingReaders}|Deps]=_Record}] ->
            %lager:warning("In prep, PrepNum is ~w, record is ~w", [PrepNum, _Record]),
-            {StillPend, ToPrev} = reply_pre_commit(PartitionType, PendingReaders, Key, SCTime, Value, TxId),
+            {StillPend, ToPrev} = reply_pre_commit(PartitionType, PendingReaders, SCTime, {LOC, FFC, Value}, TxId),
             case ToPrev of
                 [] ->
                     ets:insert(PreparedTxs, [{Key, [{pre_commit, TxId, PrepareTime, LastReaderTime, 
-                            LastPrepTime, PrepNum-1, Value, StillPend}|Deps] }]),
+                            LastPrepTime, PrepNum-1, {LOC, FFC, Value}, StillPend}|Deps] }]),
                     pre_commit(Rest, TxId, SCTime, InMemoryStore, 
-                          PreparedTxs, DepDict, Partition, PartitionType);
+                          PreparedTxs, DepDict, Partition, LOC, FFC, PartitionType);
                 _ ->
                     %% Let these readers read the previous guy...
-                   %lager:warning("In multi read version, Deps is ~w, ToPrev is ~w", [Deps, ToPrev]),
+                   %lager:warning("In multi read version, Key is ~w, Deps is ~w, ToPrev is ~w", [Key, Deps, ToPrev]),
                     AfterReadRecord = multi_read_version(Key, Deps, ToPrev, InMemoryStore),
                     ets:insert(PreparedTxs, [{Key, [{pre_commit, TxId, PrepareTime, LastReaderTime, 
-                            LastPrepTime, PrepNum-1, Value, StillPend}|AfterReadRecord] }]),
+                            LastPrepTime, PrepNum-1, {LOC, FFC, Value}, StillPend}|AfterReadRecord] }]),
                     pre_commit(Rest, TxId, SCTime, InMemoryStore, 
-                          PreparedTxs, DepDict, Partition, PartitionType)
+                          PreparedTxs, DepDict, Partition, LOC, FFC, PartitionType)
             end;
         [{Key, [{_Type, _OtherTxId, _, LastReaderTime, FirstPrepTime, _PrepNum, _Value, _OtherPendReaders}=LastOne|RecordList]}] ->
            %lager:warning("SC commit for ~w, ~p, prepnum are ~w", [TxId, Key, _PrepNum]),
@@ -550,11 +560,11 @@ pre_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Partit
                 [] -> 
                    %lager:warning("Did not find record! Record list is ~w", [RecordList]),
                     pre_commit(Rest, TxId, SCTime, InMemoryStore, 
-                          PreparedTxs, DepDict, Partition, PartitionType);
+                          PreparedTxs, DepDict, Partition, LOC, FFC, PartitionType);
                 {Prev, {TxId, TxPrepTime, TxSCValue, PendingReaders}, RestRecords} ->
                     {First, RemainRecords, AbortedReaders, DepDict1} = deal_pending_records(Prev, LastOne, SCTime, DepDict, MyNode, [], PartitionType, 1, convert_to_pd),
                    %lager:warning("Found record! Prev is ~w, First is ~w, RemainRecords is ~w", [Prev, First, RemainRecords]),
-                    {StillPend, ToPrev} = reply_pre_commit(PartitionType, PendingReaders++AbortedReaders, Key, SCTime, TxSCValue, TxId),
+                    {StillPend, ToPrev} = reply_pre_commit(PartitionType, PendingReaders++AbortedReaders, SCTime, {LOC, FFC, TxSCValue}, TxId),
                     AfterReadRecord = multi_read_version(Key, RestRecords, ToPrev, InMemoryStore),
                     true = TxPrepTime =< SCTime,
                     case First of
@@ -563,63 +573,79 @@ pre_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Partit
                                 [] ->
                                     case AfterReadRecord of
                                         [] ->
-                                            ets:insert(PreparedTxs, {Key, [{pre_commit, TxId, SCTime, LastReaderTime, SCTime, RemainPrepNum, TxSCValue, StillPend}]});
+                                            ets:insert(PreparedTxs, {Key, [{pre_commit, TxId, SCTime, LastReaderTime, SCTime, RemainPrepNum, {LOC, FFC, TxSCValue}, StillPend}]});
                                         _ ->
-                                            ets:insert(PreparedTxs, {Key, [{pre_commit, TxId, SCTime, LastReaderTime, FirstPrepTime, RemainPrepNum, TxSCValue, StillPend}|AfterReadRecord]})
+                                            ets:insert(PreparedTxs, {Key, [{pre_commit, TxId, SCTime, LastReaderTime, FirstPrepTime, RemainPrepNum, {LOC, FFC, TxSCValue}, StillPend}|AfterReadRecord]})
                                     end;
                                 [{TType, TTxId, TSCTime, TValue, TPendReaders}|RT] ->
                                     case AfterReadRecord of
                                         [] ->
-                                            ets:insert(PreparedTxs, {Key, [{TType, TTxId, TSCTime, LastReaderTime, SCTime, RemainPrepNum, TValue, TPendReaders}|RT]++[{pre_commit, TxId, SCTime, TxSCValue, StillPend}]});
+                                            ets:insert(PreparedTxs, {Key, [{TType, TTxId, TSCTime, LastReaderTime, SCTime, RemainPrepNum, TValue, TPendReaders}|RT]++[{pre_commit, TxId, SCTime, {LOC, FFC, TxSCValue}, StillPend}]});
                                         _ ->
-                                            ets:insert(PreparedTxs, {Key, [{TType, TTxId, TSCTime, LastReaderTime, FirstPrepTime, RemainPrepNum, TValue, TPendReaders}|RT]++[{pre_commit, TxId, SCTime, TxSCValue, StillPend}|AfterReadRecord]})
+                                            ets:insert(PreparedTxs, {Key, [{TType, TTxId, TSCTime, LastReaderTime, FirstPrepTime, RemainPrepNum, TValue, TPendReaders}|RT]++[{pre_commit, TxId, SCTime, {LOC, FFC, TxSCValue}, StillPend}|AfterReadRecord]})
                                     end
                             end;
-                        {F1, F2, F3, F4, _, F6, F7, F8} ->
+                        {F1, F2, F3, F4, F5, F6, F7, F8} ->
                             case AfterReadRecord of
                                 [] ->
-                                    ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, SCTime, F6, F7, F8}|RemainRecords]++[{pre_commit, TxId, SCTime, TxSCValue, StillPend}]});
+                                    case RemainRecords of [] ->
+                                        F3=F5; _ -> true=F3>=F5 end,
+                                    ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, SCTime, F6, F7, F8}|RemainRecords]++[{pre_commit, TxId, SCTime, {LOC, FFC, TxSCValue}, StillPend}]});
                                 _ ->
-                                    ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, FirstPrepTime, F6, F7, F8}|RemainRecords]++[{pre_commit, TxId, SCTime, TxSCValue, StillPend}|AfterReadRecord]})
+                                    case RemainRecords of [] -> F3=F5; _ -> true=F3>=F5 end,
+                                    ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, FirstPrepTime, F6, F7, F8}|RemainRecords]++[{pre_commit, TxId, SCTime, {LOC, FFC, TxSCValue}, StillPend}|AfterReadRecord]})
                             end
                     end,
                     pre_commit(Rest, TxId, SCTime, InMemoryStore, PreparedTxs,
-                        DepDict1, Partition, PartitionType)
+                        DepDict1, Partition, LOC, FFC, PartitionType)
                     %%% Just to expose more erros if possible
             end;
         R ->
             %% TODO: Need to fix this
             lager:error("The txn is actually aborted already ~w, ~w", [Key, R]),
             pre_commit(Rest, TxId, SCTime, InMemoryStore, PreparedTxs,
-                DepDict, Partition, PartitionType)
+                DepDict, Partition, LOC, FFC, PartitionType)
             %R = 2
     end.
 
-reply_pre_commit(PartitionType, PendingReaders, Key, SCTime, Value, WriterTxId) ->
-    %lager:warning("Replying specula commit: pendiing readers are ~w", [PendingReaders]),
+reply_pre_commit(PartitionType, PendingReaders, SCTime, MValue, PreparedTxId) ->
+   %lager:warning("Replying specula commit: pendiing readers are ~w", [PendingReaders]),
     case PartitionType of
         cache ->
-              lists:foreach(fun({ReaderTxId, Node, {relay, Sender}}) ->
+              ToPrev = lists:foldl(fun({ReaderTxId, _, Sender}=Reader, TP) ->
                         SnapshotTime = ReaderTxId#tx_id.snapshot_time,
                         case SnapshotTime >= SCTime of
                             true ->
-                                add_read_dep(ReaderTxId, WriterTxId, Key),
-                                reply({relay, Sender}, {ok, Value});
+                                {PLOC, PFFC, Value} = MValue,
+                               %lager:warning("Trying to reply"),
+                                case is_safe_read(PLOC, PFFC, PreparedTxId, ReaderTxId) of
+                                    true -> gen_server:reply(Sender, {ok, Value}), TP;
+                                    false -> 
+                                        gen_server:cast(ReaderTxId#tx_id.server_pid, 
+                                            {read_blocked, ReaderTxId, PLOC, PFFC, Value, Sender}),
+                                        TP
+                                        %% Maybe place in waiting queue instead of reading it?
+                                end;
                             false ->
-                                {_, RealKey} = Key,
-                                clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false)
+                               %lager:warning("Block it"),
+                                [Reader|TP]
                         end end,
-                    PendingReaders),
-                {[], []};
+                    [], PendingReaders),
+                {[], ToPrev};
         _ ->
-            lists:foldl(fun({ReaderTxId, ignore, Sender}=ReaderInfo, {Pend, ToPrev}) ->
+            lists:foldl(fun({ReaderTxId, Sender}=ReaderInfo, {Pend, ToPrev}) ->
                 case ReaderTxId#tx_id.snapshot_time >= SCTime of
                     true ->
                         case sc_by_local(ReaderTxId) of
                             true ->
-                                add_read_dep(ReaderTxId, WriterTxId, Key),
-                                %lager:warning("Replying to ~w", [Sender]),
-                                reply(Sender, {ok, Value}),
+                                {PLOC, PFFC, Value} = MValue,
+                                case is_safe_read(PLOC, PFFC, PreparedTxId, ReaderTxId) of
+                                    true -> gen_server:reply(Sender, {ok, Value});
+                                    false -> 
+                                        gen_server:cast(ReaderTxId#tx_id.server_pid, 
+                                            {read_blocked, ReaderTxId, PLOC, PFFC, Value, Sender})
+                                        %% Maybe place in waiting queue instead of reading it?
+                                end,
                                 {Pend, ToPrev};
                             false ->
                                 %lager:warning("Adding ~w to pend", [Sender]),
@@ -632,25 +658,27 @@ reply_pre_commit(PartitionType, PendingReaders, Key, SCTime, Value, WriterTxId) 
             end, {[], []}, PendingReaders)
     end.
 
-reply_to_all(PartitionType, PendingReaders, Key, CommitTime, Value) ->
+reply_to_all(PartitionType, PendingReaders, CommitTime, Value) ->
     case PartitionType of
         cache ->
-              lists:foreach(fun({ReaderTxId, Node, {relay, Sender}}) ->
+              lists:foldl(fun({ReaderTxId, _Node, Sender}=ReaderInfo, TP) ->
                         SnapshotTime = ReaderTxId#tx_id.snapshot_time,
                         case SnapshotTime >= CommitTime of
                             true ->
-                                reply({relay, Sender}, {ok, Value});
-                            false ->
-                                {_, RealKey} = Key,
-                                clocksi_vnode:relay_read(Node, RealKey, ReaderTxId, Sender, false)
+                                gen_server:reply(Sender, {ok, Value}),
+                                TP;
+                            false -> [ReaderInfo|TP]
                         end end,
-                    PendingReaders),
-                [];
+                    [], PendingReaders);
         _ ->
-            lists:foldl(fun({ReaderTxId, ignore, Sender}=ReaderInfo, ToPrev) ->
-                case ReaderTxId#tx_id.snapshot_time >= CommitTime of
+            lists:foldl(fun({RTxId, Sender}=ReaderInfo, ToPrev) ->
+                case RTxId#tx_id.snapshot_time >= CommitTime of
                     true ->
-                        reply(Sender, {ok, Value}),
+                        case Sender of
+                            {remote, Client} -> 
+                                gen_server:cast(RTxId#tx_id.server_pid, {rr_value, RTxId, Client, CommitTime, Value});
+                            _ -> gen_server:reply(Sender, {ok, Value})
+                        end,
                         ToPrev;
                     false ->
                         [ReaderInfo|ToPrev]
@@ -675,20 +703,26 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
         [] ->
             ets:insert(PreparedTxs, {Key, SnapshotTime}),
             ready;
-        [{Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, FirstPrepTime, PendPrepNum, Value, PendingReader}| PendingPrepare]}] ->
+        [{Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, FirstPrepTime, PendPrepNum, MValue, PendingReader}| PendingPrepare]}] ->
            %lager:warning("~p: has ~p with ~p, Type is ~p, lastpp time is ~p, pend prep num is ~p, pending prepares are ~p",[Key, PreparedTxId, PrepareTime, Type, FirstPrepTime, PendPrepNum, PendingPrepare]),
             case SnapshotTime >= PrepareTime of
                 true ->
                     %% Read current version
                     case (Type == pre_commit) and sc_by_local(TxId) of
                         true ->
-                            add_read_dep(TxId, PreparedTxId, Key),
-                            %lager:warning("~p finally reading specula version ~p, pend prep num is ~w", [TxId, Value, PendPrepNum]),
-                            {specula, Value};
+                            {PLOC, PFFC, Value} = MValue,
+                            case is_safe_read(PLOC, PFFC, PreparedTxId, TxId) of
+                                true -> {specula, Value}; 
+                                false -> 
+                                        Sender = case SenderInfo of {_, _, S} -> S; {_, S} -> S end,   
+                                        gen_server:cast(TxId#tx_id.server_pid, 
+                                            {read_blocked, TxId, PLOC, PFFC, Value, Sender}),
+                                        wait
+                            end;
                         false ->
                             %lager:warning("~p can not read this version, not by local or not specula commit, Type is ~p, PrepTx is ~p, PendPrepNum is ~w", [TxId, Type, PreparedTxId, PendPrepNum]),
                             ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, max(SnapshotTime, LastReaderTime), FirstPrepTime, PendPrepNum,
-                                Value, [SenderInfo|PendingReader]}| PendingPrepare]}),
+                                MValue, [SenderInfo|PendingReader]}| PendingPrepare]}),
                             not_ready
                     end;
                 false ->
@@ -698,21 +732,23 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
                         false ->
                             %% Read previous version
                            %lager:warning("Trying to read appr version, pending preapre is ~w", [PendingPrepare]),
-                            {IfReady, Record} = read_appr_version(TxId, Key, PendingPrepare, [], SenderInfo),
+                            {IfReady, Record} = read_appr_version(TxId, PendingPrepare, [], SenderInfo),
                             case IfReady of
                                 not_ready ->
-                                    ets:insert(PreparedTxs, [{Key, [{Type, PreparedTxId, PrepareTime, max(SnapshotTime, LastReaderTime), FirstPrepTime, PendPrepNum, Value, PendingReader}|Record]}]),
+                                    ets:insert(PreparedTxs, [{Key, [{Type, PreparedTxId, PrepareTime, max(SnapshotTime, LastReaderTime), FirstPrepTime, PendPrepNum, MValue, PendingReader}|Record]}]),
                                     not_ready;
+                                wait ->
+                                    wait;
                                 specula ->
                                     case SnapshotTime > LastReaderTime of
-                                        true -> ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, SnapshotTime, FirstPrepTime, PendPrepNum, Value, PendingReader}| PendingPrepare]});
+                                        true -> ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, SnapshotTime, FirstPrepTime, PendPrepNum, MValue, PendingReader}| PendingPrepare]});
                                         false -> ok
                                     end,
                                     SCValue = Record,
                                     {specula, SCValue};
                                 ready ->
                                     case SnapshotTime > LastReaderTime of
-                                        true -> ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, SnapshotTime, FirstPrepTime, PendPrepNum, Value, PendingReader}| PendingPrepare]});
+                                        true -> ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, SnapshotTime, FirstPrepTime, PendPrepNum, MValue, PendingReader}| PendingPrepare]});
                                         false -> ok
                                     end,
                                     ready
@@ -724,16 +760,16 @@ specula_read(TxId, Key, PreparedTxs, SenderInfo) ->
             ready
     end.
 
-add_read_dep(ReaderTx, WriterTx, _Key) ->
-    %lager:warning("Inserting anti_dep from ~p to ~p", [ReaderTx, WriterTx]),
-    ets:insert(dependency, {WriterTx, ReaderTx}),
-    ets:insert(anti_dep, {ReaderTx, WriterTx}).
+%add_read_dep(ReaderTx, WriterTx, _Key) ->
+%    %lager:warning("Inserting anti_dep from ~p to ~p", [ReaderTx, WriterTx]),
+%    ets:insert(dependency, {WriterTx, ReaderTx}),
+%    ets:insert(anti_dep, {ReaderTx, WriterTx}).
 
 %% What wans to delete/commit is not found, This is problematic! If commits arrive out-of-order, need to use a queue to store it
 delete_and_read(_DeleteType, _, _, _, _Key, DepDict, _, _, [], _TxId, _, _, _) ->
    %lager:warning("Want to ~w ~w for key ~w, but arrived already", [_DeleteType, _TxId, _Key]),
     DepDict;
-delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, Partition, [{Type, TxId, _Time, Value, PendingReaders}|Rest], TxId, Prev, FirstOne, 0) ->
+delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, Partition, [{Type, TxId, _Time, MValue, PendingReaders}|Rest], TxId, Prev, FirstOne, 0) ->
     %% If can read previous version: read
     %% If can not read previous version: add to previous pending
    %lager:warning("Delete and read ~w for ~w, prev is ~w", [DeleteType, TxId, Prev]),
@@ -756,9 +792,10 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
                     end,
     {First, RemainPrev, AbortReaders, DepDict1} 
         = deal_pending_records(Prev, FirstOne, TxCommitTime, DepDict, {Partition, node()}, [], PartitionType, ToRemovePrep, RemoveDepType),
+    Value = case Type of pre_commit -> {_, _, V} = MValue, V; _ -> MValue end, 
     ToPrev = case DeleteType of 
                 abort -> AbortReaders++PendingReaders; 
-                commit -> reply_to_all(PartitionType, AbortReaders++PendingReaders, Key, TxCommitTime, Value)
+                commit -> reply_to_all(PartitionType, AbortReaders++PendingReaders, TxCommitTime, Value)
              end,
     AfterReadRecord = multi_read_version(Key, Rest, ToPrev, InMemoryStore),
     case AfterReadRecord of
@@ -769,8 +806,8 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
                     RemainPrev = [],
                     %case RemainPrev of
                     %    [] ->
-                            RemainPrepNum = 0,
-                            ets:insert(PreparedTxs, {Key, LastReaderTime}),
+                    RemainPrepNum = 0,
+                    ets:insert(PreparedTxs, {Key, LastReaderTime}),
                     %    [{TType, TTxId, TSCTime, TValue, TPendReaders}|RT] ->
                     %        ets:insert(PreparedTxs, {Key, [{TType, TTxId, TSCTime, LastReaderTime, NewFirstPrep, RemainPrepNum, TValue, TPendReaders}|RT]})
                     %end,
@@ -781,7 +818,7 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
                     DepDict1
             end;
         [{TType, TTxId, TSCTime, TValue, TPendReaders}|TT] ->
-            %lager:warning("After read is ~w ~w", [TxId, AfterReadRecord]),
+            %lager:warning("First is ~w, After read is ~w ~w", [First, TxId, AfterReadRecord]),
             case First of
                 {LastReaderTime, FirstPrepTime, RemainPrepNum} ->
                     case RemainPrev of
@@ -794,11 +831,12 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
                 {F1, F2, F3, F4, F5, F6, F7, F8} ->
                     case RemainPrev of
                         [] ->
-                            ets:insert(PreparedTxs, {Key, [First|RemainPrev]++AfterReadRecord});
-                        _ ->
-                            F5 = F3,
                             {_, _, _, _, _, FirstPrepTime, _, _} = FirstOne,
-                            ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, FirstPrepTime, F6, F7, F8}|RemainPrev]++AfterReadRecord})
+                            F5 = F3,
+                            ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, FirstPrepTime, F6, F7, F8}|AfterReadRecord]});
+                        _ ->
+                            true = F3 > F5,
+                            ets:insert(PreparedTxs, {Key, [First|RemainPrev]++AfterReadRecord})
                     end,
                     DepDict1
             end
@@ -809,9 +847,9 @@ delete_and_read(abort, _PreparedTxs, _InMemoryStore, _TxCommitTime, _Key, DepDic
     %lager:warning("Abort but got nothing"),
     DepDict.
 
-read_appr_version(_ReaderTxId, _Key, [], _Prev, _SenderInfo) ->
+read_appr_version(_ReaderTxId, [], _Prev, _SenderInfo) ->
     {ready, []}; 
-read_appr_version(ReaderTxId, Key, [{Type, SCTxId, SCTime, SCValue, SCPendingReaders}|Rest], Prev, SenderInfo) when ReaderTxId#tx_id.snapshot_time >= SCTime ->
+read_appr_version(ReaderTxId, [{Type, SCTxId, SCTime, SCValue, SCPendingReaders}|Rest], Prev, SenderInfo) when ReaderTxId#tx_id.snapshot_time >= SCTime ->
     case Type of
         prepared ->
             {not_ready, lists:reverse(Prev)++[{Type, SCTxId, SCTime, SCValue, [SenderInfo|SCPendingReaders]}|Rest]};
@@ -821,18 +859,31 @@ read_appr_version(ReaderTxId, Key, [{Type, SCTxId, SCTime, SCValue, SCPendingRea
             case sc_by_local(ReaderTxId) of
                 true ->
                    %lager:warning("~p reads specula value ~p!", [SCTxId, SCValue]),
-                    add_read_dep(ReaderTxId, SCTxId, Key),
-                    {specula, SCValue};
+                    {PLOC, PFFC, Value} = SCValue,
+                    case is_safe_read(PLOC, PFFC, SCTxId, ReaderTxId) of
+                        true -> {specula, Value}; 
+                        false -> 
+                                Sender = case SenderInfo of {_, _, S} -> S; {_, S} -> S end,   
+                                gen_server:cast(ReaderTxId#tx_id.server_pid, 
+                                    {read_blocked, ReaderTxId, PLOC, PFFC, Value, Sender}),
+                                {wait, []} 
+                    end;
                 false ->
                    %lager:warning("~p can read specula value, because not by local!", [SCTxId]),
                     {not_ready, lists:reverse(Prev)++[{Type, SCTxId, SCTime, SCValue, [SenderInfo|SCPendingReaders]}|Rest]}
             end
     end;
-read_appr_version(ReaderTxId, Key, [H|Rest], Prev, SenderInfo) -> 
-    read_appr_version(ReaderTxId, Key, Rest, [H|Prev], SenderInfo).
+read_appr_version(ReaderTxId, [H|Rest], Prev, SenderInfo) -> 
+    read_appr_version(ReaderTxId, Rest, [H|Prev], SenderInfo).
 
 multi_read_version(_Key, List, [], _) -> 
     List;
+multi_read_version({_, RealKey}, [], SenderInfos, ignore) -> %% In cache 
+    lists:foreach(fun({ReaderTxId, Node, Sender}) ->
+           %lager:warning("Send read of ~w from ~w to ~w", [RealKey, ReaderTxId, Sender]),
+            clocksi_vnode:remote_read(Node, RealKey, ReaderTxId, Sender)
+                  end, SenderInfos),
+    [];
 multi_read_version(Key, [], SenderInfos, InMemoryStore) -> 
     %% Let all senders read
     Value = case ets:lookup(InMemoryStore, Key) of
@@ -842,22 +893,29 @@ multi_read_version(Key, [], SenderInfos, InMemoryStore) ->
                     [{_CommitTime, First}|_T] = ValueList,
                     First
             end,
-    lists:foreach(fun({_ReaderTxId, ignore, Sender}) ->
-                        reply(Sender, {ok, Value})
+    lists:foreach(fun({_ReaderTxId, Sender}) ->
+                        gen_server:reply(Sender, {ok, Value})
                   end, SenderInfos),
     [];
-multi_read_version(Key, [{pre_commit, SCTxId, SCTime, SCValue, SCPendingReaders}|Rest], SenderInfos, CommittedTxs) -> 
-    RemainReaders = lists:foldl(fun({ReaderTxId, ignore, Sender}, Pend) ->
-            case ReaderTxId#tx_id.snapshot_time >= SCTime of
+multi_read_version(Key, [{pre_commit, SCTxId, SCTime, SCValue, SCPendingReaders}|Rest], SenderInfos, InMemoryStore) -> 
+    RemainReaders = lists:foldl(fun(Reader, Pend) ->
+            {TxId, Sender} = case Reader of {RTxId, _, S} -> {RTxId, S}; {RTxId, S} -> {RTxId, S} end,
+            case TxId#tx_id.snapshot_time >= SCTime of
                 true ->
-                    add_read_dep(ReaderTxId, SCTxId, Key),
-                    reply(Sender, {ok, SCValue}),
+                    {PLOC, PFFC, Value} = SCValue,
+                    case is_safe_read(PLOC, PFFC, SCTxId, TxId) of
+                        true -> gen_server:reply(Sender, {ok, Value});
+                        false ->
+                                gen_server:cast(TxId#tx_id.server_pid, 
+                                    {read_blocked, TxId, PLOC, PFFC, Value, Sender})
+                            %% Maybe place in waiting queue instead of reading it?
+                    end,
                     Pend;
                 false ->
-                    [{ReaderTxId, ignore, Sender}|Pend] 
+                    [Reader|Pend] 
             end end, [], SenderInfos),
-    [{pre_commit, SCTxId, SCTime, SCValue, SCPendingReaders}|multi_read_version(Key, Rest, RemainReaders, CommittedTxs)];
-multi_read_version(_Key, [{Type, SCTxId, SCTime, SCValue, SCPendingReaders}|Rest], SenderInfos, _CommittedTxs) -> 
+    [{pre_commit, SCTxId, SCTime, SCValue, SCPendingReaders}|multi_read_version(Key, Rest, RemainReaders, InMemoryStore)];
+multi_read_version(_Key, [{Type, SCTxId, SCTime, SCValue, SCPendingReaders}|Rest], SenderInfos, _InMemoryStore) -> 
     [{Type, SCTxId, SCTime, SCValue, SenderInfos++SCPendingReaders}|Rest].
 
 sc_by_local(TxId) ->
@@ -924,18 +982,19 @@ ready_or_block(TxId, Key, PreparedTxs, SenderInfo) ->
             ets:insert(PreparedTxs, {Key, SnapshotTime}),
             ready;
         [{Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, FirstPrepTime, CanSC, Value, PendingReader}|PendingPrepare]}] ->
-            %lager:warning("~p Not ready.. ~p waits for ~p with ~p, others are ~p", [Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
             case SnapshotTime < FirstPrepTime of
                 true ->
+                   %lager:warning("Actually ready!"),
                     ready;
                 false ->
+                   %lager:warning("~p Not ready.. ~p waits for ~p with ~p, FirstPrepTime is ~w, others are ~p, pending prepare ~w", [Key, TxId, PreparedTxId, PrepareTime, FirstPrepTime, PendingReader, PendingPrepare]),
                     case SnapshotTime >= PrepareTime of
                         true ->
                             ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, FirstPrepTime, CanSC, Value, [SenderInfo|PendingReader]}| PendingPrepare]}),
                             not_ready;
-
                         false ->
                             Record = insert_pend_reader(PendingPrepare, SnapshotTime, SenderInfo),
+                           %lager:warning("After insert, record is ~w", [Record]),
                             ets:insert(PreparedTxs, {Key, [{Type, PreparedTxId, PrepareTime, LastReaderTime, FirstPrepTime, CanSC, Value, PendingReader}|Record]}),
                     %lager:error("~p non_specula reads ~p is blocked by ~p! PrepareTime is ~p", [TxId, Key, PreparedTxId, PrepareTime]),
                             not_ready
@@ -950,3 +1009,89 @@ insert_pend_reader([{Type, PrepTxId, PrepareTime, PrepValue, RWaiter}|Rest], Sna
     [{Type, PrepTxId, PrepareTime, PrepValue, [SenderInfo|RWaiter]}|Rest]; 
 insert_pend_reader([Record|Rest], SnapshotTime, SenderInfo) ->
     [Record|insert_pend_reader(Rest, SnapshotTime, SenderInfo)].
+
+
+is_safe_read(PLOC, PFFC, PreparedTxId, TxId) ->
+    ets:insert(dependency, {PreparedTxId, TxId}),
+    case ets:lookup(anti_dep, TxId) of
+        [] ->
+           %lager:warning("Insert ~w ~w for ~w, of ~w", [PLOC, PFFC, TxId, PreparedTxId]),
+            ets:insert(anti_dep, {TxId, {PLOC, [PLOC]}, PFFC, [PreparedTxId]}),
+            true;
+        [{TxId, {OldLOC, LOCList}, FFC, Deps}] ->
+            NLOC = min(OldLOC, PLOC),
+            NFFC = max(FFC, PFFC),
+            case NLOC >= NFFC of
+                true ->
+                   %lager:warning("NewLOC is ~w, NewFFC is ~w, safe!", [NLOC, NFFC]),
+                    NLOCList = case PLOC of inf -> LOCList; _ -> [PLOC|LOCList] end,
+                    ets:insert(anti_dep, {TxId, {NLOC, NLOCList}, NFFC, [PreparedTxId|Deps]}),
+                    true;
+                false ->
+                   %lager:warning("NewLOC is ~w, NewFFC is ~w, unsafe!", [NLOC, NFFC]),
+                    false
+            end
+    end.
+
+read_value(Key, TxId, Sender, InMemoryStore) ->
+    case ets:lookup(InMemoryStore, Key) of
+        [] ->
+            gen_server:reply(Sender, {ok, []});
+        [{Key, ValueList}] ->
+           %lager:warning("~w trying to read ~w", [TxId, Key]),
+            MyClock = TxId#tx_id.snapshot_time,
+            find_version(ValueList, MyClock, TxId, Sender)
+    end.
+
+remote_read_value(Key, TxId, Sender, InMemoryStore) ->
+   %lager:warning("~w remote reading ~w", [TxId, Key]),
+    case ets:lookup(InMemoryStore, Key) of
+        [] ->
+           %lager:warning("Directly reply to ~w", [Sender]),
+            gen_server:reply(Sender, {ok, []});
+        [{Key, ValueList}] ->
+           %lager:warning("~w trying to read ~w", [TxId, Key]),
+            MyClock = TxId#tx_id.snapshot_time,
+            find_version_for_remote(ValueList, MyClock, TxId, Sender)
+    end.
+
+find_version([],  _SnapshotTime, _, Sender) ->
+    gen_server:reply(Sender, {ok, []});
+find_version([{TS, Value}|Rest], SnapshotTime, TxId, Sender) ->
+    case SnapshotTime >= TS of
+        true ->
+            case ets:lookup(anti_dep, TxId) of
+                [] ->
+                    ets:insert(anti_dep, {TxId, {inf, []}, TS, []}),
+                    gen_server:reply(Sender, {ok, Value});
+                [{TxId, {LOC, LOCList}, FFC, Deps}] ->
+                   %lager:warning("~w has ~w, ~w, ~w, ~w", [TxId, LOC, LOCList, FFC, Deps]),
+                    case TS =< FFC of
+                        true ->
+                            gen_server:reply(Sender, {ok, Value});
+                        false ->
+                            case TS =< LOC of
+                                true ->
+                                    ets:insert(anti_dep, {TxId, {LOC, LOCList}, TS, Deps}),
+                                    gen_server:reply(Sender, {ok, Value});
+                                false ->
+                                   %lager:warning("~w blocked when trying to read, TS is ~w, LOC is ~w", [TxId, TS, LOC]),
+                                    gen_server:cast(TxId#tx_id.server_pid, {read_blocked, TxId, inf, TS, Value, Sender})
+                            end
+                    end 
+            end;
+        false ->
+            find_version(Rest, SnapshotTime, TxId, Sender)
+    end.
+
+
+find_version_for_remote([],  _SnapshotTime, _, Sender) ->
+    gen_server:reply(Sender, {ok, []});
+find_version_for_remote([{TS, Value}|Rest], SnapshotTime, TxId, Sender) ->
+    case SnapshotTime >= TS of
+        true ->
+           %lager:warning("Send ~w of ~w to its coord", [Value, TxId]),
+            gen_server:cast(TxId#tx_id.server_pid, {rr_value, TxId, Sender, TS, Value});
+        false ->
+            find_version_for_remote(Rest, SnapshotTime, TxId, Sender)
+    end.

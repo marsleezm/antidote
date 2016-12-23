@@ -31,9 +31,9 @@
 
 -export([should_specula/3, make_prepared_specula/4, speculate_and_read/4, generate_snapshot/4, 
             coord_should_specula/1, finalize_version_and_reply/5, add_specula_meta/4,
-            finalize_dependency/5, deal_commit_deps/2, deal_abort_deps/1]).
+            finalize_dependency/5, deal_commit_deps/3, deal_abort_deps/1]).
 
-deal_commit_deps(TxId, CommitTime) ->
+deal_commit_deps(TxId, LOC, CommitTime) ->
     case ets:lookup(dependency, TxId) of
         [] ->
             ok; %% No read dependency was created!
@@ -43,7 +43,7 @@ deal_commit_deps(TxId, CommitTime) ->
                             case DependTxId#tx_id.snapshot_time >= CommitTime of
                                 true ->
                                     %lager:info("Calling read valid by ts of ~w, from ~w", [DependTxId, TId]),
-                                    gen_server:cast(DependTxId#tx_id.server_pid, {read_valid, DependTxId, TId});
+                                    gen_server:cast(DependTxId#tx_id.server_pid, {read_valid, DependTxId, TId, LOC});
                                 false ->
                                     %lager:info("Calling read invalid by ts of ~w, from ~w", [DependTxId, TId]),
                                     gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, CommitTime, DependTxId})

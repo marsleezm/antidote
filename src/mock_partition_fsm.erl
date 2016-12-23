@@ -44,11 +44,11 @@
         terminate/2]).
 
 -export([
-        repl_commit/4,
+        repl_commit/5,
         repl_abort/3,
         abort/2,
-        commit/3,
-        read_valid/3,
+        commit/4,
+        read_valid/4,
         read_invalid/3,
         if_applied/2,
         specula_prepare/5,
@@ -78,13 +78,13 @@ init([]) ->
 if_applied(Param, Result) ->
     gen_server:call(test_fsm, {if_applied, Param, Result}).
 
-repl_commit(UpdatedParts, TxId, CommitTime, _) ->
+repl_commit(UpdatedParts, TxId, _, CommitTime, _) ->
     gen_server:cast(test_fsm, {repl_commit, TxId, UpdatedParts, CommitTime}).
 
 repl_abort(UpdatedParts, TxId, _) ->
     gen_server:cast(test_fsm, {repl_abort, TxId, UpdatedParts}).
 
-read_valid(_, RTxId, WTxId) ->
+read_valid(_, RTxId, WTxId, _) ->
     gen_server:cast(test_fsm, {read_valid, RTxId, WTxId}).
 
 read_invalid(_, _, TxId) ->
@@ -93,7 +93,7 @@ read_invalid(_, _, TxId) ->
 abort(UpdatedParts, TxId) ->
     gen_server:cast(test_fsm, {abort, TxId, UpdatedParts}).
 
-commit(UpdatedParts, TxId, CommitTime) ->
+commit(UpdatedParts, TxId, _, CommitTime) ->
     gen_server:cast(test_fsm, {commit, TxId, UpdatedParts, CommitTime}).
 
 specula_prepare(DataReplServ, TxId, Partition, Updates, PrepareTime) ->

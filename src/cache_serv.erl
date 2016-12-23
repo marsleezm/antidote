@@ -47,8 +47,8 @@
 %% States
 -export([
         prepare_specula/4,
-        commit/3,
-        pre_commit/3,
+        commit/4,
+        pre_commit/5,
         abort/2,
         if_prepared/2,
         num_specula_read/0,
@@ -97,14 +97,14 @@ prepare_specula(TxId, Partition, WriteSet, PrepareTime) ->
 abort(TxId, Partition) -> 
     gen_server:cast(node(), {abort, TxId, Partition}).
 
-commit(TxId, Partition, CommitTime) -> 
-    gen_server:cast(node(), {commit, TxId, Partition, CommitTime}).
+commit(TxId, Partition, LOC, CommitTime) -> 
+    gen_server:cast(node(), {commit, TxId, Partition, LOC, CommitTime}).
 
 local_certify(TxId, Partition, WriteSet) ->
     gen_server:cast(node(), {local_certify, TxId, Partition, WriteSet, self()}).
 
-pre_commit(TxId, Partition, SpeculaCommitTs) ->
-    gen_server:cast(node(), {pre_commit, TxId, Partition, SpeculaCommitTs}).
+pre_commit(TxId, Partition, SpeculaCommitTs, LOC, FFC) ->
+    gen_server:cast(node(), {pre_commit, TxId, Partition, SpeculaCommitTs, LOC, FFC}).
 
 %%%===================================================================
 %%% Internal
@@ -134,19 +134,23 @@ handle_call({read, Key, TxId, {Partition, _}=Node, SpeculaRead}, Sender,
         SD0=#state{prepared_txs=PreparedTxs}) ->
     case SpeculaRead of
         false ->
-            ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
+            ?CLOCKSI_VNODE:remote_read(Node, Key, TxId, Sender),
             {noreply, SD0};
         true ->
-            %lager:warning("Cache specula read ~w of ~w", [Key, TxId]), 
-            case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, {relay, Sender}}) of
+            lager:warning("Cache specula read ~w of ~w from ~w", [Key, TxId, Sender]), 
+            case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, Sender}) of
+                wait ->
+                    lager:warning("~w read wait!", [TxId]),
+                    {noreply, SD0};
                 not_ready->
-                    %lager:warning("Read blocked!"),
+                    lager:warning("~w read blocked!", [TxId]),
                     {noreply, SD0};
                 {specula, Value} ->
+                    lager:warning("~w read specula ~w", [TxId, Value]),
                     {reply, {ok, Value}, SD0};
                 ready ->
-                    %lager:warning("Read finished!"),
-                    ?CLOCKSI_VNODE:relay_read(Node, Key, TxId, Sender, false),
+                    lager:warning("~w remote read!"),
+                    ?CLOCKSI_VNODE:remote_read(Node, Key, TxId, Sender),
                     {noreply, SD0}
             end
     end;
@@ -162,7 +166,8 @@ handle_call({read, Key, TxId}, _Sender,
                 {SpeculaTxId, Value} ->
                     ets:insert(dependency, {SpeculaTxId, TxId}),
                     %lager:info("Inserting anti_dep from ~w to ~w for ~p", [TxId, SpeculaTxId, Key]),
-                    ets:insert(anti_dep, {TxId, SpeculaTxId}),
+                    %% To make sure this is never triggered
+                    TxId = SpeculaTxId,
                     {reply, {ok, Value}, SD0};
                 [] ->
                     {reply, {ok, []}, SD0}
@@ -217,12 +222,12 @@ handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
             {noreply, SD0}
     end;
 
-handle_cast({pre_commit, TxId, Partition, SpeculaCommitTime}, State=#state{prepared_txs=PreparedTxs,
+handle_cast({pre_commit, TxId, Partition, SpeculaCommitTime, LOC, FFC}, State=#state{prepared_txs=PreparedTxs,
         dep_dict=DepDict}) ->
    %lager:warning("specula commit for [~w, ~w]", [TxId, Partition]),
     case ets:lookup(PreparedTxs, {TxId, Partition}) of
         [{{TxId, Partition}, Keys}] ->
-            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, ignore, PreparedTxs, DepDict, Partition, cache),
+            DepDict1 = local_cert_util:pre_commit(Keys, TxId, SpeculaCommitTime, ignore, PreparedTxs, DepDict, Partition, LOC, FFC, cache),
             {noreply, State#state{dep_dict=DepDict1}};
         [] ->
             lager:error("Prepared record of ~w has disappeared!", [TxId]),
@@ -244,7 +249,7 @@ handle_cast({abort, TxId, Partitions},
     specula_utilities:deal_abort_deps(TxId),
     {noreply, SD0#state{dep_dict=DepDict1}};
     
-handle_cast({commit, TxId, Partitions, CommitTime}, 
+handle_cast({commit, TxId, Partitions, LOC, CommitTime}, 
 	    SD0=#state{prepared_txs=PreparedTxs, dep_dict=DepDict}) ->
    %lager:warning("Commit ~w in cache", [TxId]),
     DepDict1 = lists:foldl(fun(Partition, D) ->
@@ -256,7 +261,7 @@ handle_cast({commit, TxId, Partitions, CommitTime},
                 _ ->
                     D
             end end, DepDict, Partitions),
-    specula_utilities:deal_commit_deps(TxId, CommitTime),
+    specula_utilities:deal_commit_deps(TxId, LOC, CommitTime),
     {noreply, SD0#state{dep_dict=DepDict1}};
 
 handle_cast(_Info, StateData) ->
