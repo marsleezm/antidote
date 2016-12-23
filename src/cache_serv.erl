@@ -137,19 +137,19 @@ handle_call({read, Key, TxId, {Partition, _}=Node, SpeculaRead}, Sender,
             ?CLOCKSI_VNODE:remote_read(Node, Key, TxId, Sender),
             {noreply, SD0};
         true ->
-            lager:warning("Cache specula read ~w of ~w from ~w", [Key, TxId, Sender]), 
+           %lager:warning("Cache specula read ~w of ~w from ~w", [Key, TxId, Sender]), 
             case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, Sender}) of
                 wait ->
-                    lager:warning("~w read wait!", [TxId]),
+                   %lager:warning("~w read wait!", [TxId]),
                     {noreply, SD0};
                 not_ready->
-                    lager:warning("~w read blocked!", [TxId]),
+                   %lager:warning("~w read blocked!", [TxId]),
                     {noreply, SD0};
                 {specula, Value} ->
-                    lager:warning("~w read specula ~w", [TxId, Value]),
+                   %lager:warning("~w read specula ~w", [TxId, Value]),
                     {reply, {ok, Value}, SD0};
                 ready ->
-                    lager:warning("~w remote read!"),
+                   %lager:warning("~w remote read!"),
                     ?CLOCKSI_VNODE:remote_read(Node, Key, TxId, Sender),
                     {noreply, SD0}
             end
