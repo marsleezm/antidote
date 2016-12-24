@@ -263,10 +263,9 @@ handle_call({read, Key, TxId, _Node, SpeculaRead}, Sender,
             %lager:warning("Specula read!!"),
             case local_cert_util:specula_read(TxId, Key, PreparedTxs, {TxId, Sender}) of
                 wait->
-                    lager:warning("Read wait!"),
+                    %lager:warning("Read wait!"),
                     {noreply, SD0};
                 not_ready->
-                    lager:warning("Read blocked!"),
                     {noreply, SD0};
                 {specula, Value} ->
                     {reply, {ok, Value}, SD0};
