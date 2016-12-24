@@ -255,8 +255,8 @@ get_all_oldest() ->
     lists:foreach(fun(Node) ->
                     spawn(rpc, call, [Node, tx_cert_sup, get_oldest, [self()]])
     end, AllNodes),
-    lists:foldl(fun(_, {Node, OldT}) ->
-                   receive T -> 
+    lists:foldl(fun(_, OldT) ->
+                   receive {Node, T} -> 
                         lager:info("Got reply of ~w ~w", [Node, T]),
                         case OldT of
                          nil -> T;
