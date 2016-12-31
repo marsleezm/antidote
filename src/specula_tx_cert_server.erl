@@ -350,7 +350,7 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                     [{TxId, {_LOC, LOCList}, FFC, Deps}] -> {LOCList, FFC, Deps} 
                  end,
     true = ets:delete(anti_dep, TxId),
-      lager:warning("Start certifying ~w, readDepTxs is ~w, Sender is ~w, local parts remote parts are ~w", [TxId, ReadDepTxs, Sender, RemoteUpdates]),
+      lager:warning("Start certifying ~w, readDepTxs is ~w, Sender is ~w, local parts are ~w, remote parts are ~w", [TxId, ReadDepTxs, Sender, LocalUpdates, RemoteUpdates]),
     ClientState = dict:fetch(Client, ClientDict),
     PendingList = ClientState#c_state.pending_list, 
     InvalidAborted = ClientState#c_state.invalid_aborted,
@@ -426,8 +426,7 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                                                 _ -> {(NumLocalParts+NumRemoteParts)*(ReplFactor-1) + ReplFactor*NumCacheParts,
                                                         [TxId#tx_id.snapshot_time|RemainLOC]}
                                               end,
-                              lager:warning("NumToAck is ~w, Pending prepares are ~w", [NumToAck, PendingPrepares]),
-
+                            lager:warning("NumToAck is ~w, Pending prepares are ~w", [NumToAck, PendingPrepares]),
 
                             DepDict1 = dict:store(TxId, {NumToAck, delete_some_elems(B, ReadDepTxs), [], LastCommitTs+1}, DepDict),
                             ClientDict1 = dict:store(Client, ClientState#c_state{pending_prepares=PendingPrepares,
@@ -689,9 +688,9 @@ handle_cast({pending_prepared, TxId, PrepareTime},
     end
     end;
 
-handle_cast({solve_pending_prepared, TxId, PrepareTime}, 
+handle_cast({solve_pending_prepared, TxId, PrepareTime, _From}, 
 	    SD0=#state{dep_dict=DepDict, client_dict=ClientDict}) ->
-     lager:warning("Got solve pending prepare for ~w", [TxId]),
+     lager:warning("Got solve pending prepare for ~w from ~w", [TxId, _From]),
     Client = TxId#tx_id.client_pid,
     case dict:find(Client, ClientDict) of
         error -> {noreply, SD0};
@@ -720,7 +719,7 @@ handle_cast({solve_pending_prepared, TxId, PrepareTime},
     end
     end;
 
-handle_cast({prepared, TxId, PrepareTime}, 
+handle_cast({prepared, TxId, PrepareTime, _From}, 
 	    SD0=#state{dep_dict=DepDict, specula_length=SpeculaLength, hit_counter=HitCounter, 
             client_dict=ClientDict, rep_dict=RepDict, pending_txs=PendingTxs}) ->
     Client = TxId#tx_id.client_pid,
@@ -736,7 +735,7 @@ handle_cast({prepared, TxId, PrepareTime},
 
     case (Stage == local_cert) and (MyTxId == TxId) of
         true -> 
-            lager:warning("Got prepare for ~w, prepare time is ~w for local", [TxId, PrepareTime]),
+            lager:warning("Got prepare for ~w, prepare time is ~w for local from ~w", [TxId, PrepareTime, _From]),
             PendingList = ClientState#c_state.pending_list,
             LocalParts = ClientState#c_state.local_updates, 
             RemoteUpdates = ClientState#c_state.remote_updates, 
@@ -788,7 +787,7 @@ handle_cast({prepared, TxId, PrepareTime},
                     {noreply, SD0}
             end;
         false ->
-            lager:warning("Got prepare for ~w, prepare time is ~w  not in local", [TxId, PrepareTime]),
+            lager:warning("Got prepare for ~w, prepare time is ~w  not in local from ~w", [TxId, PrepareTime, _From]),
             case dict:find(TxId, DepDict) of
                 {ok, {1, [], LOC, OldPrepTime}} -> %% Maybe the transaction can commit 
                     NowPrepTime =  max(OldPrepTime, PrepareTime),

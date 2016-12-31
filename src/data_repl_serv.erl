@@ -379,12 +379,12 @@ handle_cast({local_certify, TxId, Partition, WriteSet, Sender},
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
             %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
-            gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
+            gen_server:cast(Sender, {prepared, TxId, PrepareTime, {node(), self()}}),
             {noreply, SD0};
         {wait, PendPrepDep, _PrepDep, PrepareTime} ->
             NewDepDict = 
                 case PendPrepDep of 
-                    0 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}), DepDict;
+                    0 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime, {node(), self()}}), DepDict;
                     _ -> dict:store(TxId, {PendPrepDep, PrepareTime, Sender}, DepDict)
                 end,
             {noreply, SD0#state{dep_dict=NewDepDict}};

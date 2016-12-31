@@ -447,7 +447,7 @@ unblock_prepare(TxId, DepDict, _Partition, convert_to_pd) ->
         {ok, {PendPrepDep, PrepareTime, Sender}} ->
             %lager:warning("PendPrepDep is ~w", [PendPrepDep]),
             case PendPrepDep of
-                1 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}), dict:erase(TxId, DepDict); 
+                1 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime, {node(), self()}}), dict:erase(TxId, DepDict); 
                 _ -> dict:store(TxId, {PendPrepDep-1, PrepareTime, Sender}, DepDict) 
             end;
         {ok, {1, PrepDep, PrepareTime, Sender, RepMode, WriteSet}} ->
@@ -468,13 +468,13 @@ unblock_prepare(TxId, DepDict, Partition, RemoveDepType) ->
         {ok, {PendPrepDep, PrepareTime, Sender}} ->
              lager:warning("~p Removing in slave replica", [TxId]),
             case PendPrepDep of
-                1 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}), dict:erase(TxId, DepDict); 
+                1 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime, {node(), self()}}), dict:erase(TxId, DepDict); 
                 _ -> dict:store(TxId, {PendPrepDep-1, PrepareTime, Sender}, DepDict) 
             end;
         {ok, {0, 1, PrepareTime, Sender, local}} ->
              lager:warning("~p Removing in the last prep dep", [TxId]),
             RemoveDepType = remove_pd,
-            gen_server:cast(Sender, {solve_pending_prepared, TxId, PrepareTime}),
+            gen_server:cast(Sender, {solve_pending_prepared, TxId, PrepareTime, {node(), self()}}),
             dict:erase(TxId, DepDict);
         {ok, {0, N, PrepareTime, Sender, local}} ->
              lager:warning("~p Removing in the last prep dep", [TxId]),
@@ -483,7 +483,7 @@ unblock_prepare(TxId, DepDict, Partition, RemoveDepType) ->
         {ok, {0, 1, PrepareTime, Sender, RepMode, TxWriteSet}} ->
              lager:warning("~p Removing in the last prep dep", [TxId]),
             RemoveDepType = remove_pd,
-            gen_server:cast(Sender, {solve_pending_prepared, TxId, PrepareTime}),
+            gen_server:cast(Sender, {solve_pending_prepared, TxId, PrepareTime, {node(), self()}}),
             RepMsg = {Sender, RepMode, TxWriteSet, PrepareTime}, 
             repl_fsm:repl_prepare(Partition, prepared, TxId, RepMsg), 
             %DepDict1 = dict:update_counter(success_wait, 1, DepDict), 
@@ -494,7 +494,7 @@ unblock_prepare(TxId, DepDict, Partition, RemoveDepType) ->
                 remove_ppd ->
                     lager:warning("~p Removing ppd, PrepDep is ~w", [TxId, PrepDep]),
                     case PrepDep of 
-                        0 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime}), 
+                        0 -> gen_server:cast(Sender, {prepared, TxId, PrepareTime, {node(), self()}}), 
                             %case RepMode of local -> ok;
                             RepMsg = {Sender, RepMode, TxWriteSet, PrepareTime},
                             repl_fsm:repl_prepare(Partition, prepared, TxId, RepMsg),
@@ -944,7 +944,7 @@ insert_prepare(PreparedTxs, TxId, Partition, WriteSet, TimeStamp, Sender) ->
               end end,  WriteSet),
               lager:warning("Got repl prepare for ~p, propose ~p and replied", [TxId, ToPrepTS]),
               ets:insert(PreparedTxs, {{TxId, Partition}, KeySet}),
-              gen_server:cast(Sender, {solve_pending_prepared, TxId, ToPrepTS});
+              gen_server:cast(Sender, {solve_pending_prepared, TxId, ToPrepTS, {node(), self()}});
           _R ->
                lager:warning("Not replying for ~p, ~p because already prepard, Record is ~p", [TxId, Partition, _R]),
               ok

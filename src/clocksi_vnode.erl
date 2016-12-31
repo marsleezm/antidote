@@ -444,7 +444,6 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                               dep_dict=DepDict,
                               debug=Debug
                               }) ->
-    %lager:warning("Got prepare request for ~w at ~w", [TxId, Partition]),
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
     Result = local_cert_util:prepare_for_master_part(TxId, WriteSet, CommittedTxs, PreparedTxs, ProposedTs),
     case Result of
@@ -456,10 +455,11 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     %case RepMode of local -> ok;
                     %                _ ->
                    %lager:warning("Here, trying to reply to coord of ~w", [TxId]),
+                    lager:warning("Master prepared for ~w at ~w", [TxId, Partition]),
                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
                     %end,
-                    gen_server:cast(Sender, {prepared, TxId, PrepareTime}),
+                    gen_server:cast(Sender, {prepared, TxId, PrepareTime, {node(), self()}}),
                     {noreply, State};
                 true ->
                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
@@ -468,6 +468,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     {noreply, State}
             end;
         {wait, PendPrepDep, PrepDep, PrepareTime} ->
+            lager:warning("Wait prepared for ~w at ~w", [TxId, Partition]),
             case IfSpecula of
                 true ->
                     NewDepDict 
@@ -488,7 +489,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
             end;
         {error, write_conflict} ->
     %DepDict1 = dict:store(success_wait, 0, DepDict),
-            %lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
+            lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
             case Debug of
                 false ->
                     case RepMode of 
