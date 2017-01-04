@@ -832,9 +832,12 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
                     ets:insert(PreparedTxs, {Key, LastReaderTime}),
                     DepDict1;
                 {F1, F2, F3, F4, _F5, F6, F7, F8} ->
-                    %lager:warning("Inserting ~w to Key ~w", [First, Key]),
-                    {_,_,NewFirstPrepTime,_,_} = lists:last(RemainPrev),
-                    ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, NewFirstPrepTime, F6, F7,F8}|RemainPrev]}),
+                    case RemainPrev of
+                        [] -> ets:insert(PreparedTxs, {Key, First});
+                        _ ->
+                            {_,_,NewFirstPrepTime,_,_} = lists:last(RemainPrev),
+                            ets:insert(PreparedTxs, {Key, [{F1, F2, F3, F4, NewFirstPrepTime, F6, F7,F8}|RemainPrev]})
+                    end,
                     DepDict1
             end;
         [{TType, TTxId, TSCTime, TValue, TPendReaders}|TT] ->
