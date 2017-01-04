@@ -445,6 +445,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                               debug=Debug
                               }) ->
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
+    lager:warning("~w received prepare for ~w", [Partition, TxId]),
     Result = local_cert_util:prepare_for_master_part(TxId, WriteSet, CommittedTxs, PreparedTxs, ProposedTs),
     case Result of
         {ok, PrepareTime} ->
