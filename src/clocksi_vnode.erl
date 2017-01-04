@@ -445,7 +445,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                               debug=Debug
                               }) ->
     Sender = case RawSender of {debug, RS} -> RS; _ -> RawSender end,
-    lager:warning("~w received prepare for ~w", [Partition, TxId]),
+    %lager:warning("~w received prepare for ~w", [Partition, TxId]),
     Result = local_cert_util:prepare_for_master_part(TxId, WriteSet, CommittedTxs, PreparedTxs, ProposedTs),
     case Result of
         {ok, PrepareTime} ->
@@ -456,7 +456,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     %case RepMode of local -> ok;
                     %                _ ->
                    %lager:warning("Here, trying to reply to coord of ~w", [TxId]),
-                    lager:warning("Master prepared for ~w at ~w", [TxId, Partition]),
+                    %lager:warning("Master prepared for ~w at ~w", [TxId, Partition]),
                     PendingRecord = {Sender, RepMode, WriteSet, PrepareTime},
                     repl_fsm:repl_prepare(Partition, prepared, TxId, PendingRecord),
                     %end,
@@ -469,7 +469,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
                     {noreply, State}
             end;
         {wait, PendPrepDep, PrepDep, PrepareTime} ->
-            lager:warning("Wait prepared for ~w at ~w", [TxId, Partition]),
+            %lager:warning("Wait prepared for ~w at ~w", [TxId, Partition]),
             case IfSpecula of
                 true ->
                     NewDepDict 
@@ -490,7 +490,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
             end;
         {error, write_conflict} ->
     %DepDict1 = dict:store(success_wait, 0, DepDict),
-            lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
+            %lager:warning("~w: ~w cerfify abort", [Partition, TxId]),
             case Debug of
                 false ->
                     case RepMode of 
