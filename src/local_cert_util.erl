@@ -751,8 +751,12 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
                     %{_,_,NewFirstPrepTime,_,_} = lists:last(RemainPrev),
                     {LastReaderTime, OldFirstPrep, NewPrepNum} = Metadata1,
                     %LastPrepTime = NewFirstPrepTime,
-                   %lager:warning("OldFirstPrep is ~w, New is ~w, RemainPrev is ~w", [OldFirstPrep, NewFirstPrepTime, RemainPrev]),
-                    true = OldFirstPrep < LastPrepTime,
+                    case LastPrepTime =< OldFirstPrep of
+                        true ->
+                            lager:warning("OldFirstPrep is ~w, RemainPrev is ~w, LastPrepTime is ~w, Key is ~w, TxId is ~w", [OldFirstPrep, RemainPrev, LastPrepTime, Key, TxId]);
+                        false -> ok
+                    end,
+                    %true = OldFirstPrep < LastPrepTime,
                     ets:insert(PreparedTxs, {Key, {LastReaderTime, LastPrepTime, NewPrepNum}, RemainPrev}),
                     DepDict1
             end;
