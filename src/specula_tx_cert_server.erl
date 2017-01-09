@@ -1021,6 +1021,7 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                     try_solve_pending(ToCommitTxs, Rest, SD0, ClientsOfCommTxns)
             end;
         {Prev, L} ->
+            lager:warning("List is ~w, Current txn is ~w", [L, CurrentTxId]),
             {PendingTxs1, RD, NewToAbort} = abort_specula_list(L, RepDict, DepDict, PendingTxs, FromNode, []),
             case CurrentTxId of
                 ?NO_TXN ->
