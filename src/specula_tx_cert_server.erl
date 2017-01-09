@@ -1061,10 +1061,19 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                             %{noreply, SD0#state{dep_dict=RD1, client_dict=ClientDict2,
                             %    read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length}};
                         read ->
-                             lager:warning("Has current txn ~w read, Pendinglist is ~w, Rest is ~w", [TxId, PendingList, Rest]),
+                             lager:warning("Has current txn ~w read, Pendinglist is ~w, Rest is ~w", [CurrentTxId, PendingList, Rest]),
+                            RD1 = case DepEntry of
+                                          {ok, {0, _, _RemainLOC, FFC, 0, Value, ReadSender}} ->
+                                              %% Should actually abort here!!!!!
+                                              ets:insert(anti_dep, {TxId, {inf, []}, FFC, []}),
+                                              gen_server:reply(ReadSender, Value),
+                                              dict:store(TxId, {0, [], [], 0}, RD);
+                                          _ -> RD
+                                       end,                            
+
                             ClientDict1 = dict:store(Client, ClientState#c_state{pending_list=Prev, invalid_aborted=1,
                                 aborted_update=get_older(AbortedUpdate, TxId)}, ClientDict), 
-                            try_solve_pending(ToCommitTxs, Rest++NewToAbort, SD0#state{dep_dict=RD, 
+                            try_solve_pending(ToCommitTxs, Rest++NewToAbort, SD0#state{dep_dict=RD1, 
                                   pending_txs=PendingTxs1, client_dict=ClientDict1}, ClientsOfCommTxns)
                             %{noreply, SD0#state{dep_dict=RD, client_dict=ClientDict2,
                             %    read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length-1}}
