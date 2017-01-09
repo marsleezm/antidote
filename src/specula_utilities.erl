@@ -56,7 +56,7 @@ deal_abort_deps(TxId) ->
             ok; %% No read dependency was created!
         List ->
             lists:foreach(fun({TId, DependTxId}) ->
-                            lager:info("Calling read invalid of ~w, from ~w", [DependTxId, TId]),
+                            %lager:info("Calling read invalid of ~w, from ~w", [DependTxId, TId]),
                             ets:delete_object(dependency, {TId, DependTxId}),
                             gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, -1, DependTxId})
                           end, List)

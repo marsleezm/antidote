@@ -250,9 +250,9 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             DepDict2 = delete_and_read(commit, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, Partition, Records, TxId, [], Metadata, 0),
             case PartitionType of cache -> ok; _ -> ets:insert(CommittedTxs, {Key, TxCommitTime}) end,
             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict2, Partition, PartitionType);
-        R ->
+        _R ->
             %[{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
-            lager:error("For key ~w, txn ~w come first! Record is ~w", [Key, TxId, R]),
+            %lager:error("For key ~w, txn ~w come first! Record is ~w", [Key, TxId, R]),
             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PartitionType)
     end.
 
@@ -944,7 +944,7 @@ is_safe_read(PLOC, PFFC, PreparedTxId, TxId) ->
                     ets:insert(anti_dep, {TxId, {NLOC, NLOCList}, NFFC, [PreparedTxId|Deps]}),
                     true;
                 false ->
-                    %lager:warning("NewLOC is ~w, NewFFC is ~w, unsafe!", [NLOC, NFFC]),
+                    lager:warning("NewLOC is ~w, NewFFC is ~w, unsafe!", [NLOC, NFFC]),
                     false
             end
     end.
