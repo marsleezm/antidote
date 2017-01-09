@@ -534,10 +534,12 @@ handle_cast({read_blocked, TxId, LastLOC, LastFFC, Value, Sender}, SD0=#state{de
                             ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
                             case ClientState#c_state.invalid_aborted of
                                 1 -> 
+                                    lager:warning("Reply directly for ~w to ~w", [TxId, Sender]),
                                     ets:insert(anti_dep, {TxId, {inf, []}, 0, []}),
                                     gen_server:reply(Sender, {ok, Value}),
                                     {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}}; 
                                 _ ->
+                                    lager:warning("~w blocked", [TxId]),
                                     {noreply, SD0#state{dep_dict=dict:store(TxId, {0, RemainDeps, RemainLOC, NewFFC, 0, {ok, Value}, Sender}, DepDict)}}
                             end
                     end
