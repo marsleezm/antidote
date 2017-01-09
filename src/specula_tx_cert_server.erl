@@ -1065,10 +1065,13 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                             RD1 = case DepEntry of
                                           {ok, {0, _, _RemainLOC, FFC, 0, Value, ReadSender}} ->
                                               %% Should actually abort here!!!!!
+                                              lager:warning("The reader was blocked, direclty replying to ~w value ~w", [ReadSender, Value]),
                                               ets:insert(anti_dep, {TxId, {inf, []}, FFC, []}),
                                               gen_server:reply(ReadSender, Value),
                                               dict:store(TxId, {0, [], [], 0}, RD);
-                                          _ -> RD
+                                          _ -> 
+                                              lager:warning("Entry is ~w", [DepEntry]),
+                                              RD
                                        end,                            
 
                             ClientDict1 = dict:store(Client, ClientState#c_state{pending_list=Prev, invalid_aborted=1,
