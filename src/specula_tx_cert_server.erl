@@ -510,7 +510,7 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     {noreply, SD0};
 
 handle_cast({read_blocked, TxId, LastLOC, LastFFC, Value, Sender}, SD0=#state{dep_dict=DepDict, client_dict=ClientDict}) ->
-    %lager:info("Read is blocked for ~w!", [TxId]),
+    lager:warning("Read is blocked for ~w!", [TxId]),
     case ets:lookup(anti_dep, TxId) of
         [] -> lager:warning("Anti dep is empty!!!"), TxId=error,
             {noreply, SD0};
@@ -545,7 +545,7 @@ handle_cast({read_blocked, TxId, LastLOC, LastFFC, Value, Sender}, SD0=#state{de
     end;
 
 handle_cast({rr_value, TxId, Sender, TS, Value}, SD0=#state{dep_dict=DepDict, client_dict=ClientDict}) ->
-    %lager:info("Remote read result for ~w is ~w!", [TxId, Value]),
+    lager:warning("Remote read result for ~w is ~w!", [TxId, Value]),
     case ets:lookup(anti_dep, TxId) of
         [] -> 
             ets:insert(anti_dep, {TxId, {inf, []}, TS, []}),
