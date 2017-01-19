@@ -976,27 +976,26 @@ find_version([],  _SnapshotTime, _, Sender) ->
 find_version([{TS, Value}|Rest], SnapshotTime, TxId, Sender) ->
     case SnapshotTime >= TS of
         true ->
-            gen_server:reply(Sender, {ok, Value});
-            %case ets:lookup(anti_dep, TxId) of
-            %    [] ->
-            %        ets:insert(anti_dep, {TxId, {inf, []}, TS, []}),
-            %        gen_server:reply(Sender, {ok, Value});
-            %    [{TxId, {LOC, LOCList}, FFC, Deps}] ->
-            %        %lager:warning("~w has ~w, ~w, ~w, ~w", [TxId, LOC, LOCList, FFC, Deps]),
-            %        case TS =< FFC of
-            %            true ->
-            %                gen_server:reply(Sender, {ok, Value});
-            %            false ->
-            %                case TS =< LOC of
-            %                    true ->
-            %                        ets:insert(anti_dep, {TxId, {LOC, LOCList}, TS, Deps}),
-            %                        gen_server:reply(Sender, {ok, Value});
-            %                    false ->
-            %                       %lager:warning("~w blocked when trying to read, TS is ~w, LOC is ~w", [TxId, TS, LOC]),
-            %                        gen_server:cast(TxId#tx_id.server_pid, {read_blocked, TxId, inf, TS, Value, Sender})
-            %                end
-            %        end 
-            %end;
+            case ets:lookup(anti_dep, TxId) of
+                [] ->
+                    ets:insert(anti_dep, {TxId, {inf, []}, TS, []}),
+                    gen_server:reply(Sender, {ok, Value});
+                [{TxId, {LOC, LOCList}, FFC, Deps}] ->
+                    %lager:warning("~w has ~w, ~w, ~w, ~w", [TxId, LOC, LOCList, FFC, Deps]),
+                    case TS =< FFC of
+                        true ->
+                            gen_server:reply(Sender, {ok, Value});
+                        false ->
+                            case TS =< LOC of
+                                true ->
+                                    ets:insert(anti_dep, {TxId, {LOC, LOCList}, TS, Deps}),
+                                    gen_server:reply(Sender, {ok, Value});
+                                false ->
+                                   %lager:warning("~w blocked when trying to read, TS is ~w, LOC is ~w", [TxId, TS, LOC]),
+                                    gen_server:cast(TxId#tx_id.server_pid, {read_blocked, TxId, inf, TS, Value, Sender})
+                            end
+                    end 
+            end;
         false ->
             find_version(Rest, SnapshotTime, TxId, Sender)
     end.
