@@ -944,7 +944,7 @@ is_safe_read(PLOC, PFFC, PreparedTxId, TxId) ->
                     ets:insert(anti_dep, {TxId, {NLOC, NLOCList}, NFFC, [PreparedTxId|Deps]}),
                     true;
                 false ->
-                    lager:warning("NewLOC is ~w, NewFFC is ~w, unsafe!", [NLOC, NFFC]),
+                    %lager:warning("NewLOC is ~w, NewFFC is ~w, unsafe!", [NLOC, NFFC]),
                     false
             end
     end.
