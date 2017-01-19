@@ -267,13 +267,13 @@ handle_call({certify_read, TxId, ClientMsgId, Client}, Sender, SD0=#state{min_co
                 {1, _} ->
                     case ClientState#c_state.aborted_update of
                         ?NO_TXN -> 
-                            %lager:warning("Aborted ~w", [TxId]),
+                            lager:warning("Aborted ~w", [TxId]),
                             ClientDict1 = dict:store(Client, ClientState#c_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
                                     committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                             DepDict1 = dict:erase(TxId, DepDict),
                             {reply, {aborted, {AbortedReads, rev(CommittedUpdates), CommittedReads}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                         AbortedTxId ->
-                            %lager:warning("Cascade aborted aborted txid is ~w, TxId is  ~w", [AbortedTxId, TxId]),
+                            lager:warning("Cascade aborted aborted txid is ~w, TxId is  ~w", [AbortedTxId, TxId]),
                             ClientDict1 = dict:store(Client, ClientState#c_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
                                             committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                             DepDict1 = dict:erase(TxId, DepDict),
@@ -530,7 +530,7 @@ handle_cast({read_blocked, TxId, LastLOC, LastFFC, Value, Sender}, SD0=#state{de
                             gen_server:reply(Sender, {ok, Value}),
                             {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}};
                         false ->
-                           %lager:warning("LastFFC ~w, New ~w, LOC ~w, RemainLOC ~w, reader is blocked",[LastFFC, NewFFC, LOCList, RemainLOC]),
+                           lager:warning("LastFFC ~w, New ~w, LOC ~w, RemainLOC ~w, reader is blocked",[LastFFC, NewFFC, LOCList, RemainLOC]),
                             ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
                             case ClientState#c_state.invalid_aborted of
                                 1 -> 
@@ -572,7 +572,7 @@ handle_cast({rr_value, TxId, Sender, TS, Value}, SD0=#state{dep_dict=DepDict, cl
                                     gen_server:reply(Sender, {ok, Value}),
                                     {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}};
                                 false ->
-                                   %lager:warning("Get blocked, TS is ~w, AntiDep is ~w, Entry is ~w", [TS, _AntiDep, _Entry]),
+                                   lager:warning("Get blocked, TS is ~w, AntiDep is ~w, Entry is ~w", [TS, _AntiDep, _Entry]),
                                     ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
                                     case ClientState#c_state.invalid_aborted of
                                         1 -> 
@@ -586,23 +586,6 @@ handle_cast({rr_value, TxId, Sender, TS, Value}, SD0=#state{dep_dict=DepDict, cl
                     end
             end
     end;
-
-%handle_cast({trace, PrevTxs, TxId, Sender, InfoList}, SD0=#state{dep_dict=DepDict, pending_list=PendingList, client_dict=ClientDict}) ->
-%    case dict:find(TxId, DepDict) of
-%        error ->    Info = io_lib:format("~p: can not find this txn!!\n", [TxId]),
-%                    gen_server:cast(Sender, {end_trace, PrevTxs++[TxId], InfoList++[Info]});
-%        {ok, {0, [], _}} -> Info = io_lib:format("~p: probably blocked by predecessors, pend list is ~p\n", [TxId, PendingList]),
-%                            [Head|_T] = PendingList,
-%                            send_prob(DepDict, Head, InfoList++[Info], Sender);
-%        {ok, {N, [], _}} -> 
-%                            {LocalParts, RemoteParts, _, _, _} = dict:fetch(TxId, ClientDict),
-%                            Info = io_lib:format("~p: blocked with ~w remaining prepare, local parts are ~w, remote parts are ~w \n", [TxId, N, LocalParts, RemoteParts]),
-%                            gen_server:cast(Sender, {end_trace, PrevTxs++[TxId], InfoList++[Info]}); 
-%        {ok, {N, ReadDeps, _}} -> lists:foreach(fun(BTxId) ->
-%                    Info = io_lib:format("~p: blocked by ~p, N is ~p, read deps are ~p \n", [TxId, BTxId, N, ReadDeps]),
-%                    gen_server:cast(BTxId#tx_id.server_pid, {trace, PrevTxs++[TxId], BTxId, Sender, InfoList ++ [Info]}) end, ReadDeps)
-%    end,
-%    {noreply, SD0};
 
 handle_cast({end_trace, TList, InfoList}, SD0) ->
     lager:info("List txn is ~p, info is ~p", [TList, lists:flatten(InfoList)]),
@@ -828,7 +811,7 @@ handle_cast({read_valid, PendingTxId, PendedTxId, PendedLOC}, SD0=#state{dep_dic
             RemainDeps = delete_elem(PendedTxId, ReadDeps),
             case MinLOC >= FFC of
                 true ->
-                   %lager:warning("Successfully Reduced blocked txn"),
+                   lager:warning("Successfully Reduced blocked txn"),
                     ets:insert(anti_dep, {PendingTxId, {MinLOC, RemainLOCList}, FFC, RemainDeps}),
                     gen_server:reply(Sender, Value),
                     DepDict1 = dict:store(PendingTxId, {0, [], [], 0}, DepDict), 
@@ -861,11 +844,11 @@ handle_cast({read_valid, PendingTxId, PendedTxId, PendedLOC}, SD0=#state{dep_dic
     end;
 
 handle_cast({read_invalid, _MyCommitTime, TxId}, SD0) ->
-   %lager:warning("Read invalid for ~w", [TxId]),
+   lager:warning("Read invalid for ~w", [TxId]),
     {noreply, try_solve_pending([], [{ignore, TxId}], SD0, [])};
     %read_abort(read_invalid, MyCommitTime, TxId, SD0);
 handle_cast({read_aborted, _MyCommitTime, TxId}, SD0) ->
-   %lager:warning("Read aborted for ~w", [TxId]),
+    lager:warning("Read aborted for ~w", [TxId]),
     {noreply, try_solve_pending([], [{ignore, TxId}], SD0, [])};
     %read_abort(read_aborted, MyCommitTime, TxId, SD0);
             
@@ -1277,7 +1260,7 @@ abort_tx(TxId, LocalParts, RemoteParts, RepDict, Stage, LocalOnlyPart) ->
                                             [{[], DepTxId}|AccTxs]
                                     end;
                                 _ ->
-                                     %lager:warning("~w is not my own, read invalid", [DepTxId]),
+                                     lager:warning("~w is not my own, read invalid", [DepTxId]),
                                     ?READ_ABORTED(TxServer, -1, DepTxId),
                                     AccTxs
                             end
@@ -1434,7 +1417,7 @@ solve_read_dependency(CommitTime, ReadDep, DepList, LOC, ClientDict) ->
                             %% Read is not valid
                             case TxServer == Self of
                                 true ->
-                                       %lager:warning("~w is my own, read invalid", [DepTxId]),
+                                    lager:warning("~w is my own, read invalid", [DepTxId]),
                                     {RD, MaybeCommit, [{[], DepTxId}|ToAbort], CD};
                                 _ ->
                                     %lager:warning("~w is not my own, read invalid", [DepTxId]),
