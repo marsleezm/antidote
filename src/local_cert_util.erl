@@ -160,6 +160,10 @@ check_prepared(TxId, PreparedTxs, Key, _Value) ->
         %% The specula-commit time of the last record
         [{Key, {LastReaderTime, _FirstPrepTime, PrepNum}, [{_Type, _PrepTxId, _PrepareTime, _PrepValue, _RWaiter}|_PWaiter]=_Record}] ->
             %lager:warning("For key ~p: record is ~w! LastReaderTime is ~w, FirstPrepTime is ~p, ~p may fail, PrepNum is ~w", [Key, _Record, _PrepTxId, _FirstPrepTime, TxId, PrepNum]),
+            case _PWaiter of
+                [] -> _FirstPrepTime = _PrepareTime;
+                _ -> ok
+            end,
             case _PrepareTime > SnapshotTime of
                 true ->
                     false;
