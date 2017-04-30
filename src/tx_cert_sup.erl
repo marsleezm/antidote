@@ -188,12 +188,13 @@ get_cdf() ->
 
 get_stat() ->
     SPL = lists:seq(1, ?NUM_SUP),
-    lists:foldl(fun(N, Acc) ->
+    [T1, T2] = lists:foldl(fun(N, Acc) ->
             Res = gen_server:call(generate_module_name(N), {get_stat}),
             lager:info("Get stat from ~w is ~p", [N, Res]),
             %AllZeros = lists:duplicate(7, 0),
             add_two(Res, Acc, [])
-            end, lists:duplicate(7,0), SPL).
+            end, [0, 0], SPL),
+    [T1, T2, 0].
     %LocalServ = hash_fun:get_local_servers(),
     %PRead = lists:foldl(fun(S, Acc) ->
     %                    Num = helper:num_specula_read(S), Num+Acc
