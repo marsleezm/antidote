@@ -512,7 +512,7 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
     {noreply, SD0};
 
 handle_cast({read_blocked, TxId, LastLOC, LastFFC, Value, Sender}, SD0=#state{dep_dict=DepDict, client_dict=ClientDict, num_blocked=NB}) ->
-   lager:warning("Read is blocked for ~w, LastLOC is ~w, LastFFC is ~w !", [TxId, LastLOC, LastFFC]),
+   %lager:warning("Read is blocked for ~w, LastLOC is ~w, LastFFC is ~w !", [TxId, LastLOC, LastFFC]),
     case ets:lookup(anti_dep, TxId) of
         [] ->%lager:warning("Anti dep is empty!!!"), TxId=error,
             {noreply, SD0};
@@ -532,7 +532,7 @@ handle_cast({read_blocked, TxId, LastLOC, LastFFC, Value, Sender}, SD0=#state{de
                             gen_server:reply(Sender, {ok, Value}),
                             {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}};
                         false ->
-                            lager:warning("LastFFC ~w, New ~w, LOC ~w, RemainLOC ~w, reader is blocked",[LastFFC, NewFFC, LOCList, RemainLOC]),
+                            %lager:warning("LastFFC ~w, New ~w, LOC ~w, RemainLOC ~w, reader is blocked",[LastFFC, NewFFC, LOCList, RemainLOC]),
                             ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
                             case ClientState#c_state.invalid_aborted of
                                 1 -> 
@@ -549,7 +549,7 @@ handle_cast({read_blocked, TxId, LastLOC, LastFFC, Value, Sender}, SD0=#state{de
     end;
 
 handle_cast({rr_value, TxId, Sender, TS, Value}, SD0=#state{dep_dict=DepDict, client_dict=ClientDict, num_blocked=NB}) ->
-   lager:warning("Remote read result for ~w is ~w!", [TxId, Value]),
+   %lager:warning("Remote read result for ~w is ~w!", [TxId, Value]),
     case ets:lookup(anti_dep, TxId) of
         [] -> 
             ets:insert(anti_dep, {TxId, {inf, []}, TS, []}),
@@ -557,7 +557,7 @@ handle_cast({rr_value, TxId, Sender, TS, Value}, SD0=#state{dep_dict=DepDict, cl
             gen_server:reply(Sender, {ok,Value}),
             {noreply, SD0};
         [{TxId, {_LOC, LOCList}, FFC, Deps}]=_AntiDep ->
-            lager:warning("Get blocked, LOCList is ~w, FFC is ~w", [LOCList, FFC]),
+            %lager:warning("Get blocked, LOCList is ~w, FFC is ~w", [LOCList, FFC]),
             case TS =< FFC of
                 true ->%lager:warning("Directly replying to ~w", [Sender]),
                         gen_server:reply(Sender, {ok,Value}), 
@@ -575,7 +575,7 @@ handle_cast({rr_value, TxId, Sender, TS, Value}, SD0=#state{dep_dict=DepDict, cl
                                     gen_server:reply(Sender, {ok, Value}),
                                     {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}};
                                 false ->
-                                    lager:warning("Get blocked, TS is ~w, AntiDep is ~w, Entry is ~w", [TS, _AntiDep, _Entry]),
+                                    %lager:warning("Get blocked, TS is ~w, AntiDep is ~w, Entry is ~w", [TS, _AntiDep, _Entry]),
                                     ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
                                     case ClientState#c_state.invalid_aborted of
                                         1 -> 
