@@ -48,6 +48,7 @@
 -export([
         prepare_specula/4,
         commit/4,
+        get_stat/0,
         pre_commit/5,
         abort/2,
         if_prepared/2,
@@ -66,6 +67,7 @@
         specula_read :: boolean(),
         num_specula_read :: non_neg_integer(),
         num_attempt_read :: non_neg_integer(),
+        cache_hit :: non_neg_integer(),
 		self :: atom()}).
 
 %%%===================================================================
@@ -87,6 +89,9 @@ read(Key, TxId) ->
 
 num_specula_read() ->
     gen_server:call(node(), {num_specula_read}).
+
+get_stat() ->
+    gen_server:call(node(), {get_stat}).
 
 if_prepared(TxId, Keys) ->
     gen_server:call(node(), {if_prepared, TxId, Keys}).
@@ -114,7 +119,7 @@ init([]) ->
     lager:info("Cache server inited"),
     PreparedTxs = tx_utilities:open_private_table(prepared_txs),
     SpeculaRead = antidote_config:get(specula_read),
-    {ok, #state{specula_read = SpeculaRead, dep_dict=dict:new(),
+    {ok, #state{specula_read = SpeculaRead, dep_dict=dict:new(), cache_hit = 0,
                 prepared_txs = PreparedTxs, num_specula_read=0, num_attempt_read=0}}.
 
 handle_call({num_specula_read}, _Sender, 
@@ -126,12 +131,15 @@ handle_call({get_pid}, _Sender, SD0) ->
 
 handle_call({clean_data}, _Sender, SD0=#state{prepared_txs=PreparedTxs}) ->
     ets:delete_all_objects(PreparedTxs),
-    {reply, ok, SD0#state{num_specula_read=0, num_attempt_read=0}};
+    {reply, ok, SD0#state{num_specula_read=0, num_attempt_read=0, cache_hit=0}};
+
+handle_call({get_stat}, _Sender, SD0=#state{cache_hit=CacheHit}) ->
+    {reply, CacheHit, SD0};
 
 handle_call({read, Key, TxId, _Node}, Sender, SD0=#state{specula_read=SpeculaRead}) ->
     handle_call({read, Key, TxId, _Node, SpeculaRead}, Sender, SD0);
 handle_call({read, Key, TxId, {Partition, _}=Node, SpeculaRead}, Sender,
-        SD0=#state{prepared_txs=PreparedTxs}) ->
+        SD0=#state{prepared_txs=PreparedTxs, cache_hit=CacheHit}) ->
     case SpeculaRead of
         false ->
             ?CLOCKSI_VNODE:remote_read(Node, Key, TxId, Sender),
@@ -141,13 +149,13 @@ handle_call({read, Key, TxId, {Partition, _}=Node, SpeculaRead}, Sender,
             case local_cert_util:specula_read(TxId, {Partition, Key}, PreparedTxs, {TxId, Node, Sender}) of
                 wait ->
                    %lager:warning("~w read wait!", [TxId]),
-                    {noreply, SD0};
+                    {noreply, SD0#state{cache_hit=CacheHit+1}};
                 not_ready->
                    %lager:warning("~w read blocked!", [TxId]),
-                    {noreply, SD0};
+                    {noreply, SD0#state{cache_hit=CacheHit+1}};
                 {specula, Value} ->
                    %lager:warning("~w read specula ~w", [TxId, Value]),
-                    {reply, {ok, Value}, SD0};
+                    {reply, {ok, Value}, SD0#state{cache_hit=CacheHit+1}};
                 ready ->
                    %lager:warning("~w remote read!"),
                     ?CLOCKSI_VNODE:remote_read(Node, Key, TxId, Sender),

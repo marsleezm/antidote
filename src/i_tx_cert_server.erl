@@ -104,7 +104,7 @@ handle_call({get_hitcounter}, _Sender, SD0) ->
     {reply, 0, SD0};
 
 handle_call({get_stat}, _Sender, SD0) ->
-    {reply, [0, 0, 0, 0, 0, 0, 0], SD0};
+    {reply, [0, 0], SD0};
 
 handle_call({append_values, Node, KeyValues, CommitTime}, Sender, SD0) ->
     clocksi_vnode:append_values(Node, KeyValues, CommitTime, Sender),
