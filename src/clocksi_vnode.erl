@@ -13,7 +13,7 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
--module(master_vnode).
+-module(clocksi_vnode).
 -behaviour(riak_core_vnode).
 
 -include("antidote.hrl").
