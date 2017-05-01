@@ -815,13 +815,13 @@ handle_cast({read_valid, PendingTxId, PendedTxId, PendedLOC}, SD0=#state{dep_dic
             RemainDeps = delete_elem(PendedTxId, ReadDeps),
             case MinLOC >= FFC of
                 true ->
-                    lager:warning("Successfully Reduced blocked txn, MinLOC is ~w, FFC is ~w", [MinLOC, FFC]),
+                    lager:warning("Successfully Reduced blocked txn ~w, MinLOC is ~w, FFC is ~w", [PendingTxId, MinLOC, FFC]),
                     ets:insert(anti_dep, {PendingTxId, {MinLOC, RemainLOCList}, FFC, RemainDeps}),
                     gen_server:reply(Sender, Value),
                     DepDict1 = dict:store(PendingTxId, {0, [], [], 0}, DepDict), 
                     {noreply, SD0#state{dep_dict=DepDict1, time_blocked=TB+timer:now_diff(os:timestamp(), Blocked)}};
                 false ->
-                    lager:warning("Didn't reduce blocked txn, LOCList is ~w, RemainLOCList is ~w, FFC is ~w", [LOCList, RemainLOCList, FFC]),
+                    lager:warning("Didn't reduce blocked txn ~w, LOCList is ~w, RemainLOCList is ~w, FFC is ~w", [PendingTxId, LOCList, RemainLOCList, FFC]),
                     DepDict1 = dict:store(PendingTxId, {0, RemainDeps, RemainLOCList, FFC, 0, Value, Sender, Blocked}, DepDict), 
                     {noreply, SD0#state{dep_dict=DepDict1}}
             end;
@@ -1401,10 +1401,10 @@ solve_read_dependency(CommitTime, ReadDep, DepList, LOC, ClientDict) ->
                                                 true -> 
                                                     ets:insert(anti_dep, {DepTxId, {MinLOC, RemainLOC}, FFC, RemainDeps}),
                                                     gen_server:reply(Sender, Value),
-                                                    lager:warning("Replying to reader ~w, inserted remainLOC is ~w, FFC is ~w", [Sender, RemainLOC, FFC]),
+                                                    lager:warning("~w Replying to reader ~w, inserted remainLOC is ~w, FFC is ~w", [DepTxId, Sender, RemainLOC, FFC]),
                                                     {dict:store(DepTxId, {0, [], [], 0}, RD), MaybeCommit, ToAbort, CD, AccTB+timer:now_diff(os:timestamp(), BlockedTime)};
                                                 false ->
-                                                    lager:warning("Updated, but can not reply ~w, ~w", [RemainLOC, FFC]),
+                                                    lager:warning("Updated ~w, but can not reply ~w, ~w", [DepTxId, RemainLOC, FFC]),
                                                     {dict:store(DepTxId, {0, RemainDeps, RemainLOC, FFC, 0, Value, Sender, BlockedTime}, RD), 
                                                         MaybeCommit, ToAbort, CD, AccTB}
                                             end;
