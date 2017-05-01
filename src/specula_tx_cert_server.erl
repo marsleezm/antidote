@@ -1080,7 +1080,7 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                             %    read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length}};
                         read ->
                             lager:warning("Has current txn ~w read, Pendinglist is ~w, Rest is ~w", [CurrentTxId, PendingList, Rest]),
-                            case dict:find(CurrentTxId, DepDict) of
+                            case dict:find(CurrentTxId, RD) of
                                 {ok, {0, RemainReadDeps, _RemainLOC, FFC, 0, Value, ReadSender, BlockedTime}} ->
                                     %% Should actually abort here!!!!!
                                     lager:warning("Trying to reply ~w of Value ~w", [ReadSender, Value]),
