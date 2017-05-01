@@ -1243,9 +1243,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
     ?REPL_FSM:repl_abort(LocalParts, TxId, RepDict),
     ?CLOCKSI_VNODE:abort(lists:delete(ExceptNode, RemoteParts), TxId),
     ?REPL_FSM:repl_abort(RemoteParts, TxId, RepDict),
-    DepDict1 = dict:erasr(TxId, DepDict),
-    lager:warning("After aborting ~w, find from dict is ~w", [TxId, dict:find(TxId, DepDict1)]),
-    {PendingTxs1, DepDict1, ToAbortTxs}.
+    {PendingTxs1, dict:erase(TxId, DepDict), ToAbortTxs}.
 
 abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
     %[{TxId, {LocalParts, RemoteParts, _LP, _RP, IfWaited}}] = ets:lookup(ClientDict, TxId), 
@@ -1274,9 +1272,7 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
     ?CLOCKSI_VNODE:abort(RemoteParts, TxId),
     ?REPL_FSM:repl_abort(RemoteParts, TxId, RepDict),
     %abort_to_table(RemoteParts, TxId, RepDict),
-    DepDict1 = dict:erasr(TxId, DepDict),
-    lager:warning("After aborting ~w, find from dict is ~w", [TxId, dict:find(TxId, DepDict1)]),
-    {PendingTxs1, DepDict1, ToAbortTxs}.
+    {PendingTxs1, dict:erase(TxId, DepDict), ToAbortTxs}.
 
 abort_tx(TxId, LocalParts, RemoteParts, RepDict, Stage) ->
     abort_tx(TxId, LocalParts, RemoteParts, RepDict, Stage, ignore).
