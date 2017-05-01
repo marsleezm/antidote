@@ -965,8 +965,10 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
             try_solve_pending(ToCommitTxs, Rest, SD0#state{dep_dict=dict:erase(TxId, DepDict), 
                     client_dict=dict:store(Client, ClientState1, ClientDict)}, ClientsOfCommTxns);
         DepEntry ->
+            lager:warning("For ~w, DepEntry is ~w", [TxId, DepEntry]),
         case start_from_list(TxId, PendingList) of
         [] ->
+            lager:warning("Did not find the tx in list, list is ~w", [PendingList]),
             case TxId of
                 CurrentTxId ->
                     case Stage of
@@ -1008,6 +1010,7 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                             %{noreply, SD0#state{client_dict=ClientDict1}}
                     end;
                 _ -> %% The transaction has already been aborted or whatever
+                    lager:warning("~w is not current tx ~w", [TxId, CurrentTxId]),
                     try_solve_pending(ToCommitTxs, Rest, SD0, ClientsOfCommTxns)
             end;
         {Prev, L} ->
