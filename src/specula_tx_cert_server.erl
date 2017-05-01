@@ -1031,7 +1031,7 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                                     try_solve_pending(ToCommitTxs, Rest, SD0#state{client_dict=ClientDict1, dep_dict=DepDict1, time_blocked=timer:now_diff(os:timestamp(), TimeBlocked)+TB}, ClientsOfCommTxns);
                                   _ -> 
                                     ClientDict1 = dict:store(Client, ClientState#c_state{invalid_aborted=1}, ClientDict), 
-                                    try_solve_pending(ToCommitTxs, Rest, SD0#state{client_dict=ClientDict1}, ClientsOfCommTxns)
+                                    try_solve_pending(ToCommitTxs, Rest, SD0#state{client_dict=ClientDict1, dep_dict=DepDict}, ClientsOfCommTxns)
                             end
                     end;
                 _ -> %% The transaction has already been aborted or whatever
@@ -1095,7 +1095,7 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                                     lager:warning("Entry is ~w for ~w", [_Entry, CurrentTxId]),
                                     ClientDict1 = dict:store(Client, ClientState#c_state{pending_list=Prev, invalid_aborted=1, aborted_update=get_older(AbortedUpdate, TxId)}, ClientDict), 
                                     try_solve_pending(ToCommitTxs, Rest++NewToAbort, SD0#state{pending_txs=PendingTxs1, 
-                                        client_dict=ClientDict1}, ClientsOfCommTxns)
+                                        client_dict=ClientDict1, dep_dict=RD}, ClientsOfCommTxns)
                            end
                             %{noreply, SD0#state{dep_dict=RD, client_dict=ClientDict2,
                             %    read_aborted=RAD1, read_invalid=RID1, cascade_aborted=CascadAborted+Length-1}}
@@ -1243,7 +1243,9 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict, ExceptNode) ->
     ?REPL_FSM:repl_abort(LocalParts, TxId, RepDict),
     ?CLOCKSI_VNODE:abort(lists:delete(ExceptNode, RemoteParts), TxId),
     ?REPL_FSM:repl_abort(RemoteParts, TxId, RepDict),
-    {PendingTxs1, dict:erase(TxId, DepDict), ToAbortTxs}.
+    DepDict1 = dict:erasr(TxId, DepDict),
+    lager:warning("After aborting ~w, find from dict is ~w", [TxId, dict:find(TxId, DepDict1)]),
+    {PendingTxs1, DepDict1, ToAbortTxs}.
 
 abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
     %[{TxId, {LocalParts, RemoteParts, _LP, _RP, IfWaited}}] = ets:lookup(ClientDict, TxId), 
