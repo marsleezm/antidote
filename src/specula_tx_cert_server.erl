@@ -1092,7 +1092,7 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                                     try_solve_pending(ToCommitTxs, Rest++NewToAbort, SD0#state{dep_dict=RD1, 
                                           pending_txs=PendingTxs1, client_dict=ClientDict1, time_blocked=TB+timer:now_diff(os:timestamp(), BlockedTime)}, ClientsOfCommTxns);
                                 _Entry -> 
-                                    lager:warning("Entry is ~w", [_Entry]),
+                                    lager:warning("Entry is ~w for ~w", [_Entry, CurrentTxId]),
                                     ClientDict1 = dict:store(Client, ClientState#c_state{pending_list=Prev, invalid_aborted=1, aborted_update=get_older(AbortedUpdate, TxId)}, ClientDict), 
                                     try_solve_pending(ToCommitTxs, Rest++NewToAbort, SD0#state{pending_txs=PendingTxs1, 
                                         client_dict=ClientDict1}, ClientsOfCommTxns)
@@ -1119,7 +1119,7 @@ try_solve_pending([{NowPrepTime, LOC, PendingTxId}|Rest], [], SD0=#state{client_
     Stage = ClientState#c_state.stage,
     case PendingList of
         [] -> %% This is the just report_committed txn.. But new txn has not come yet.
-              lager:warning("Pending list no me ~p, commit current tx!",[PendingTxId]),
+              lager:warning("Pending list no me ~p, commit current tx, Stage is ~w!",[PendingTxId, Stage]),
             RemoteParts = case Stage of remote_cert -> RemoteUpdates; local_cert -> [P||{P, _} <-RemoteUpdates] end,
             DepDict2 = dict:erase(PendingTxId, DepDict),
             CurCommitTime = max(NowPrepTime, MinCommitTS+1),
@@ -1272,7 +1272,9 @@ abort_specula_tx(TxId, PendingTxs, RepDict, DepDict) ->
     ?CLOCKSI_VNODE:abort(RemoteParts, TxId),
     ?REPL_FSM:repl_abort(RemoteParts, TxId, RepDict),
     %abort_to_table(RemoteParts, TxId, RepDict),
-    {PendingTxs1, dict:erase(TxId, DepDict), ToAbortTxs}.
+    DepDict1 = dict:erasr(TxId, DepDict),
+    lager:warning("After aborting ~w, find from dict is ~w", [TxId, dict:find(TxId, DepDict1)]),
+    {PendingTxs1, DepDict1, ToAbortTxs}.
 
 abort_tx(TxId, LocalParts, RemoteParts, RepDict, Stage) ->
     abort_tx(TxId, LocalParts, RemoteParts, RepDict, Stage, ignore).
