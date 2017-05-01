@@ -1093,7 +1093,7 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                                           pending_txs=PendingTxs1, client_dict=ClientDict1, time_blocked=TB+timer:now_diff(os:timestamp(), BlockedTime)}, ClientsOfCommTxns);
                                 _Entry -> 
                                     lager:warning("Entry is ~w", [_Entry]),
-                                    ClientDict1 = dict:store(Client, ClientState#c_state{pending_list=Prev, invalid_aborted=1}, ClientDict), 
+                                    ClientDict1 = dict:store(Client, ClientState#c_state{pending_list=Prev, invalid_aborted=1, aborted_update=get_older(AbortedUpdate, TxId)}, ClientDict), 
                                     try_solve_pending(ToCommitTxs, Rest++NewToAbort, SD0#state{pending_txs=PendingTxs1, 
                                         client_dict=ClientDict1}, ClientsOfCommTxns)
                            end
@@ -1141,7 +1141,7 @@ try_solve_pending([{NowPrepTime, LOC, PendingTxId}|Rest], [], SD0=#state{client_
             {PendingTxs2, NewPendingList, NewMaxPT, DepDict2, NewToAbort, MyNext, ClientDict2, CommittedTxs, NewTB1}= 
                 try_commit_follower(CommitTime, ListRest, RepDict, DepDict1, PendingTxs1, ClientDict1, [], [], [], 0), 
             CS2 = dict:fetch(Client, ClientDict2),
-            lager:warning("~w committed, time is ~w", [PendingTxId, Now]),
+            lager:warning("~w committed, time is ~w, Committed updates is ~w", [PendingTxId, Now, CommittedTxs]),
             ClientDict3 = dict:store(Client, CS2#c_state{pending_list=NewPendingList, 
                     committed_updates=CommittedTxs++[{PendingTxId, Now}|CommittedUpdates]}, ClientDict2),
             try_solve_pending(Rest++MayCommitTxs++MyNext, Rest++ToAbortTxs++NewToAbort, SD0#state{min_commit_ts=NewMaxPT, dep_dict=DepDict2, 
