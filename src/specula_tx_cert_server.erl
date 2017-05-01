@@ -513,77 +513,101 @@ handle_cast({load, Sup, Type, Param}, SD0) ->
 
 handle_cast({read_blocked, TxId, LastLOC, LastFFC, Value, Sender}, SD0=#state{dep_dict=DepDict, client_dict=ClientDict, num_blocked=NB}) ->
     lager:warning("Read is blocked for ~w, LastLOC is ~w, LastFFC is ~w !", [TxId, LastLOC, LastFFC]),
-    case ets:lookup(anti_dep, TxId) of
-        [] -> lager:warning("Anti dep is empty!!!"), TxId=error,
-            {noreply, SD0};
-        [{TxId, {_LOC, LOCList}, FFC, Deps}] ->
-            case dict:fetch(TxId, DepDict) of 
-                {0, SolvedReadDeps, ToRemoveLOC, 0} -> 
-                    NewFFC = max(FFC, LastFFC),
-                    RemainLOC = case LastLOC of inf -> delete_some_elems(ToRemoveLOC, LOCList); 
-                                                _ -> delete_some_elems(ToRemoveLOC, [LastLOC|LOCList])
-                                end,
-                    CurrentLOC = case RemainLOC of [] -> inf; _ -> lists:min(RemainLOC) end,
-                    RemainDeps = delete_some_elems(SolvedReadDeps, Deps),
-                    case CurrentLOC >= NewFFC of
-                        true ->
-                           lager:warning("LastFFC ~w, New ~w, LOC ~w, RemainLOC ~w, Replying to ~w", [LastFFC, NewFFC, LOCList, RemainLOC, Sender]),
-                            ets:insert(anti_dep, {TxId, {CurrentLOC, RemainLOC}, NewFFC, RemainDeps}),
-                            gen_server:reply(Sender, {ok, Value}),
-                            {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}};
-                        false ->
-                            lager:warning("LastFFC ~w, New ~w, LOC ~w, RemainLOC ~w, reader is blocked",[LastFFC, NewFFC, LOCList, RemainLOC]),
-                            ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
-                            case ClientState#c_state.invalid_aborted of
-                                1 -> 
-                                    lager:warning("Reply directly for ~w to ~w", [TxId, Sender]),
-                                    ets:insert(anti_dep, {TxId, {inf, []}, 0, []}),
+    ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
+    case ClientState#c_state.invalid_aborted of
+        1 -> 
+            case ClientState#c_state.tx_id of
+                TxId ->
+                    ets:insert(anti_dep, {TxId, {inf, []}, 0, []}),
+                    gen_server:reply(Sender, {ok, Value}),
+                    {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}}; 
+                _ -> ok
+            end;
+        _ ->
+            case ets:lookup(anti_dep, TxId) of
+                [] -> lager:warning("Anti dep is empty!!!"), TxId=error,
+                    {noreply, SD0};
+                [{TxId, {_LOC, LOCList}, FFC, Deps}] ->
+                    case dict:fetch(TxId, DepDict) of 
+                        {0, SolvedReadDeps, ToRemoveLOC, 0} -> 
+                            NewFFC = max(FFC, LastFFC),
+                            RemainLOC = case LastLOC of inf -> delete_some_elems(ToRemoveLOC, LOCList); 
+                                                        _ -> delete_some_elems(ToRemoveLOC, [LastLOC|LOCList])
+                                        end,
+                            CurrentLOC = case RemainLOC of [] -> inf; _ -> lists:min(RemainLOC) end,
+                            RemainDeps = delete_some_elems(SolvedReadDeps, Deps),
+                            case CurrentLOC >= NewFFC of
+                                true ->
+                                   lager:warning("LastFFC ~w, New ~w, LOC ~w, RemainLOC ~w, Replying to ~w", [LastFFC, NewFFC, LOCList, RemainLOC, Sender]),
+                                    ets:insert(anti_dep, {TxId, {CurrentLOC, RemainLOC}, NewFFC, RemainDeps}),
                                     gen_server:reply(Sender, {ok, Value}),
-                                    {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}}; 
-                                _ ->
-                                    lager:warning("~w blocked", [TxId]),
-                                    {noreply, SD0#state{dep_dict=dict:store(TxId, {0, RemainDeps, RemainLOC, NewFFC, 0, {ok, Value}, Sender, os:timestamp()}, DepDict), num_blocked=NB+1}}
+                                    {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}};
+                                false ->
+                                    lager:warning("LastFFC ~w, New ~w, LOC ~w, RemainLOC ~w, reader is blocked",[LastFFC, NewFFC, LOCList, RemainLOC]),
+                                    ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
+                                    case ClientState#c_state.invalid_aborted of
+                                        1 -> 
+                                            lager:warning("Reply directly for ~w to ~w", [TxId, Sender]),
+                                            ets:insert(anti_dep, {TxId, {inf, []}, 0, []}),
+                                            gen_server:reply(Sender, {ok, Value}),
+                                            {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}}; 
+                                        _ ->
+                                            lager:warning("~w blocked", [TxId]),
+                                            {noreply, SD0#state{dep_dict=dict:store(TxId, {0, RemainDeps, RemainLOC, NewFFC, 0, {ok, Value}, Sender, os:timestamp()}, DepDict), num_blocked=NB+1}}
+                                    end
                             end
                     end
             end
     end;
 
 handle_cast({rr_value, TxId, Sender, TS, Value}, SD0=#state{dep_dict=DepDict, client_dict=ClientDict, num_blocked=NB}) ->
-   lager:warning("Remote read result for ~w is ~w!", [TxId, Value]),
-    case ets:lookup(anti_dep, TxId) of
-        [] -> 
-            ets:insert(anti_dep, {TxId, {inf, []}, TS, []}),
-            lager:warning("First time replying, Sender is ~w", [Sender]),
-            gen_server:reply(Sender, {ok,Value}),
-            {noreply, SD0};
-        [{TxId, {_LOC, LOCList}, FFC, Deps}]=_AntiDep ->
-            lager:warning("Get blocked, LOCList is ~w, FFC is ~w", [LOCList, FFC]),
-            case TS =< FFC of
-                true -> lager:warning("Directly replying to ~w", [Sender]),
-                        gen_server:reply(Sender, {ok,Value}), 
-                        {noreply, SD0};
-                false ->
-                    case dict:fetch(TxId, DepDict) of 
-                        {0, SolvedReadDeps, ToRemoveLOC, 0}=_Entry -> 
-                            RemainLOC = delete_some_elems(ToRemoveLOC, LOCList),
-                            CurrentLOC = case RemainLOC of [] -> inf; _ -> lists:min(RemainLOC) end,
-                            RemainDeps = delete_some_elems(SolvedReadDeps, Deps),
-                            case CurrentLOC >= TS of
-                                true ->
-                                    lager:warning("Actually unblocked, CurrentLOC is ~w, TS is ~w", [CurrentLOC, TS]),
-                                    ets:insert(anti_dep, {TxId, {CurrentLOC, RemainLOC}, TS, RemainDeps}),
-                                    gen_server:reply(Sender, {ok, Value}),
-                                    {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}};
-                                false ->
-                                    lager:warning("Get blocked, TS is ~w, AntiDep is ~w, Entry is ~w", [TS, _AntiDep, _Entry]),
-                                    ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
-                                    case ClientState#c_state.invalid_aborted of
-                                        1 -> 
-                                            ets:insert(anti_dep, {TxId, {inf, []}, 0, []}),
+    lager:warning("Remote read result for ~w is ~w!", [TxId, Value]),
+    ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
+    case ClientState#c_state.invalid_aborted of
+        1 -> 
+            case ClientState#c_state.tx_id of
+                TxId ->
+                    ets:insert(anti_dep, {TxId, {inf, []}, 0, []}),
+                    gen_server:reply(Sender, {ok, Value}),
+                    {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}}; 
+                _ -> ok
+            end;
+        _ ->
+            case ets:lookup(anti_dep, TxId) of
+                [] -> 
+                    ets:insert(anti_dep, {TxId, {inf, []}, TS, []}),
+                    lager:warning("First time replying, Sender is ~w", [Sender]),
+                    gen_server:reply(Sender, {ok,Value}),
+                    {noreply, SD0};
+                [{TxId, {_LOC, LOCList}, FFC, Deps}]=_AntiDep ->
+                    lager:warning("Get blocked, LOCList is ~w, FFC is ~w", [LOCList, FFC]),
+                    case TS =< FFC of
+                        true -> lager:warning("Directly replying to ~w", [Sender]),
+                                gen_server:reply(Sender, {ok,Value}), 
+                                {noreply, SD0};
+                        false ->
+                            case dict:fetch(TxId, DepDict) of 
+                                {0, SolvedReadDeps, ToRemoveLOC, 0}=_Entry -> 
+                                    RemainLOC = delete_some_elems(ToRemoveLOC, LOCList),
+                                    CurrentLOC = case RemainLOC of [] -> inf; _ -> lists:min(RemainLOC) end,
+                                    RemainDeps = delete_some_elems(SolvedReadDeps, Deps),
+                                    case CurrentLOC >= TS of
+                                        true ->
+                                            lager:warning("Actually unblocked, CurrentLOC is ~w, TS is ~w", [CurrentLOC, TS]),
+                                            ets:insert(anti_dep, {TxId, {CurrentLOC, RemainLOC}, TS, RemainDeps}),
                                             gen_server:reply(Sender, {ok, Value}),
-                                            {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}}; 
-                                        _ ->
-                                            {noreply, SD0#state{dep_dict=dict:store(TxId, {0, RemainDeps, RemainLOC, TS, 0, {ok, Value}, Sender, os:timestamp()}, DepDict), num_blocked=NB+1}}
+                                            {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}};
+                                        false ->
+                                            lager:warning("Get blocked, TS is ~w, AntiDep is ~w, Entry is ~w", [TS, _AntiDep, _Entry]),
+                                            ClientState = dict:fetch(TxId#tx_id.client_pid, ClientDict),
+                                            case ClientState#c_state.invalid_aborted of
+                                                1 -> 
+                                                    ets:insert(anti_dep, {TxId, {inf, []}, 0, []}),
+                                                    gen_server:reply(Sender, {ok, Value}),
+                                                    {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}}; 
+                                                _ ->
+                                                    {noreply, SD0#state{dep_dict=dict:store(TxId, {0, RemainDeps, RemainLOC, TS, 0, {ok, Value}, Sender, os:timestamp()}, DepDict), num_blocked=NB+1}}
+                                            end
                                     end
                             end
                     end
@@ -1006,7 +1030,8 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                                     ClientDict1 = dict:store(Client, ClientState#c_state{invalid_aborted=1}, ClientDict), 
                                     try_solve_pending(ToCommitTxs, Rest, SD0#state{client_dict=ClientDict1, dep_dict=DepDict1, time_blocked=timer:now_diff(os:timestamp(), TimeBlocked)+TB}, ClientsOfCommTxns);
                                   _ -> 
-                                    try_solve_pending(ToCommitTxs, Rest, SD0, ClientsOfCommTxns)
+                                    ClientDict1 = dict:store(Client, ClientState#c_state{invalid_aborted=1}, ClientDict), 
+                                    try_solve_pending(ToCommitTxs, Rest, SD0#state{client_dict=ClientDict1}, ClientsOfCommTxns)
                             end
                     end;
                 _ -> %% The transaction has already been aborted or whatever

@@ -807,7 +807,7 @@ multi_read_version(_Key, List, [], _) ->
     List;
 multi_read_version({_, RealKey}, [], SenderInfos, ignore) -> %% In cache 
     lists:foreach(fun({ReaderTxId, Node, Sender}) ->
-            %lager:warning("Send read of ~w from ~w to ~w", [RealKey, ReaderTxId, Sender]),
+            lager:warning("Send read of ~w from ~w to ~w", [RealKey, ReaderTxId, Sender]),
             clocksi_vnode:remote_read(Node, RealKey, ReaderTxId, Sender)
                   end, SenderInfos),
     [];
