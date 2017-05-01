@@ -946,7 +946,7 @@ try_solve_pending([], [], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, d
         false ->
             try_solve_pending(NewMayCommit, NewToAbort, SD1, [])
     end;
-try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, pending_txs=PendingTxs, dep_dict=DepDict}, ClientsOfCommTxns) ->
+try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=ClientDict, rep_dict=RepDict, pending_txs=PendingTxs, dep_dict=DepDict, time_blocked=TB}, ClientsOfCommTxns) ->
     Client = TxId#tx_id.client_pid,
     ClientState = dict:fetch(Client, ClientDict),
     CurrentTxId = ClientState#c_state.tx_id, 
@@ -997,17 +997,17 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                                 SD0#state{dep_dict=RD1, client_dict=ClientDict1}, ClientsOfCommTxns);
                             %{noreply, SD0#state{dep_dict=RD1, client_dict=ClientDict1, read_aborted=RAD1, read_invalid=RID1}};
                         read ->
-                            DepDict1 = case DepEntry of
-                                          {ok, {0, RemainReadDeps, _RemainLOC, FFC, 0, Value, ReadSender}} ->
-                                              %% Should actually abort here!!!!!
-                                              ets:insert(anti_dep, {TxId, {inf, []}, FFC, RemainReadDeps}),
-                                              gen_server:reply(ReadSender, Value),
-                                              dict:store(TxId, {0, [], [], 0}, DepDict);
-                                          _ -> DepDict
-                                       end,
-                            ClientDict1 = dict:store(Client, ClientState#c_state{invalid_aborted=1}, ClientDict), 
-                            try_solve_pending(ToCommitTxs, Rest, SD0#state{client_dict=ClientDict1, dep_dict=DepDict1}, ClientsOfCommTxns)
-                            %{noreply, SD0#state{client_dict=ClientDict1}}
+                            case DepEntry of
+                                {ok, {0, RemainReadDeps, _RemainLOC, FFC, 0, Value, ReadSender, TimeBlocked}} ->
+                                    %% Should actually abort here!!!!!
+                                    ets:insert(anti_dep, {TxId, {inf, []}, FFC, RemainReadDeps}),
+                                    gen_server:reply(ReadSender, Value),
+                                    DepDict1 = dict:store(TxId, {0, [], [], 0}, DepDict),
+                                    ClientDict1 = dict:store(Client, ClientState#c_state{invalid_aborted=1}, ClientDict), 
+                                    try_solve_pending(ToCommitTxs, Rest, SD0#state{client_dict=ClientDict1, dep_dict=DepDict1, time_blocked=timer:now_diff(os:timestamp(), TimeBlocked)+TB}, ClientsOfCommTxns);
+                                  _ -> 
+                                    try_solve_pending(ToCommitTxs, Rest, SD0, ClientsOfCommTxns)
+                            end
                     end;
                 _ -> %% The transaction has already been aborted or whatever
                     lager:warning("~w is not current tx ~w", [TxId, CurrentTxId]),
