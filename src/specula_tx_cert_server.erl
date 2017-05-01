@@ -521,7 +521,8 @@ handle_cast({read_blocked, TxId, LastLOC, LastFFC, Value, Sender}, SD0=#state{de
                     ets:insert(anti_dep, {TxId, {inf, []}, 0, []}),
                     gen_server:reply(Sender, {ok, Value}),
                     {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}}; 
-                _ -> ok
+                _ -> 
+                    {noreply, SD0}
             end;
         _ ->
             case ets:lookup(anti_dep, TxId) of
@@ -570,7 +571,8 @@ handle_cast({rr_value, TxId, Sender, TS, Value}, SD0=#state{dep_dict=DepDict, cl
                     ets:insert(anti_dep, {TxId, {inf, []}, 0, []}),
                     gen_server:reply(Sender, {ok, Value}),
                     {noreply, SD0#state{dep_dict=dict:store(TxId, {0, [], [], 0}, DepDict)}}; 
-                _ -> ok
+                _ -> 
+                    {noreply, SD0}
             end;
         _ ->
             case ets:lookup(anti_dep, TxId) of
