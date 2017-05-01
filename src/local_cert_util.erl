@@ -807,7 +807,7 @@ multi_read_version(_Key, List, [], _) ->
     List;
 multi_read_version({_, RealKey}, [], SenderInfos, ignore) -> %% In cache 
     lists:foreach(fun({ReaderTxId, Node, Sender}) ->
-            lager:warning("Send read of ~w from ~w to ~w", [RealKey, ReaderTxId, Sender]),
+            %lager:warning("Send read of ~w from ~w to ~w", [RealKey, ReaderTxId, Sender]),
             clocksi_vnode:remote_read(Node, RealKey, ReaderTxId, Sender)
                   end, SenderInfos),
     [];
@@ -964,13 +964,13 @@ read_value(Key, TxId, Sender, InMemoryStore) ->
     end.
 
 remote_read_value(Key, TxId, Sender, InMemoryStore) ->
-   lager:warning("~w remote reading ~w", [TxId, Key]),
+   %lager:warning("~w remote reading ~w", [TxId, Key]),
     case ets:lookup(InMemoryStore, Key) of
         [] ->
-            lager:warning("Directly reply to ~w", [Sender]),
+            %lager:warning("Directly reply to ~w", [Sender]),
             gen_server:reply(Sender, {ok, []});
         [{Key, ValueList}] ->
-            lager:warning("~w trying to read ~w", [TxId, Key]),
+            %lager:warning("~w trying to read ~w", [TxId, Key]),
             MyClock = TxId#tx_id.snapshot_time,
             find_version_for_remote(ValueList, MyClock, TxId, Sender)
     end.
@@ -994,8 +994,8 @@ find_version([{TS, Value}|Rest], SnapshotTime, TxId, Sender) ->
                                     ets:insert(anti_dep, {TxId, {LOC, LOCList}, TS, Deps}),
                                     gen_server:reply(Sender, {ok, Value});
                                 false ->
-                                   lager:warning("~w has ~w, ~w, ~w, ~w", [TxId, LOC, LOCList, FFC, Deps]),
-                                   lager:warning("~w blocked when trying to read, TS is ~w, LOC is ~w", [TxId, TS, LOC]),
+                                   %lager:warning("~w has ~w, ~w, ~w, ~w", [TxId, LOC, LOCList, FFC, Deps]),
+                                   %lager:warning("~w blocked when trying to read, TS is ~w, LOC is ~w", [TxId, TS, LOC]),
                                     gen_server:cast(TxId#tx_id.server_pid, {read_blocked, TxId, inf, TS, Value, Sender})
                             end
                     end 
@@ -1010,7 +1010,7 @@ find_version_for_remote([],  _SnapshotTime, _, Sender) ->
 find_version_for_remote([{TS, Value}|Rest], SnapshotTime, TxId, Sender) ->
     case SnapshotTime >= TS of
         true ->
-           lager:warning("Send ~w of ~w to its coord, It's TS is ~w", [Value, TxId, TS]),
+           %lager:warning("Send ~w of ~w to its coord, It's TS is ~w", [Value, TxId, TS]),
             gen_server:cast(TxId#tx_id.server_pid, {rr_value, TxId, Sender, TS, Value});
         false ->
             find_version_for_remote(Rest, SnapshotTime, TxId, Sender)
