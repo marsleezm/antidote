@@ -263,11 +263,11 @@ handle_call({certify_read, TxId, ClientMsgId, Client}, Sender, SD0=#state{min_co
                 {1, _} ->
                     case ClientState#client_state.aborted_update of
                         ?NO_TXN -> 
-                            %lgaer:warning("Aborted ~w", [TxId]),
+                            %lager:warning("Aborted ~w", [TxId]),
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
                                     committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                             DepDict1 = dict:erase(TxId, DepDict),
-                            {reply, {aborted, {[TxId|AbortedReads], rev(CommittedUpdates), lists:sort(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
+                            {reply, {aborted, {true, [TxId|AbortedReads], rev(CommittedUpdates), lists:sort(CommittedReads)}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                         AbortedTxId ->
                             %lgaer:warning("Cascade aborted aborted txid is ~w, TxId is  ~w", [AbortedTxId, TxId]),
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
@@ -358,10 +358,11 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                      %lgaer:warning("InvalidAborted ~w", [InvalidAborted]),
                     case ClientState#client_state.aborted_update of
                         ?NO_TXN -> 
+                            %lager:warning("Cascading abort!"),
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
                                     committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
                             DepDict1 = dict:erase(TxId, DepDict),
-                            {reply, {aborted, {AbortedReads, rev(CommittedUpdates), CommittedReads}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
+                            {reply, {aborted, {true, AbortedReads, rev(CommittedUpdates), CommittedReads}}, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
                         AbortedTxId ->
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, aborted_update=?NO_TXN, aborted_reads=[],
                                             committed_updates=[], committed_reads=[], invalid_aborted=0}, ClientDict),
@@ -830,24 +831,24 @@ try_solve_pending(ToCommitTxs, [{FromNode, TxId}|Rest], SD0=#state{client_dict=C
                 CurrentTxId ->
                     case Stage of
                         local_cert ->
-                            %lgaer:warning("~w abort local!", [TxId]),
+                            %lager:warning("~w abort local!", [TxId]),
                             NewToAbort = case FromNode of [] -> abort_tx(TxId, LocalParts, [], RepDict);
                                                           _ ->  abort_tx(TxId, lists:delete(FromNode, LocalParts), [], RepDict)
                             end,
                             RD1 = dict:erase(TxId, DepDict),
-                            gen_server:reply(Sender, {aborted, {AbortedReads, rev(CommittedUpdates), CommittedReads}}),
+                            gen_server:reply(Sender, {aborted, {false, AbortedReads, rev(CommittedUpdates), CommittedReads}}),
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, committed_updates=[], committed_reads=[], aborted_reads=[]}, ClientDict), 
                             try_solve_pending(ToCommitTxs, Rest++NewToAbort, 
                                 SD0#state{dep_dict=RD1, client_dict=ClientDict1}, ClientsOfCommTxns);
                             %{noreply, SD0#state{dep_dict=RD1, read_aborted=RAD1, read_invalid=RID1, client_dict=ClientDict1}};
                         remote_cert ->
-                             %lgaer:warning("~w abort remote!", [TxId]),
+                            %lager:warning("~w abort remote!", [TxId]),
                             RemoteParts = [P||{P, _} <-RemoteUpdates],
                             NewToAbort = case FromNode of [] -> abort_tx(TxId, LocalParts, RemoteParts, RepDict);
                                                           _ -> abort_tx(TxId, LocalParts, lists:delete(FromNode, RemoteParts), RepDict)
                             end,
                             RD1 = dict:erase(TxId, DepDict),
-                            gen_server:reply(Sender, {aborted, {AbortedReads, rev(CommittedUpdates), CommittedReads}}),
+                            gen_server:reply(Sender, {aborted, {true, AbortedReads, rev(CommittedUpdates), CommittedReads}}),
                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=?NO_TXN, committed_updates=[], committed_reads=[], aborted_reads=[]}, ClientDict), 
                             try_solve_pending(ToCommitTxs, Rest++NewToAbort, 
                                 SD0#state{dep_dict=RD1, client_dict=ClientDict1}, ClientsOfCommTxns);
