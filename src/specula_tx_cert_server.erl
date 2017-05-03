@@ -388,7 +388,7 @@ handle_call({certify_update, TxId, LocalUpdates, RemoteUpdates, ClientMsgId}, Se
                                            %lager:warning("remote prepr for ~w", [TxId]),
                                             ?CLOCKSI_VNODE:prepare(RemoteUpdates, TxId, {remote, ignore}),
                                             DepDict1 = dict:store(TxId, 
-                                                    {ReplFactor*length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1, os:timestamp()}, DepDict),
+                                                    {ReplFactor*length(RemotePartitions), ReadDepTxs--B, LastCommitTs+1}, DepDict),
                                             ClientDict1 = dict:store(Client, ClientState#client_state{tx_id=TxId, local_updates=[], 
                                                 remote_updates=RemoteUpdates, stage=remote_cert, sender=Sender, spec_commit_time=os:timestamp()}, ClientDict),
                                             {noreply, SD0#state{dep_dict=DepDict1, client_dict=ClientDict1}};
