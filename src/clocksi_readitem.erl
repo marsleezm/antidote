@@ -27,17 +27,19 @@
 -endif.
 
 %% API
--export([check_prepared/3, return/4]).
+-export([check_prepared/4, return/4]).
 
-check_prepared(Key,TxId,PreparedCache) ->
+check_prepared(Key, TxId, Sender, PreparedCache) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedCache, Key) of
         [] ->
             ready;
-        [{Key, {_TxId, Time}}] ->
+        [{Key, {PrepTxId, Time}, Readers}] ->
             case Time =< SnapshotTime of
                 true ->
-                    {not_ready, 2};
+                    %lager:info("~w of ~w is blocked due to ~w", [TxId, Key, PrepTxId]),
+                    ets:insert(PreparedCache, {Key, {PrepTxId, Time}, [{Sender, TxId}|Readers]}),
+                    not_ready;
                 false ->
                     ready
             end
@@ -48,7 +50,8 @@ check_prepared(Key,TxId,PreparedCache) ->
 return(Key, Type,TxId, SnapshotCache) ->
     case ets:lookup(SnapshotCache, Key) of
         [] ->
-            {ok, Type:new()};
+           %lager:warning("~w: found nothing for ~w", [TxId, Key]),
+            {ok, {Type, Type:new()}};
         [{Key, ValueList}] ->
             MyClock = TxId#tx_id.snapshot_time,
             {ok, find_version(ValueList, MyClock, Type)}
@@ -58,11 +61,13 @@ return(Key, Type,TxId, SnapshotCache) ->
 %%%%%%%%%Intenal%%%%%%%%%%%%%%%%%%
 find_version([], _SnapshotTime, Type) ->
     %{error, not_found};
-    Type:new();
+   %lager:warning("found nothing ~w", [Key]),
+    {Type, Type:new()};
 find_version([{TS, Value}|Rest], SnapshotTime, Type) ->
     case SnapshotTime >= TS of
         true ->
-            Value;
+           %lager:warning("found something for ~w", [Key]),
+            {Type, Value};
         false ->
             find_version(Rest, SnapshotTime, Type)
     end.

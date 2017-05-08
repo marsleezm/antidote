@@ -112,6 +112,7 @@ async_read_data_item(Node, Key, Type, TxId) ->
 prepare(ListofNodes, TxId) ->
     Self = {fsm, undefined, self()},
     dict:fold(fun(Node,WriteSet,_Acc) ->
+           %lager:warning("~w sending prepare to ~w", [TxId, Node]),
 			riak_core_vnode_master:command(Node,
 						       {prepare, TxId,WriteSet, Self},
                                Self,
@@ -159,6 +160,7 @@ init([Partition]) ->
 
     IfCertify = antidote_config:get(do_cert),
     IfReplicate = antidote_config:get(do_repl),
+    IfReplicate = false,
 
     _ = case IfReplicate of
                     true ->
@@ -206,7 +208,7 @@ print_stat() ->
     print_stat(PartitionList, {0,0,0,0,0,0,0}).
 
 print_stat([], {CommitAcc, AbortAcc, CertFailAcc, BlockedAcc, TimeAcc, CntAcc, BlockedTime}) ->
-    lager:info("Total number committed is ~w, total number aborted is ~w, cer fail is ~w, num blocked is ~w,Avg time is ~w, Avg blocked time is ~w", [CommitAcc, AbortAcc, CertFailAcc, BlockedAcc, TimeAcc div max(1,CntAcc), BlockedTime div max(1,BlockedAcc)]),
+   %lager:info("Total number committed is ~w, total number aborted is ~w, cer fail is ~w, num blocked is ~w,Avg time is ~w, Avg blocked time is ~w", [CommitAcc, AbortAcc, CertFailAcc, BlockedAcc, TimeAcc div max(1,CntAcc), BlockedTime div max(1,BlockedAcc)]),
     {CommitAcc, AbortAcc, CertFailAcc, BlockedAcc, TimeAcc, CntAcc, BlockedTime};
 print_stat([{Partition,Node}|Rest], {CommitAcc, AbortAcc, CertFailAcc, BlockedAcc, TimeAcc, CntAcc, BlockedTime}) ->
     {Commit, Abort, Cert, BlockedA, TimeA, CntA, BlockedTimeA} = riak_core_vnode_master:sync_command({Partition,Node},
@@ -231,7 +233,7 @@ check_prepared_empty([{Partition,Node}|Rest]) ->
 	    true ->
             ok;
 	    false ->
-            lager:warning("Prepared not empty!")
+           lager:warning("Prepared not empty!")
     end,
 	check_prepared_empty(Rest).
 
@@ -256,7 +258,7 @@ handle_command({check_tables_ready},_Sender,SD0=#state{partition=Partition}) ->
 
 handle_command({print_stat},_Sender,SD0=#state{partition=Partition, num_aborted=NumAborted, blocked_time=BlockedTime,
                     num_committed=NumCommitted, num_cert_fail=NumCertFail, num_blocked=NumBlocked, total_time=A6, prepare_count=A7}) ->
-    lager:info("~w: committed is ~w, aborted is ~w, num cert fail ~w, num blocked ~w, avg blocked time ~w",[Partition, 
+   lager:info("~w: committed is ~w, aborted is ~w, num cert fail ~w, num blocked ~w, avg blocked time ~w",[Partition, 
             NumCommitted, NumAborted, NumCertFail, NumBlocked, BlockedTime div max(1,NumBlocked)]),
     {reply, {NumCommitted, NumAborted, NumCertFail, NumBlocked, A6, A7, BlockedTime}, SD0};
     
@@ -266,7 +268,7 @@ handle_command({check_prepared_empty},_Sender,SD0=#state{prepared_txs=PreparedTx
 		 0 ->
             {reply, true, SD0};
 		 _ ->
-            lager:warning("Not empty!! ~w", [PreparedList]),
+           %lager:warning("Not empty!! ~w", [PreparedList]),
             {reply, false, SD0}
     end;
 
@@ -274,28 +276,31 @@ handle_command({check_servers_ready},_Sender,SD0) ->
     {reply, true, SD0};
 
 handle_command({read, Key, Type, TxId}, Sender, SD0=#state{num_blocked=NumBlocked,
-            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=Partition}) ->
+            prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
     clock_service:update_ts(TxId#tx_id.snapshot_time),
-    case clocksi_readitem:check_prepared(Key, TxId, PreparedTxs) of
-        {not_ready, Delay} ->
-            spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
-                         Sender, now_microsec(now())}, {Partition, node()}]),
+    case clocksi_readitem:check_prepared(Key, TxId, Sender, PreparedTxs) of
+        not_ready ->
+            %spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
+            %             Sender, now_microsec(now())}, {Partition, node()}]),
             {noreply, SD0#state{num_blocked=NumBlocked+1}};
         ready ->
             Result = clocksi_readitem:return(Key, Type, TxId, InMemoryStore),
+           %lager:warning("~w Replying ~w", [TxId, Result]),
             {reply, Result, SD0}
     end;
 
 
-handle_command({async_read, Key, Type, TxId, OrgSender, LastTime}, _Sender,SD0=#state{num_blocked=NumBlocked, blocked_time=BlockedTime, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, partition=Partition}) ->
+handle_command({async_read, Key, Type, TxId, OrgSender, LastTime}, Sender,SD0=#state{num_blocked=NumBlocked, blocked_time=BlockedTime, prepared_txs=PreparedTxs, inmemory_store=InMemoryStore}) ->
     clock_service:update_ts(TxId#tx_id.snapshot_time),
-    case clocksi_readitem:check_prepared(Key, TxId, PreparedTxs) of
-        {not_ready, Delay} ->
-            spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
-                         OrgSender, LastTime}, {Partition, node()}]),
+    case clocksi_readitem:check_prepared(Key, TxId, Sender, PreparedTxs) of
+        not_ready ->
+           %lager:warning("~w: ~w is prepared, so read later!!!", [TxId, Key]),
+            %spawn(clocksi_vnode, async_send_msg, [Delay, {async_read, Key, Type, TxId,
+            %             OrgSender, LastTime}, {Partition, node()}]),
             {noreply, SD0#state{num_blocked=NumBlocked+1}};
         ready ->
             Result = clocksi_readitem:return(Key, Type, TxId, InMemoryStore),
+           %lager:warning("~w Replying ~w", [TxId, Result]),
             riak_core_vnode:reply(OrgSender, Result),
             {noreply, SD0#state{blocked_time=BlockedTime+now_microsec(now())-LastTime}}
     end;
@@ -310,9 +315,11 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                               num_cert_fail=NumCertFail,
                               prepared_txs=PreparedTxs
                               }) ->
+   %lager:warning("Trying to prepare ~w, WriteSet is ~w", [TxId, WriteSet]),
     Result = prepare(TxId, WriteSet, CommittedTx, PreparedTxs, IfCertify),
     case Result of
         {ok, PrepareTime} ->
+           %lager:warning("Prepared ~w, if rep is ~w", [TxId, IfReplicate]),
             UsedTime = now_microsec(erlang:now()) - PrepareTime,
             case IfReplicate of
                 true ->
@@ -324,11 +331,8 @@ handle_command({prepare, TxId, WriteSet, OriginalSender}, _Sender,
                     riak_core_vnode:reply(OriginalSender, {prepared, TxId, PrepareTime}),
                     {noreply, State#state{total_time=TotalTime+UsedTime, prepare_count=PrepareCount+1}} 
             end;
-        {error, wait_more} ->
-            spawn(clocksi_vnode, async_send_msg, [2, {prepare, TxId, 
-                        WriteSet, OriginalSender}, {Partition, node()}]),
-            {noreply, State};
         {error, write_conflict} ->
+           %lager:warning("~w abort!", [TxId]),
             riak_core_vnode:reply(OriginalSender, {abort, TxId}),
             {noreply, State#state{num_cert_fail=NumCertFail+1, prepare_count=PrepareCount+1}}
     end;
@@ -375,6 +379,7 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
                       inmemory_store=InMemoryStore,
                       num_committed=NumCommitted
                       } = State) ->
+   %lager:warning("~w being committed", [TxId]),
     Result = commit(TxId, TxCommitTime, Updates, CommittedTx, PreparedTxs, InMemoryStore),
     case Result of
         {ok, {committed,NewCommittedTx}} ->
@@ -394,12 +399,27 @@ handle_command({commit, TxId, TxCommitTime, Updates}, Sender,
     end;
 
 handle_command({abort, TxId, Updates}, _Sender,
-               #state{partition=_Partition, prepared_txs=PreparedTxs, num_aborted=NumAborted} = State) ->
+               #state{partition=_Partition, prepared_txs=PreparedTxs, 
+                    inmemory_store=InMemoryStore, num_aborted=NumAborted} = State) ->
+   %lager:warning("Aborting ~w, updates are ~w", [TxId, Updates]),
     case Updates of
         [] ->
             {reply, {error, no_tx_record}, State};
         _ -> 
-            clean_prepared(PreparedTxs,Updates,TxId),
+            lists:foreach(fun({Key, Type, _Op}) ->
+                            case ets:lookup(PreparedTxs, Key) of
+                                [{Key, {TxId, _}, Readers}] ->
+                                    SV = case ets:lookup(InMemoryStore, Key) of
+                                              [] ->
+                                                  Type:new();
+                                              [{Key, ValueList}] ->
+                                                  [{_CommitTime, First}|_] = ValueList,
+                                                  First
+                                          end,
+                                    reply_pending_readers(Readers, abort, Type, nothing, SV),
+                                    ets:delete(PreparedTxs, Key);
+                                _ -> ok 
+                            end end, Updates), 
             {noreply, State#state{num_aborted=NumAborted+1}}
     end;
 
@@ -464,9 +484,7 @@ prepare(TxId, TxWriteSet, CommittedTx, PreparedTxs, IfCertify)->
 		    set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime),
 		    {ok, PrepareTime};
 	    false ->
-	        {error, write_conflict};
-        wait ->
-            {error,  wait_more}
+	        {error, write_conflict}
     end.
 
 prepare_and_commit(TxId, TxWriteSet, CommittedTx, PreparedTxs, InMemoryStore, IfCertify)->
@@ -475,33 +493,31 @@ prepare_and_commit(TxId, TxWriteSet, CommittedTx, PreparedTxs, InMemoryStore, If
             CommitTime = clock_service:increment_ts(TxId#tx_id.snapshot_time),
             case TxWriteSet of
                   [{Key, _Type, _Value} | _Rest] ->
-                      update_store(TxWriteSet, TxId, CommitTime, InMemoryStore),
                       NewDict = dict:store(Key, CommitTime, CommittedTx),
-                      clean_prepared(PreparedTxs, TxWriteSet, TxId),
+                      %clean_prepared(PreparedTxs, TxWriteSet, TxId, CommitTime, InMemoryStore),
+                      update_store(TxWriteSet, TxId, CommitTime, PreparedTxs, InMemoryStore),
                       {ok, {committed, CommitTime, NewDict}};
                   _ ->
                       {error, no_updates}
             end;
 	    false ->
-	        {error, write_conflict};
-        wait ->
-            {error,  wait_more}
+	        {error, write_conflict}
     end.
 
 
 set_prepared(_PreparedTxs,[],_TxId,_Time) ->
     ok;
 set_prepared(PreparedTxs,[{Key, _Type, _Op} | Rest],TxId,Time) ->
-    true = ets:insert(PreparedTxs, {Key, {TxId, Time}}),
+    true = ets:insert(PreparedTxs, {Key, {TxId, Time}, []}),
     set_prepared(PreparedTxs,Rest,TxId,Time).
 
 commit(TxId, TxCommitTime, Updates, CommittedTx, 
                                 PreparedTxs, InMemoryStore)->
     case Updates of
         [{Key, _Type, _Value} | _Rest] -> 
-            update_store(Updates, TxId, TxCommitTime, InMemoryStore),
+            update_store(Updates, TxId, TxCommitTime, PreparedTxs, InMemoryStore),
             NewDict = dict:store(Key, TxCommitTime, CommittedTx),
-            clean_prepared(PreparedTxs,Updates,TxId),
+            %clean_prepared(PreparedTxs,Updates,TxId, TxCommitTime, InMemoryStore),
             {ok, {committed, NewDict}};
         _ -> 
             {error, no_updates}
@@ -517,17 +533,19 @@ commit(TxId, TxCommitTime, Updates, CommittedTx,
 %%      a. ActiteTxsPerKey,
 %%      b. PreparedTxs
 %%
-clean_prepared(_PreparedTxs,[],_TxId) ->
-    ok;
-clean_prepared(PreparedTxs,[{Key, _Type, _Op} | Rest],TxId) ->
-    case ets:lookup(PreparedTxs, Key) of
-        [{Key, {TxId, _Time}}] ->
-            true = ets:delete(PreparedTxs, Key);
-        _ ->
-            ok
-    end,   
-    clean_prepared(PreparedTxs,Rest,TxId).
 
+reply_pending_readers([], _CommitTime, _Type, _FV, _SV) ->
+    ok;
+reply_pending_readers([{Sender, TxId}|R], CommitTime, Type, FV, SV) ->
+    case TxId#tx_id.snapshot_time >= CommitTime of
+        true ->
+           %lager:warning("Replying to ~w ~w", [TxId, Value]),
+            riak_core_vnode:reply(Sender, {ok, {Type, FV}}),
+            reply_pending_readers(R, CommitTime, Type, FV, SV);
+        false ->
+            riak_core_vnode:reply(Sender, {ok, {Type, SV}}),
+            reply_pending_readers(R, CommitTime, Type, FV, SV) 
+    end.
 
 %% @doc converts a tuple {MegaSecs,Secs,MicroSecs} into microseconds
 now_microsec({MegaSecs, Secs, MicroSecs}) ->
@@ -575,21 +593,31 @@ check_prepared(TxId, PreparedTxs, Key) ->
 
 -spec update_store(KeyValues :: [{key(), atom(), term()}],
                           TxId::txid(),TxCommitTime:: {term(), term()},
-                                InMemoryStore :: cache_id()) -> ok.
-update_store([], _TxId, _TxCommitTime, _InMemoryStore) ->
+                                PreparedTxs :: cache_id(), InMemoryStore :: cache_id()) -> ok.
+update_store([], _TxId, _TxCommitTime, _PreparedTxs, _InMemoryStore) ->
     ok;
-update_store([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, InMemoryStore) ->
-    case ets:lookup(InMemoryStore, Key) of
-        [] ->
-            Init = Type:new(),
-            {ok, NewSnapshot} = Type:update(Param, Actor, Init),
-            true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}]});
-        [{Key, ValueList}] ->
-            {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
-            [{_CommitTime, First}|_] = RemainList,
-            {ok, NewSnapshot} = Type:update(Param, Actor, First),
-            true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}|RemainList]})
+update_store([{Key, Type, {Param, Actor}}|Rest], TxId, TxCommitTime, PreparedTxs, InMemoryStore) ->
+    {FirstV, SecondV} = case ets:lookup(InMemoryStore, Key) of
+                        [] ->
+                            Init = Type:new(),
+                            {ok, NewSnapshot} = Type:update(Param, Actor, Init),
+                            true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}]}),
+                            {NewSnapshot, Init};
+                        [{Key, ValueList}] ->
+                            {RemainList, _} = lists:split(min(?NUM_VERSION,length(ValueList)), ValueList),
+                            [{_CommitTime, First}|_] = RemainList,
+                            {ok, NewSnapshot} = Type:update(Param, Actor, First),
+                            true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, NewSnapshot}|RemainList]}),
+                            {NewSnapshot, First}
+                    end,
+    case ets:lookup(PreparedTxs, Key) of
+        [{Key, {TxId, _Time}, Readers}] ->
+           %lager:warning("~w is aborting, so cleaning ~w", [TxId, Key]),
+            reply_pending_readers(Readers, TxCommitTime, Type, FirstV, SecondV),
+            true = ets:delete(PreparedTxs, Key);
+        _ ->
+            ok
     end,
-    update_store(Rest, TxId, TxCommitTime, InMemoryStore),
+    update_store(Rest, TxId, TxCommitTime, PreparedTxs, InMemoryStore),
     ok.
 

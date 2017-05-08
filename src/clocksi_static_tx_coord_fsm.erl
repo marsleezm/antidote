@@ -130,19 +130,21 @@ execute_batch_ops(timeout, SD=#state{
                         {read, Key, Type} ->
                             Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
                             IndexNode = hd(Preflist),
-                            %%lager:info("NumToRead count: ~w",[NumToRead+1]),
+                            %lager:info("NumToRead count: ~w, reading key ~w, TxId is ~w",[NumToRead+1, Key, TxId]),
                             ok = ?CLOCKSI_VNODE:async_read_data_item(IndexNode, Key, Type, TxId),
                             {UpdatedPartitions, NumToRead+1};
                         {update, Key, Type, Op} ->
                             Preflist = ?LOG_UTIL:get_preflist_from_key(Key),
                             IndexNode = hd(Preflist),
+                            %lager:info("~w trying to update ~w",[TxId, Key]),
                             UpdatedPartitions1 =  dict:append(IndexNode, {Key, Type, Op}, 
                                                             UpdatedPartitions),
                             {UpdatedPartitions1, NumToRead}
                     end
                 end,
     {WriteSet, NumOfReads} = lists:foldl(ProcessOp, {dict:new(),0}, Operations),
-    %lager:info("Operations are ~w, WriteSet is ~w, NumOfReads ~w",[Operations, WriteSet, NumOfReads]),
+     %lager:info("Operations are ~w, WriteSet is ~w, NumOfReads ~w",[Operations, NumOfReads]),
+  %lager:warning("Starting tx ~w", [TxId]),
     case dict:size(WriteSet) of
         0->
             case NumOfReads of
@@ -150,7 +152,7 @@ execute_batch_ops(timeout, SD=#state{
                     reply_to_client(SD#state{state=committed, 
                             commit_time=clocksi_vnode:now_microsec(erlang:now())});
                 _ ->
-                    %%lager:info("Waiting for ~w reads to reply", [NumOfReads]),
+                   %lager:info("Waiting for ~w reads to reply", [NumOfReads]),
                     Snapshot_time=TxId#tx_id.snapshot_time,
                     {next_state, single_committing, SD#state{state=committing, num_to_ack=0, 
                         commit_time=Snapshot_time, num_to_read=NumOfReads}}
@@ -176,7 +178,9 @@ execute_batch_ops(timeout, SD=#state{
 receive_prepared({prepared, _, ReceivedPrepareTime},
                  S0=#state{num_to_ack=NumToAck,
                            num_to_read=NumToRead,
+                           %tx_id = TxId,
                            prepare_time=PrepareTime}) ->
+  %lager:warning("~w received a prepard, remain is ~w", [TxId, NumToAck]),
     MaxPrepareTime = max(PrepareTime, ReceivedPrepareTime),
     case NumToAck of 
         1 ->
@@ -221,9 +225,11 @@ receive_prepared(timeout, S0) ->
 single_committing({ok, {Type, Snapshot}},
                  S0=#state{num_to_read=NumToRead,
                             read_set=ReadSet,
+                            %tx_id=TxId,
                             num_to_ack=NumToAck}) ->
-    %%lager:info("Got some replies ~w", [Type:value(Snapshot)]),
+  %lager:info("~w got some replies ~w, NumToRead is ~w, NumToAck is ~w", [TxId, Snapshot, NumToRead, NumToAck]),
     ReadSet1 = ReadSet ++ [Type:value(Snapshot)],
+  %lager:info("~w after adding", [TxId]),
     case NumToRead of 
         1 ->
             case NumToAck of
@@ -258,10 +264,10 @@ committing(timeout, S0=#state{tx_id = TxId,
                               commit_time=Commit_time}) ->
     case dict:size(UpdatedPartitions) of
         0 ->
-            %%lager:info("Replying directly"),
+           %lager:info("Replying directly ~w", [TxId]),
             reply_to_client(S0#state{state=committed});
         _N ->
-            %%lager:info("Committing"),
+           %lager:info("Committing ~w", [TxId]),
             ?CLOCKSI_VNODE:commit(UpdatedPartitions, TxId, Commit_time),
             reply_to_client(S0#state{state=committed})
     end.
@@ -271,21 +277,25 @@ committing(timeout, S0=#state{tx_id = TxId,
 %% does not pass the certification check, the transaction aborts.
 abort(timeout, SD0=#state{tx_id = TxId,
                           updated_partitions=UpdatedPartitions}) ->
+  %lager:info("~w will be aborted", [TxId]),
     ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted});
 
 abort({abort, _}, SD0=#state{tx_id = TxId,
                         updated_partitions=UpdatedPartitions}) ->
+  %lager:info("~w will be aborted", [TxId]),
     ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted});
 
 abort({prepared, _, _}, SD0=#state{tx_id=TxId,
                         updated_partitions=UpdatedPartitions}) ->
+  %lager:info("~w will be aborted", [TxId]),
     ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted});
 
 abort({ok, _}, SD0=#state{tx_id=TxId,
                         updated_partitions=UpdatedPartitions}) ->
+  %lager:info("~w will be aborted", [TxId]),
     ?CLOCKSI_VNODE:abort(UpdatedPartitions, TxId),
     reply_to_client(SD0#state{state=aborted}).
 
@@ -294,6 +304,7 @@ abort({ok, _}, SD0=#state{tx_id=TxId,
 reply_to_client(SD=#state{from=From, tx_id=TxId, read_set=ReadSet,
                                    state=TxState, commit_time=CommitTime}) ->
     
+  %lager:warning("~w just finished!", [TxId]),
      _ = if undefined =/= From ->
             Reply = case TxState of
                         committed ->

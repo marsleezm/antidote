@@ -25,9 +25,9 @@
 -export([start/2, stop/1]).
 
 %% PB Services
--define(SERVICES, [{antidote_pb_counter, 94, 98},
-                   {antidote_pb_set, 99, 101},
-                   {antidote_pb_txn, 102, 111}]).
+%-define(SERVICES, [{antidote_pb_counter, 94, 98},
+%                   {antidote_pb_set, 99, 101},
+%                   {antidote_pb_txn, 102, 111}]).
 
 %% ===================================================================
 %% Application callbacks
@@ -53,7 +53,7 @@ start(_StartType, _StartArgs) ->
 
             ok = riak_core_ring_events:add_guarded_handler(antidote_ring_event_handler, []),
             ok = riak_core_node_watcher_events:add_guarded_handler(antidote_node_event_handler, []),
-            ok = riak_api_pb_service:register(?SERVICES),
+            %ok = riak_api_pb_service:register(?SERVICES),
             {ok, Pid};
         {error, Reason} ->
             {error, Reason}
