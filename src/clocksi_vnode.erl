@@ -577,7 +577,7 @@ handle_command({abort, TxId}, _Sender,
   %lager:warning("~w: Aborting ~w", [Partition, TxId]),
     case ets:lookup(PreparedTxs, TxId) of
         [{TxId, {waiting, WriteSet}}] ->
-            Keys = [Key || {Key, _} <- WriteSet],
+            Keys = [Key || {Key, V} <- WriteSet, V /= read],
             case IfSpecula of
                 true -> specula_utilities:deal_abort_deps(TxId);
                 false -> ok 
@@ -664,7 +664,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS)->
     PrepareTime = max(MaxTS+1, tx_utilities:now_microsec()),
     case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0) of
         {false, InsertedKeys, WaitingKeys} ->
-           %lager:warning("Check and insert failes: ~w", [TxId]),
+            %lager:warning("Check and insert failes: ~w", [TxId]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of
@@ -673,7 +673,8 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS)->
             {error, write_conflict};
         0 ->
            %lager:warning("~w has no dependency", [TxId]),
-            KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
+            KeySet = [K || {K, V} <- TxWriteSet, V /= read],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
+            %lager:warning("Insert ~w for ~w keys of ~w", [TxId, length(KeySet), length(TxWriteSet)]),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
             {ok, PrepareTime};
         N ->
@@ -853,11 +854,16 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, W
         [{Key, CommitTime}] ->
             case CommitTime > SnapshotTime of
                 true ->
-                   %lager:warning("~w: False for committed key ~p, Commit time is ~w", [TxId, Key, CommitTime]),
+                    lager:warning("~w: False for committed key ~p, Commit time is ~w", [TxId, Key, CommitTime]),
                     {false, InsertedKeys, WaitingKeys};
                 false ->
                     case check_prepared(PPTime, TxId, PreparedTxs, Key, Value) of
+                        true_read ->
+                            lager:warning("~w: cc pass for read key ~p", [TxId, Key]),
+                            check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs,  
+                                InsertedKeys, WaitingKeys, NumWaiting);
                         true ->
+                            lager:warning("~w: cc pass for update key ~p", [TxId, Key]),
                             check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs,  
                                 [Key|InsertedKeys], WaitingKeys, NumWaiting);
                         wait ->
@@ -870,6 +876,9 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, W
             end;
         [] ->
             case check_prepared(PPTime, TxId, PreparedTxs, Key, Value) of
+                true_read ->
+                    check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, 
+                        InsertedKeys, WaitingKeys, NumWaiting); 
                 true ->
                     check_and_insert(PPTime, TxId, T, CommittedTxs, PreparedTxs, 
                         [Key|InsertedKeys], WaitingKeys, NumWaiting); 
@@ -880,8 +889,25 @@ check_and_insert(PPTime, TxId, [H|T], CommittedTxs, PreparedTxs, InsertedKeys, W
                   %lager:warning("~w: False of prepared for ~p", [TxId, Key]),
                     {false, InsertedKeys, WaitingKeys}
             end
+%% If I am reading, only need to insert tx id and pptime, but nothing else.
     end.
 
+%% If I am reading, only need to insert tx id and pptime, but nothing else.
+check_prepared(PPTime, TxId, PreparedTxs, Key, read) ->
+    SnapshotTime = TxId#tx_id.snapshot_time,
+    case ets:lookup(PreparedTxs, Key) of
+        [] ->
+            true_read;
+        [{Key, [{PrepTxId, PrepareTime, OldPPTime, PrepValue, RWaiter}|PWaiter]}] ->
+            case OldPPTime > SnapshotTime of
+                true ->
+                    false;
+                false ->
+                    ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, PPTime, PrepValue, RWaiter}|
+                             (PWaiter++[{TxId, PPTime}])]}),
+                    wait
+            end
+    end;
 check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case ets:lookup(PreparedTxs, Key) of
@@ -891,10 +917,8 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
         [{Key, [{PrepTxId, PrepareTime, OldPPTime, PrepValue, RWaiter}|PWaiter]}] ->
             case OldPPTime > SnapshotTime of
                 true ->
-                   %lager:warning("~w fail because prepare time is ~w, PWaiters are ~p", [TxId, PrepareTime, PWaiter]),
                     false;
                 false ->
-                 %lager:warning("~p: ~w waits for ~w with ~w, which is ~p", [Key, TxId, PrepTxId, PrepareTime, PWaiter]),
                     ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, PPTime, PrepValue, RWaiter}|
                              (PWaiter++[{TxId, PPTime, Value}])]}),
                     wait
@@ -1141,7 +1165,7 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
                 _ ->
                    %lager:warning("~w unblocked, replicating writeset", [TxId]),
                     [{TxId, {waiting, WriteSet}}] = ets:lookup(PreparedTxs, TxId),
-                    ets:insert(PreparedTxs, {TxId, [K|| {K, _} <-WriteSet]}),
+                    ets:insert(PreparedTxs, {TxId, [K|| {K, V} <-WriteSet, V /= read]}),
                     case RepMode of
                         local_aggr -> ok;
                         _ -> 

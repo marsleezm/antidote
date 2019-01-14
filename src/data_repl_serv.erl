@@ -400,15 +400,23 @@ handle_cast({repl_prepare, Type, TxId, Part, WriteSet, TimeStamp, Sender},
                             case ets:lookup(PendingLog, {TxId, Part}) of
                                 [] ->
                                     KeySet = lists:foldl(fun({Key, Value}, KS) ->
-                                    case ets:lookup(PendingLog, Key) of
-                                        [] ->
-                                            true = ets:insert(PendingLog, {Key, [{TxId, TimeStamp, Value, []}]}),
-                                            [Key|KS];
-                                        [{Key, RemainList}] ->
-                                            NewList = insert_version(RemainList, TxId, TimeStamp, Value),
-                                            true = ets:insert(PendingLog, {Key, NewList}),
-                                            [Key|KS]
+                                    case Value of
+                                        read -> 
+                                            %lager:warning("~w: repl read key ~p", [TxId, Key]), 
+                                            KS;
+                                        _ ->
+                                        %lager:warning("~w: repl update key ~p", [TxId, Key]),
+                                        case ets:lookup(PendingLog, Key) of
+                                            [] ->
+                                                true = ets:insert(PendingLog, {Key, [{TxId, TimeStamp, Value, []}]}),
+                                                [Key|KS];
+                                            [{Key, RemainList}] ->
+                                                NewList = insert_version(RemainList, TxId, TimeStamp, Value),
+                                                true = ets:insert(PendingLog, {Key, NewList}),
+                                                [Key|KS]
+                                        end
                                     end end, [], WriteSet),
+                                    %lager:warning("~w: repl, inserting ~p of ~w", [TxId, length(KeySet), length(WriteSet)]), 
                                    %lager:warning("Got repl prepare for ~w, ~p", [TxId, KeySet]),
                                     ets:insert(PendingLog, {{TxId, Part}, KeySet}),
                                     NewTs = max(Ts, tx_utilities:now_microsec()),
