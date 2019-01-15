@@ -89,7 +89,7 @@ prepare_for_other_part(TxId, Partition, TxWriteSet, CommittedTxs, PreparedTxs, I
         %% Pend-prepare. 
         {PendPrepDep, PrepDep, PrepareTime} ->
           %lager:warning("~p passed but has ~p pend prep deps, ~p prep dep, prepare with ~p, KeySet is ~w", [TxId, PendPrepDep, PrepDep, PrepareTime, KeySet]),
-            KeySet = lists:foreach(fun({K, V}, KS) ->
+            KeySet = lists:foldl(fun({K, V}, KS) ->
               case V of read -> KS;
                 _ ->
                   InsertKey = case PartitionType of cache -> {Partition, K}; slave -> K end,
