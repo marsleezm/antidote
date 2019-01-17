@@ -28,89 +28,80 @@
 -define(SPECULA_THRESHOLD, 0).
 
 prepare_for_master_part(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTime)->
-    %KeySet = [K || {K, _} <- TxWriteSet],
-    case certification_check(InitPrepTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, 0, 0) of
+    KeySet = [K || {K, _} <- TxWriteSet],
+    case certification_check(InitPrepTime, TxId, KeySet, CommittedTxs, PreparedTxs, 0, 0) of
         false ->
             {error, write_conflict};
         %% Directly prepare
         {0, 0, PrepareTime} ->
           %lager:warning("~p passed prepare with ~p", [TxId, PrepareTime]),
-            KeySet = lists:foldl(fun({K, V}, KS) ->
-                case V of read -> KS;
-                    _ ->
-                    ets:insert(PreparedTxs, {K, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]}),
-                    [K|KS]
-                end
-            end, [], TxWriteSet),
-            %lager:warning("~w key size is ~w, inserting size is ~w", [TxId, length(TxWriteSet), length(KeySet)]),
+            lists:foreach(fun({K, V}) ->
+                    ets:insert(PreparedTxs, {K, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]})
+                    end, TxWriteSet),
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
             {ok, PrepareTime};
         %% Pend-prepare. 
         {PendPrepDep, PrepDep, PrepareTime} ->
           %lager:warning("~p passed but has ~p pend dep, ~p prepdep, prepare with ~p", [TxId, PendPrepDep, PrepDep, PrepareTime]),
             %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
-            KeySet = lists:foldl(fun({K, V}, KS) ->
-                case V of read -> KS ;
-                    _ ->
-                  case ets:lookup(PreparedTxs, K) of
-                  [] ->
-                      ets:insert(PreparedTxs, {K, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]});
-                  [{K, {LastReaderTime, FirstPrepTime, PrepNum}, [{Type, PrepTxId, OldPPTime, PrepValue, RWaiter}|Rest]}] ->
-                      ets:insert(PreparedTxs, {K, {LastReaderTime, FirstPrepTime, PrepNum+1}, [{prepared, TxId, PrepareTime, V, []}|[{Type, PrepTxId, OldPPTime, PrepValue, RWaiter}|Rest]]});
-                  _R -> 
-                    ets:insert(PreparedTxs, {K, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]})
-                  end, [K|KS]
-                end
-            end, [], TxWriteSet),
-            %lager:warning("~w key size is ~w, inserting size is ~w", [TxId, length(TxWriteSet), length(KeySet)]),
+            lists:foreach(fun({K, V}) ->
+                          case ets:lookup(PreparedTxs, K) of
+                          [] ->
+                              ets:insert(PreparedTxs, {K, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]});
+                          [{K, {LastReaderTime, FirstPrepTime, PrepNum}, [{Type, PrepTxId, OldPPTime, PrepValue, RWaiter}|Rest]}] ->
+                              %ets:insert(PreparedTxs, {K, [{Type, PrepTxId, OldPPTime, LastReaderTime, max(LastPrepTime, PrepareTime), PrepNum+1, PrepValue, RWaiter}|
+                              %         (PWaiter++[{prepared, TxId, PrepareTime, V, []}])]});
+                              ets:insert(PreparedTxs, {K, {LastReaderTime, FirstPrepTime, PrepNum+1}, [{prepared, TxId, PrepareTime, V, []}|[{Type, PrepTxId, OldPPTime, PrepValue, RWaiter}|Rest]]});
+                          _R -> 
+                           %lager:warning("R is ~w", [_R]),
+                            ets:insert(PreparedTxs, {K, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]})
+                          end
+                    end, TxWriteSet),
             ets:insert(PreparedTxs, {TxId, KeySet}),
             {wait, PendPrepDep, PrepDep, PrepareTime}
     end.
 
 prepare_for_other_part(TxId, Partition, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTime, PartitionType)->
-    case certification_check(InitPrepTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, 0, 0) of
+    KeySet = case PartitionType of cache -> [{Partition,K} || {K, _} <- TxWriteSet];
+                                   slave -> [K || {K, _} <- TxWriteSet]
+             end,
+    case certification_check(InitPrepTime, TxId, KeySet, CommittedTxs, PreparedTxs, 0, 0) of
         false ->
             {error, write_conflict};
         %% Directly prepare
         {0, 0, PrepareTime} ->
           %lager:warning("~p passed prepare with ~p, KeySet is ~p", [TxId, PrepareTime, KeySet]),
-            KeySet = lists:foldl(fun({K, V}, KS) ->
-                case V of
-                    read -> KS;
-                    _ ->
-                        InsertKey = case PartitionType of cache -> {Partition, K}; slave -> K end,
-                        ets:insert(PreparedTxs, {InsertKey, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]}),
-                        [InsertKey|KS]
-                end
-                end, [], TxWriteSet),
-            %lager:warning("~w key size is ~w, inserting size is ~w", [TxId, length(TxWriteSet), length(KeySet)]),
+            lists:foreach(fun({K, V}) ->
+                    InsertKey = case PartitionType of cache -> {Partition, K}; slave -> K end,
+                    ets:insert(PreparedTxs, {InsertKey, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]})
+                    end, TxWriteSet),
             true = ets:insert(PreparedTxs, {{TxId, Partition}, KeySet}),
             {ok, PrepareTime};
         %% Pend-prepare. 
         {PendPrepDep, PrepDep, PrepareTime} ->
           %lager:warning("~p passed but has ~p pend prep deps, ~p prep dep, prepare with ~p, KeySet is ~w", [TxId, PendPrepDep, PrepDep, PrepareTime, KeySet]),
-            KeySet = lists:foreach(fun({K, V}, KS) ->
-              case V of read -> KS;
-                _ ->
-                  InsertKey = case PartitionType of cache -> {Partition, K}; slave -> K end,
-                  case ets:lookup(PreparedTxs, InsertKey) of
-                  [] -> 
-                      ets:insert(PreparedTxs, {InsertKey, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]});
-                  [{InsertKey,  {LastRTime, FirstPrepTime, PrepNum},[{Type, PrepTxId, OldPPTime, PrepValue, RWaiter}|PWaiter]}] ->
-                      ets:insert(PreparedTxs, {InsertKey, {LastRTime, FirstPrepTime, PrepNum+1}, [{prepared, TxId, PrepareTime, V, []}|[{Type, PrepTxId, OldPPTime, PrepValue, RWaiter}|PWaiter]]});
-                  _R -> 
-                      ets:insert(PreparedTxs, {InsertKey, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]})
-                  end, [InsertKey|KS]
-                end
-            end, [], TxWriteSet),
-            %lager:warning("~w key size is ~w, inserting size is ~w", [TxId, length(TxWriteSet), length(KeySet)]),
+            %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
+            lists:foreach(fun({K, V}) ->
+                          InsertKey = case PartitionType of cache -> {Partition, K}; slave -> K end,
+                          case ets:lookup(PreparedTxs, InsertKey) of
+                          [] -> 
+                              ets:insert(PreparedTxs, {InsertKey, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]});
+                          [{InsertKey,  {LastRTime, FirstPrepTime, PrepNum},[{Type, PrepTxId, OldPPTime, PrepValue, RWaiter}|PWaiter]}] ->
+                              %ets:insert(PreparedTxs, {InsertKey, [{Type, PrepTxId, OldPPTime, LastRTime, max(LastPrepTime, PrepareTime), PrepNum+1, PrepValue, RWaiter}|(PWaiter++[{prepared, TxId, PrepareTime, V, []}])]});
+                             %lager:warning("Key is ~w, After insertion is ~w", [K, [{prepared, TxId, PrepareTime, LastRTime, FirstPrepTime, PrepNum+1, V, []}|[{Type, PrepTxId, OldPPTime, PrepValue, RWaiter}|PWaiter]]]),
+                              ets:insert(PreparedTxs, {InsertKey, {LastRTime, FirstPrepTime, PrepNum+1}, [{prepared, TxId, PrepareTime, V, []}|[{Type, PrepTxId, OldPPTime, PrepValue, RWaiter}|PWaiter]]});
+                          _R -> 
+                             %lager:warning("R is ~w", [_R]),
+                              ets:insert(PreparedTxs, {InsertKey, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]})
+                          end
+                    end, TxWriteSet),
             true = ets:insert(PreparedTxs, {{TxId, Partition}, KeySet}),
             {wait, PendPrepDep, PrepDep, PrepareTime}
     end.
 
 certification_check(FinalPrepTime, _, [], _, _, PendPrepDep, PrepDep) ->
     {PendPrepDep, PrepDep, FinalPrepTime};
-certification_check(PrepareTime, TxId, [{Key, _}|T], CommittedTxs, PreparedTxs, PendPrepDep, PrepDep) ->
+certification_check(PrepareTime, TxId, [Key|T], CommittedTxs, PreparedTxs, PendPrepDep, PrepDep) ->
     SnapshotTime = TxId#tx_id.snapshot_time,
     case CommittedTxs of
         ignore ->
