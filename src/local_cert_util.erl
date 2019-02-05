@@ -321,7 +321,7 @@ deal_pending_records([{Type, TxId, PPTime, Value, PendingReaders}|PWaiter]=List,
     case SCTime > TxId#tx_id.snapshot_time of
         true ->
             case Value of
-                read -> ok;
+                read -> deal_pending_records(PWaiter, Metadata, SCTime, DepDict, MyNode, PendingReaders++Readers, PartitionType, RemovePrepNum, RemoveDepType, read);
                 _ ->
                     %% Abort the current txn
                     NewDepDict = abort_from_dep_dict(TxId, DepDict, PartitionType, MyNode),
