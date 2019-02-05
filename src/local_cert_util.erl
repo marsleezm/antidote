@@ -754,7 +754,7 @@ delete_and_read(_DeleteType, _, _, _, _Key, DepDict, _, _, [], _TxId, _, _) ->
 delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, Partition, [{Type, TxId, _Time, MValue, PendingReaders}|Rest], TxId, Prev, Metadata) ->
     %% If can read previous version: read
     %% If can not read previous version: add to previous pending
-     lager:warning("Delete and read ~w for ~w, prev is ~w, metadata is ~w, rest is ~w", [DeleteType, TxId, Prev, Metadata, Rest]),
+     lager:warning("Delete and read ~w for ~w, prev is ~w, metadata is ~w, rest is ~w, type is ~w, MValue is ~w", [DeleteType, TxId, Prev, Metadata, Rest, Type, MValue]),
     Value = case Type of pre_commit -> {_, _, V} = MValue, V; _ -> MValue end, 
     case Value of
         read ->
@@ -771,6 +771,7 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
                                             case Type of pre_commit -> not_remove; _ -> convert_to_pd end
                                     end
                             end,
+            lager:warning("~w read before pending record", [TxId]),
             {RemainPrev, Metadata1, LastPrepTime, AbortReaders, DepDict1} 
                 = deal_pending_records(Prev, Metadata, TxCommitTime, DepDict, {Partition, node()}, [], PartitionType, ToRemovePrep, RemoveDepType, read),
             ToPrev = case DeleteType of 
@@ -808,6 +809,7 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
                                             case Type of pre_commit -> not_remove; _ -> convert_to_pd end
                                     end
                             end,
+            lager:warning("~w normal before pending record", [TxId]),
             {RemainPrev, Metadata1, LastPrepTime, AbortReaders, DepDict1} 
                 = deal_pending_records(Prev, Metadata, TxCommitTime, DepDict, {Partition, node()}, [], PartitionType, ToRemovePrep, RemoveDepType, update),
             ToPrev = case DeleteType of 
