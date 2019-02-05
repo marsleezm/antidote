@@ -680,6 +680,9 @@ ready_or_block(TxId, Key, PendingTxs, Sender) ->
         [] ->
             ready;
         [{Key, []}] ->  ready;
+        [{Key, [{_, _, read, PR}|_]}] ->
+            PR = [],
+            ready;
         [{Key, [{PreparedTxId, PrepareTime, Value, PendingReader}|Others]}] ->
            %lager:warning("Blocked"),
             case PrepareTime =< SnapshotTime of
