@@ -53,7 +53,7 @@ prepare_for_master_part(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTim
                       %         (PWaiter++[{prepared, TxId, PrepareTime, V, []}])]});
                       ets:insert(PreparedTxs, {K, {LastReaderTime, FirstPrepTime, PrepNum+1}, [{prepared, TxId, PrepareTime, V, []}|[{Type, PrepTxId, OldPPTime, PrepValue, RWaiter}|Rest]]});
                   _R -> 
-                    lager:warning("R is ~w", [_R]),
+                    %lager:warning("R is ~w", [_R]),
                     ets:insert(PreparedTxs, {K, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]})
                   end
                 end, TxWriteSet),
@@ -182,7 +182,7 @@ check_prepared(TxId, PreparedTxs, Key, _Value) ->
                     end
             end;
         [{Key, LastReaderTime}] ->
-            lager:warning("LastReader Time is ~w", [LastReaderTime]),
+            %lager:warning("LastReader Time is ~w", [LastReaderTime]),
             %ToPrepTime = max(LastReaderTime+1, PPTime),
             %ets:insert(PreparedTxs, {Key, [{TxId, ToPrepTime, ToPrepTime, PPTime, Value, []}]}),
             {true, LastReaderTime+1}
@@ -752,7 +752,7 @@ delete_and_read(_DeleteType, _, _, _, _Key, DepDict, _, _, [], _TxId, _, _) ->
 delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDict, PartitionType, Partition, [{Type, TxId, _Time, MValue, PendingReaders}|Rest], TxId, Prev, Metadata) ->
     %% If can read previous version: read
     %% If can not read previous version: add to previous pending
-     lager:warning("Delete and read ~w for ~w, prev is ~w, metadata is ~w", [DeleteType, TxId, Prev, Metadata]),
+     lager:warning("Delete and read ~w for ~w, prev is ~w, metadata is ~w, rest is ~w", [DeleteType, TxId, Prev, Metadata, Rest]),
     Value = case Type of pre_commit -> {_, _, V} = MValue, V; _ -> MValue end, 
     case Value of
         read ->
