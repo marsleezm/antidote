@@ -318,21 +318,17 @@ deal_pending_records([{repl_prepare, _TxId, PPTime, _Value, _PendingReaders}|_]=
     {lists:reverse(List), {LastReaderTime, FirstPrepTime, PrepNum-RemovePrepNum}, PPTime, Readers, DepDict}; 
 deal_pending_records([{Type, TxId, PPTime, Value, PendingReaders}|PWaiter]=List, Metadata, SCTime, 
             DepDict, MyNode, Readers, PartitionType, RemovePrepNum, RemoveDepType, read) ->
-    case SCTime > TxId#tx_id.snapshot_time of
-        true ->
-            case Value of
-                read -> deal_pending_records(PWaiter, Metadata, SCTime, DepDict, MyNode, PendingReaders++Readers, PartitionType, RemovePrepNum, RemoveDepType, read);
-                _ ->
-                    %% Abort the current txn
-                    NewDepDict = abort_from_dep_dict(TxId, DepDict, PartitionType, MyNode),
-                    case Type of
-                        pre_commit ->
-                            deal_pending_records(PWaiter, Metadata, SCTime, NewDepDict, MyNode, PendingReaders++Readers, PartitionType, RemovePrepNum, RemoveDepType, read);
-                        prepared ->
-                            deal_pending_records(PWaiter, Metadata, SCTime, NewDepDict, MyNode, PendingReaders++Readers, PartitionType, RemovePrepNum+1, RemoveDepType, read)
-                    end
+    case {SCTime > TxId#tx_id.snapshot_time, Value == read} of
+        {true, false} ->
+            %% Abort the current txn
+            NewDepDict = abort_from_dep_dict(TxId, DepDict, PartitionType, MyNode),
+            case Type of
+                pre_commit ->
+                    deal_pending_records(PWaiter, Metadata, SCTime, NewDepDict, MyNode, PendingReaders++Readers, PartitionType, RemovePrepNum, RemoveDepType, read);
+                prepared ->
+                    deal_pending_records(PWaiter, Metadata, SCTime, NewDepDict, MyNode, PendingReaders++Readers, PartitionType, RemovePrepNum+1, RemoveDepType, read)
             end;
-        false ->
+        _ ->
             case Type of 
                 master ->
                     case dict:find(TxId, DepDict) of
