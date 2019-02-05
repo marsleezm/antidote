@@ -570,7 +570,7 @@ pre_commit([Key|Rest], TxId, SCTime, InMemoryStore, PreparedTxs, DepDict, Partit
                           PreparedTxs, DepDict, Partition, LOC, FFC, PartitionType)
             end;
         [{Key, Metadata, RecordList}] ->
-           lager:warning("SC commit for ~w, ~p, meta data is ~w", [TxId, Key, Metadata]),
+           lager:warning("SC commit for ~w, ~p, meta data is ~w, RC list is ~w", [TxId, Key, Metadata, RecordList]),
             %case RecordList of
             %    [{_,_, F, _, _}] -> F = FirstPrepTime;
             %    _ -> ok
@@ -685,7 +685,9 @@ reply_to_all(PartitionType, PendingReaders, CommitTime, Value) ->
     end.
 
 find_prepare_record(RecordList, TxId) ->
-    find_prepare_record(RecordList, TxId, []).
+    R = find_prepare_record(RecordList, TxId, []),
+    lager:warning("Returning record ~w", [R]),
+    R.
   
 find_prepare_record([], _TxId, _Prev) ->
     [];
