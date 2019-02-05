@@ -772,8 +772,10 @@ delete_and_read(DeleteType, PreparedTxs, InMemoryStore, TxCommitTime, Key, DepDi
                                     end
                             end,
             lager:warning("~w read before pending record", [TxId]),
-            {RemainPrev, Metadata1, LastPrepTime, AbortReaders, DepDict1} 
+            RR 
                 = deal_pending_records(Prev, Metadata, TxCommitTime, DepDict, {Partition, node()}, [], PartitionType, ToRemovePrep, RemoveDepType, read),
+            lager:warning("~w got ~w", [TxId, RR]),
+            {RemainPrev, Metadata1, LastPrepTime, AbortReaders, DepDict1} = RR, 
             ToPrev = case DeleteType of 
                         abort -> AbortReaders++PendingReaders; 
                         commit -> reply_to_all(PartitionType, AbortReaders++PendingReaders, TxCommitTime, Value)
