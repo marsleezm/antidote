@@ -662,7 +662,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS)->
     PrepareTime = max(MaxTS+1, tx_utilities:now_microsec()),
     case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0) of
         {false, InsertedKeys, WaitingKeys} ->
-           lager:warning("Check and insert failes: ~w", [TxId]),
+           %lager:warning("Check and insert failes: ~w", [TxId]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of
@@ -1043,8 +1043,11 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
         [] ->
             ready;
         [{Key, [{_, _, _, read, PR}| _]}] ->
-            lager:warning("Key is ~w, PR is ~w", [Key, PR]),
-            PR = [],
+            case PR of
+                [] -> ok;
+                _ -> lager:warning("Key is ~w, PR is ~w", [Key, PR]),
+                    PR = []
+            end,
             ready;
         [{Key, [{PreparedTxId, PrepareTime, LastPPTime, Value, PendingReader}| PendingPrepare]}] ->
           %lager:warning("~p Not ready.. ~w waits for ~w with ~w, others are ~w", [Key, TxId, PreparedTxId, PrepareTime, PendingReader]),
