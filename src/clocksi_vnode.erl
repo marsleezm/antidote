@@ -1043,6 +1043,7 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
         [] ->
             ready;
         [{Key, [{_, _, _, read, PR}| _]}] ->
+            lager:warning("PR is ~w", [PR]),
             PR = [],
             ready;
         [{Key, [{PreparedTxId, PrepareTime, LastPPTime, Value, PendingReader}| PendingPrepare]}] ->
