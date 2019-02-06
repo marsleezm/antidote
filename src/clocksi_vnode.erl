@@ -1046,10 +1046,10 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
     case ets:lookup(PreparedTxs, Key) of
         [] ->
             ready;
-        [{Key, [{_, _, _, read, PR}| _]}] ->
+        [{Key, [{PTxId, _, _, read, PR}| _]}] ->
             case PR of
                 [] -> ok;
-                _ -> lager:warning("Key is ~w, PR is ~w", [Key, PR]),
+                _ -> lager:warning("Key is ~w, PTxId is ~w, PR is ~w", [Key, PTxId, PR]),
                     PR = []
             end,
             ready;
@@ -1059,7 +1059,7 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
                 true ->
                     ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastPPTime, Value,
                         [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
-                     lager:error("~w non_specula reads ~p is blocked by ~w! PrepareTime is ~w", [TxId, Key, PreparedTxId, PrepareTime]),
+                     lager:error("~w non_specula reads ~p is blocked by ~w, Value ~w! PrepareTime is ~w", [TxId, Key, PreparedTxId, Value, PrepareTime]),
                     not_ready;
                 false ->
                     ready
