@@ -933,11 +933,10 @@ update_store([], _TxId, TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTx
     %DepDict;
     dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PTime) ->
-    lager:warning("Trying to insert key ~p with for ~w, commit time is ~w", [Key, TxId, TxCommitTime]),
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, PrepareTime, LastPPTime, read, PendReaders}|Deps] }] ->		
-            lager:warning("~w inserting for read, PendReaders are ~w", [TxId, PendReaders]),
+            lager:warning("~w for ~w, inserting for read, PendReaders are ~w", [TxId, Key, PendReaders]),
             case ets:lookup(CommittedTxs, Key) of
                 [{Key, OCT}] -> true = ets:insert(CommittedTxs, {Key, max(OCT, TxCommitTime)});
                 [] -> true = ets:insert(CommittedTxs, {Key, TxCommitTime})
@@ -956,7 +955,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                         DepDict2, Partition, PrepareTime)
             end;
         [{Key, [{TxId, PrepareTime, LastPPTime, Value, []}|Deps] }] ->		
-            lager:warning("~w No pending reader! Waiter is ~p", [TxId, Deps]),
+            lager:warning("~w for ~w, no pending reader! Waiter is ~p", [TxId, Key, Deps]),
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]});
@@ -980,7 +979,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
 						PreparedTxs, DepDict2, Partition, PrepareTime)
             end;
         [{Key, [{TxId, PrepareTime, LastPPTime, Value, PendingReaders}|Deps]}] ->
-            lager:warning("~w Pending readers are ~w! Pending writers are ~p", [TxId, PendingReaders, Deps]),
+            lager:warning("~w for ~w, pending readers are ~w! Pending writers are ~p", [TxId, Key, PendingReaders, Deps]),
             ets:insert(CommittedTxs, {Key, TxCommitTime}),
             Values = case ets:lookup(InMemoryStore, Key) of
                         [] ->
