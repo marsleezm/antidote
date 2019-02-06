@@ -937,6 +937,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, PrepareTime, LastPPTime, read, PendReaders}|Deps] }] ->		
+            lager:warning("~w inserting for read, PendReaders are ~w", [TxId, PendReaders]),
             case ets:lookup(CommittedTxs, Key) of
                 [{Key, OCT}] -> true = ets:insert(CommittedTxs, {Key, max(OCT, TxCommitTime)});
                 [] -> true = ets:insert(CommittedTxs, {Key, TxCommitTime})
@@ -979,7 +980,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
 						PreparedTxs, DepDict2, Partition, PrepareTime)
             end;
         [{Key, [{TxId, PrepareTime, LastPPTime, Value, PendingReaders}|Deps]}] ->
-         %lager:warning("~w Pending readers are ~w! Pending writers are ~p", [TxId, PendingReaders, Deps]),
+            lager:warning("~w Pending readers are ~w! Pending writers are ~p", [TxId, PendingReaders, Deps]),
             ets:insert(CommittedTxs, {Key, TxCommitTime}),
             Values = case ets:lookup(InMemoryStore, Key) of
                         [] ->
@@ -1033,7 +1034,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             end;
          [] ->
             %[{TxId, Keys}] = ets:lookup(PreparedTxs, TxId),
-          %lager:warning("Something is wrong!!! A txn updated two same keys ~p!", [Key]),
+            lager:warning("Something is wrong!!! A txn updated two same keys ~p!", [Key]),
             update_store(Rest, TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PTime)
     end.
 
