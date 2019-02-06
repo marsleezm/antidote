@@ -369,10 +369,10 @@ handle_command({read, Key, TxId}, Sender, SD0=#state{%num_blocked=NumBlocked,
 handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state{
             prepared_txs=PreparedTxs, inmemory_store=InMemoryStore, max_ts=MaxTS}) ->
     %{NumRR, AccRR} = RelayRead,
-     lager:error("~w relay read ~p", [TxId, Key]),
+     %lager:error("~w relay read ~p", [TxId, Key]),
     %T1 = os:timestamp(),
     MaxTS1 = max(MaxTS, TxId#tx_id.snapshot_time),
-     lager:warning("~w reading key ~w, MaxTS is ~w", [TxId, Key, MaxTS]),
+     %lager:warning("~w reading key ~w, MaxTS is ~w", [TxId, Key, MaxTS]),
     case SpeculaRead of
         false ->
             case ready_or_block(TxId, Key, PreparedTxs, {relay, Reader}) of
@@ -380,20 +380,20 @@ handle_command({relay_read, Key, TxId, Reader, SpeculaRead}, _Sender, SD0=#state
                     {noreply, SD0#state{max_ts=MaxTS1}};
                 ready ->
                     Result = read_value(Key, TxId, InMemoryStore),
-                     lager:warning("~w reading key ~w finished", [TxId, Key]),
+                    %lager:warning("~w reading key ~w finished", [TxId, Key]),
                     gen_server:reply(Reader, Result), 
     		        %T2 = os:timestamp(),
                     {noreply, SD0#state{max_ts=MaxTS1}}%i, relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}}
             end;
         true ->
-           lager:warning("Specula read!!"),
+           %lager:warning("Specula read!!"),
             case specula_read(TxId, Key, PreparedTxs, {relay, Reader}) of
                 not_ready->
                     {noreply, SD0#state{max_ts=MaxTS1}};
                 {specula, Value} ->
                     gen_server:reply(Reader, {ok, Value}), 
     		        %T2 = os:timestamp(),
-                 lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
+                 %lager:warning("Specula read finished: ~w, ~p", [TxId, Key]),
                     {noreply, SD0#state{max_ts=MaxTS1}};
 				        %relay_read={NumRR+1, AccRR+get_time_diff(T1, T2)}}};
                 ready ->
@@ -1242,10 +1242,10 @@ unblock_prepare(TxId, DepDict, PreparedTxs, Partition) ->
 read_value(Key, TxId, InMemoryStore) ->
     case ets:lookup(InMemoryStore, Key) of
         [] ->
-            lager:warning("Nothing in store!!"),
+            %lager:warning("Nothing in store!!"),
             {ok, []};
         [{Key, ValueList}] ->
-            lager:warning("Value list is ~p", [ValueList]),
+            %lager:warning("Value list is ~p", [ValueList]),
             MyClock = TxId#tx_id.snapshot_time,
             find_version(ValueList, MyClock)
     end.
