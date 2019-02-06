@@ -792,7 +792,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, _, LastPPTime, _, []}| PrepDeps]}] ->
-       %lager:warning("clean abort: for key ~p, No reader, prepdeps are ~p", [Key, PrepDeps]),
+            lager:warning("clean abort for ~w for key ~p, No reader, prepdeps are ~p", [TxId, Key, PrepDeps]),
 			%% 0 for commit time means that the first prepared txs will just be prepared
             {PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, LastPPTime, update, MyNode),
             case PPTxId of
@@ -805,7 +805,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 					clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition)
             end;
         [{Key, [{TxId, _, LastPPTime, _, PendingReaders}|PrepDeps]}] ->
-          %lager:warning("Clean abort: for key ~p, readers are ~p, prep deps are ~w", [Key, PendingReaders, PrepDeps]),
+            lager:warning("Clean abort for ~w for key ~p, readers are ~p, prep deps are ~w", [Key, TxId, PendingReaders, PrepDeps]),
 			{PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, LastPPTime, update, MyNode),
             Value = case ets:lookup(InMemoryStore, Key) of
 		                [{Key, ValueList}] ->
@@ -1002,10 +1002,10 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                     lists:foreach(fun({SnapshotTime, Sender}) ->
                             case SnapshotTime >= TxCommitTime of
                                 true ->
-                                     lager:info("Replying to ~w of second value", [Sender]),
+                                    %lager:info("Replying to ~w of second value", [Sender]),
                                     reply(Sender, {ok, lists:nth(2,Values)});
                                 false ->
-                                     lager:info("Replying to ~w of first value", [Sender]),
+                                    %lager:info("Replying to ~w of first value", [Sender]),
                                     reply(Sender, {ok, hd(Values)})
                             end end,
                         PendingReaders),
