@@ -422,7 +422,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
     case Result of
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
-            lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
+            %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
             case IfReplicate of
                 true ->
                     case Debug of
@@ -936,12 +936,16 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, PrepareTime, LastPPTime, read, PendReaders}|Deps] }] ->		
-            lager:warning("~w for ~w, inserting for read, PendReaders are ~w", [TxId, Key, PendReaders]),
+            case PendReaders of
+                [] -> ok;
+                _ ->
+                    lager:warning("~w for ~w, inserting for read, PendReaders are ~w", [TxId, Key, PendReaders]),
+                    PendReaders = []
+            end,
             case ets:lookup(CommittedTxs, Key) of
                 [{Key, OCT}] -> true = ets:insert(CommittedTxs, {Key, max(OCT, TxCommitTime)});
                 [] -> true = ets:insert(CommittedTxs, {Key, TxCommitTime})
             end,
-            PendReaders = [],
             {PPTxId, Record, DepDict1} = deal_with_prepare_deps(Deps, TxCommitTime, DepDict, LastPPTime, read, MyNode),
             case Record of
                 ignore ->
