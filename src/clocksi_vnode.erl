@@ -808,7 +808,6 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 					clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition)
             end;
         [{Key, [{TxId, _, LastPPTime, _, PendingReaders}|PrepDeps]}] ->
-           lager:warning("Clean abort for ~w for key ~p, readers are ~p, prep deps are ~w", [Key, TxId, PendingReaders, PrepDeps]),
 			{PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, LastPPTime, update, MyNode),
             Value = case ets:lookup(InMemoryStore, Key) of
 		                [{Key, ValueList}] ->
@@ -817,6 +816,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
 		                [] ->
 							[]
             		end,
+           lager:warning("Clean abort for ~w for key ~p, readers are ~p, prep deps are ~w, after rec is ~w", [Key, TxId, PendingReaders, PrepDeps, Record]),
 			case Record of
                 ignore ->
 					lists:foreach(fun({_, Sender}) -> 
@@ -828,7 +828,7 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
                     DepDict2 = unblock_prepare(PPTxId, DepDict1, PreparedTxs, Partition),
 					StillPReaders = lists:foldl(fun({SnapshotTime, Sender}, PReaders) -> 
 										case {SnapshotTime >= PPTime, PValue == read} of
-											{true, true} -> [{SnapshotTime, Sender}|PReaders];
+											{true, false} -> [{SnapshotTime, Sender}|PReaders];
 											_ ->  reply(Sender, {ok,Value}), PReaders
 										end end, [], PendingReaders),
 					true = ets:insert(PreparedTxs, {Key, [{PPTxId, PPTime, LastPPTime, PValue, StillPReaders}|Remaining]}),
