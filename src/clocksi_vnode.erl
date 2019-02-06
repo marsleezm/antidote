@@ -422,7 +422,7 @@ handle_command({prepare, TxId, WriteSet, RepMode, ProposedTs}, RawSender,
     case Result of
         {ok, PrepareTime} ->
             %UsedTime = tx_utilities:now_microsec() - PrepareTime,
-          %lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
+            lager:warning("~w: ~w certification check prepred with ~w", [Partition, TxId, PrepareTime]),
             case IfReplicate of
                 true ->
                     case Debug of
@@ -662,7 +662,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS)->
     PrepareTime = max(MaxTS+1, tx_utilities:now_microsec()),
     case check_and_insert(PrepareTime, TxId, TxWriteSet, CommittedTxs, PreparedTxs, [], [], 0) of
         {false, InsertedKeys, WaitingKeys} ->
-           %lager:warning("Check and insert failes: ~w", [TxId]),
+           lager:warning("Check and insert failes: ~w", [TxId]),
             lists:foreach(fun(K) -> ets:delete(PreparedTxs, K) end, InsertedKeys),
             lists:foreach(fun(K) -> 
                 case ets:lookup(PreparedTxs, K) of
@@ -676,7 +676,7 @@ prepare(TxId, TxWriteSet, CommittedTxs, PreparedTxs, MaxTS)->
             true = ets:insert(PreparedTxs, {TxId, KeySet}),
             {ok, PrepareTime};
         N ->
-          %lager:warning("~w has ~w dependency", [TxId, N]),
+            lager:warning("~w has ~w dependency", [TxId, N]),
             %KeySet = [K || {K, _} <- TxWriteSet],  % set_prepared(PreparedTxs, TxWriteSet, TxId,PrepareTime, []),
             true = ets:insert(PreparedTxs, {TxId, {waiting, TxWriteSet}}),
             {wait, N, PrepareTime}
@@ -917,7 +917,7 @@ check_prepared(PPTime, TxId, PreparedTxs, Key, Value) ->
                 true ->
                     false;
                 false ->
-                   %lager:warning("~w waiting for update ~w for key ~w", [TxId, PrepTxId, Key]),
+                   lager:warning("~w waiting for update ~w for key ~w", [TxId, PrepTxId, Key]),
                     ets:insert(PreparedTxs, {Key, [{PrepTxId, PrepareTime, PPTime, PrepValue, RWaiter}|
                              (PWaiter++[{TxId, PPTime, Value}])]}),
                     wait
@@ -933,7 +933,7 @@ update_store([], _TxId, TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedTx
     %DepDict;
     dict:update(commit_diff, fun({Diff, Cnt}) -> {Diff+TxCommitTime-PrepareTime, Cnt+1} end, DepDict);
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PTime) ->
-    %lager:warning("Trying to insert key ~p with for ~w, commit time is ~w", [Key, TxId, TxCommitTime]),
+    lager:warning("Trying to insert key ~p with for ~w, commit time is ~w", [Key, TxId, TxCommitTime]),
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, PrepareTime, LastPPTime, read, PendReaders}|Deps] }] ->		
@@ -955,7 +955,7 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                         DepDict2, Partition, PrepareTime)
             end;
         [{Key, [{TxId, PrepareTime, LastPPTime, Value, []}|Deps] }] ->		
-         %lager:warning("~w No pending reader! Waiter is ~p", [TxId, Deps]),
+            lager:warning("~w No pending reader! Waiter is ~p", [TxId, Deps]),
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]});
@@ -1051,7 +1051,7 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
                 true ->
                     ets:insert(PreparedTxs, {Key, [{PreparedTxId, PrepareTime, LastPPTime, Value,
                         [{TxId#tx_id.snapshot_time, Sender}|PendingReader]}| PendingPrepare]}),
-                     lager:error("~w non_specula reads ~p is blocked by ~w! PrepareTime is ~w", [TxId, Key, PreparedTxId, PrepareTime]),
+                     %lager:error("~w non_specula reads ~p is blocked by ~w! PrepareTime is ~w", [TxId, Key, PreparedTxId, PrepareTime]),
                     not_ready;
                 false ->
                     ready
@@ -1118,7 +1118,7 @@ add_read_dep(ReaderTx, WriterTx, _Key) ->
 deal_with_prepare_deps([], _, DepDict, _LastPPTime, _, _) ->
     {ignore, ignore, DepDict};
 deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, LastPPTime, read, MyNode) ->
-    %lager:warning("Dealing with ~p, ~p, commit time is ~w", [TxId, PPTime, TxCommitTime]),
+    lager:warning("Dealing with ~p, ~p, commit time is ~w", [TxId, PPTime, TxCommitTime]),
     case Value of
         read ->
             case dict:find(TxId, DepDict) of
@@ -1155,7 +1155,7 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, L
             end
     end;
 deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, LastPPTime, update, MyNode) ->
-    %lager:warning("Dealing with ~p, ~p, commit time is ~w", [TxId, PPTime, TxCommitTime]),
+    lager:warning("Dealing with ~p, ~p, commit time is ~w", [TxId, PPTime, TxCommitTime]),
     case TxCommitTime > TxId#tx_id.snapshot_time of
         true ->
             %% Abort the current transaction if it is not aborted yet.. (if dep dict still has its record)
@@ -1183,7 +1183,7 @@ deal_with_prepare_deps([{TxId, PPTime, Value}|PWaiter], TxCommitTime, DepDict, L
                     deal_with_prepare_deps(PWaiter, TxCommitTime, DepDict, LastPPTime, update, MyNode);
                 _ ->
                     {NewDepDict, Remaining} = abort_others(PPTime, PWaiter, DepDict, MyNode),
-                     lager:error("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
+                     %lager:error("Returning record of ~w with prepare ~w, remaining is ~w, dep is ~w", [TxId, PPTime, Remaining, NewDepDict]),
                     {TxId, [{TxId, PPTime, LastPPTime, Value, []}|Remaining], NewDepDict}
             end
     end.
