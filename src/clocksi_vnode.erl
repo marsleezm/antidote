@@ -824,9 +824,9 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
                 [{PPTxId, PPTime, LastPPTime, PValue, []}|Remaining] ->
                     DepDict2 = unblock_prepare(PPTxId, DepDict1, PreparedTxs, Partition),
 					StillPReaders = lists:foldl(fun({SnapshotTime, Sender}, PReaders) -> 
-										case SnapshotTime >= PPTime of
-											true -> [{SnapshotTime, Sender}|PReaders];
-											false ->  reply(Sender, {ok,Value}), PReaders
+										case {SnapshotTime >= PPTime, PValue == read} of
+											{true, true} -> [{SnapshotTime, Sender}|PReaders];
+											_ ->  reply(Sender, {ok,Value}), PReaders
 										end end, [], PendingReaders),
 					true = ets:insert(PreparedTxs, {Key, [{PPTxId, PPTime, LastPPTime, PValue, StillPReaders}|Remaining]}),
 					clean_abort_prepared(PreparedTxs,Rest,TxId, InMemoryStore, DepDict2, Partition)
