@@ -34,7 +34,7 @@ prepare_for_master_part(TxId, TxWriteSet, CommittedTxs, PreparedTxs, InitPrepTim
             {error, write_conflict};
         %% Directly prepare
         {0, 0, PrepareTime} ->
-           lager:warning("~p passed prepare with ~p", [TxId, PrepareTime]),
+           %lager:warning("~p passed prepare with ~p", [TxId, PrepareTime]),
             lists:foreach(fun({K, V}) ->
                     ets:insert(PreparedTxs, {K, {PrepareTime, PrepareTime, 1}, [{prepared, TxId, PrepareTime, V, []}]})
                     end, TxWriteSet),
@@ -200,7 +200,7 @@ update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedT
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PartitionType) ->
     case ets:lookup(PreparedTxs, Key) of
         [{Key, {LRTime, _FirstPrepTime, _PrepNum}, [{Type, TxId, _PrepareTime, MValue, PendingReaders}|Others]}] ->
-             lager:warning("~p Pending readers are ~p! Others are ~p", [TxId, PendingReaders, Others]),
+            %lager:warning("~p Pending readers are ~p! Others are ~p", [TxId, PendingReaders, Others]),
             AllPendingReaders = lists:foldl(fun({_, _, _, _ , Readers}, CReaders) ->
                                        Readers++CReaders end, PendingReaders, Others), 
             Value = case Type of pre_commit -> {_, _, V}=MValue, V; _ -> MValue end,
