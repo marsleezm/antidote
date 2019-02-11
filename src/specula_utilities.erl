@@ -42,10 +42,10 @@ deal_commit_deps(TxId, LOC, CommitTime) ->
                             ets:delete_object(dependency, {TId, DependTxId}),
                             case DependTxId#tx_id.snapshot_time >= CommitTime of
                                 true ->
-                                    %lager:info("Calling read valid by ts of ~w, from ~w", [DependTxId, TId]),
+                                    lager:info("Calling read valid by ts of ~w, from ~w", [DependTxId, TId]),
                                     gen_server:cast(DependTxId#tx_id.server_pid, {read_valid, DependTxId, TId, LOC});
                                 false ->
-                                    %lager:info("Calling read invalid by ts of ~w, from ~w", [DependTxId, TId]),
+                                    lager:info("Calling read invalid by ts of ~w, from ~w", [DependTxId, TId]),
                                     gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, CommitTime, DependTxId})
                           end end, List)
     end.
@@ -56,7 +56,7 @@ deal_abort_deps(TxId) ->
             ok; %% No read dependency was created!
         List ->
             lists:foreach(fun({TId, DependTxId}) ->
-                            %lager:info("Calling read invalid of ~w, from ~w", [DependTxId, TId]),
+                            lager:info("Calling read invalid of ~w, from ~w", [DependTxId, TId]),
                             ets:delete_object(dependency, {TId, DependTxId}),
                             gen_server:cast(DependTxId#tx_id.server_pid, {read_invalid, -1, DependTxId})
                           end, List)
@@ -116,13 +116,13 @@ should_specula(PreparedTime, SnapshotTime, SpeculaTimeout) ->
 speculate_and_read(Key, MyTxId, PreparedRecord, Tables) ->
     {PreparedTxs, InMemoryStore, SpeculaDep} = Tables,
     {SpeculatedTxId, Value} = make_prepared_specula(Key, PreparedRecord, PreparedTxs, InMemoryStore),
-    %lager:info("Specula reading ~w of ~w", [Key, MyTxId]),
+    lager:info("Specula reading ~w of ~w", [Key, MyTxId]),
     add_specula_meta(SpeculaDep, SpeculatedTxId, MyTxId, Key),
     {specula, Value}.
 
 make_prepared_specula(Key, PreparedRecord, PreparedTxs, _InMemoryStore) ->
     {TxId, PrepareTime, Value, PendingReaders} = PreparedRecord,
-    %lager:info("Trying to make prepared specula ~w for ~w",[Key, TxId]),
+    lager:info("Trying to make prepared specula ~w for ~w",[Key, TxId]),
     true = ets:insert(PreparedTxs, {Key, {specula, TxId, PrepareTime, Value, PendingReaders}}),
     {TxId, Value}.
 
@@ -154,7 +154,7 @@ finalize_dependency(NumToCount, TxId, TxCommitTime, SpeculaDep, Type) ->
         [] -> %% No dependency, do nothing!
             NumToCount;
         [{TxId, DepList}] -> %% Do something for each of the dependency...
-            %lager:info("Found dependency ~w for key ~w",[DepList, TxId]),
+            lager:info("Found dependency ~w for key ~w",[DepList, TxId]),
             true = ets:delete(SpeculaDep, TxId),
             case Type of
                 commit ->
