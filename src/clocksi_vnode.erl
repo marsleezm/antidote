@@ -792,10 +792,10 @@ clean_abort_prepared(PreparedTxs, [Key | Rest], TxId, InMemoryStore, DepDict, Pa
     MyNode = {Partition, node()},
     case ets:lookup(PreparedTxs, Key) of
         [{Key, [{TxId, _, LastPPTime, _, []}| PrepDeps]}] ->
-            case PrepDeps of
-                [] -> ok;
-                _ ->lager:warning("clean abort for ~w for key ~p, No reader, prepdeps are ~p", [TxId, Key, PrepDeps])
-            end,
+            %case PrepDeps of
+            %    [] -> ok;
+            %    _ -> lager:warning("clean abort for ~w for key ~p, No reader, prepdeps are ~p", [TxId, Key, PrepDeps])
+            %end,
 			%% 0 for commit time means that the first prepared txs will just be prepared
             {PPTxId, Record, DepDict1} = deal_with_prepare_deps(PrepDeps, 0, DepDict, LastPPTime, update, MyNode),
             case PPTxId of
@@ -962,9 +962,9 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
                         DepDict2, Partition, PrepareTime)
             end;
         [{Key, [{TxId, PrepareTime, LastPPTime, Value, []}|Deps] }] ->		
-            case Deps of [] -> ok;
-                     _ ->lager:warning("~w for ~w, no pending reader! Waiter is ~p", [TxId, Key, Deps])
-            end,
+            %case Deps of [] -> ok;
+            %         _ ->lager:warning("~w for ~w, no pending reader! Waiter is ~p", [TxId, Key, Deps])
+            %end,
             case ets:lookup(InMemoryStore, Key) of
                 [] ->
                     true = ets:insert(InMemoryStore, {Key, [{TxCommitTime, Value}]});
@@ -1054,7 +1054,7 @@ ready_or_block(TxId, Key, PreparedTxs, Sender) ->
         [{Key, [{_PTxId, _, _, read, PR}| _]}] ->
             case PR of
                 [] -> ok;
-                _ ->lager:warning("Key is ~w, PTxId is ~w, PR is ~w", [Key, _PTxId, PR]),
+                _ -> %lager:warning("Key is ~w, PTxId is ~w, PR is ~w", [Key, _PTxId, PR]),
                     PR = []
             end,
             ready;
