@@ -206,7 +206,11 @@ update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, Prepar
             Value = case Type of pre_commit -> {_, _, V}=MValue, V; _ -> MValue end,
             case Value of
                 read ->
-                    AllPendingReaders = [],
+                    case AllPendingReaders of
+                        [] -> ok;
+                        _ -> lager:warning("~p all pending readers are ~p", [TxId, AllPendingReaders]),
+                             AllPendingReaders = []
+                    end,
                     ets:insert(CommittedTxs, {Key, TxCommitTime});
                 _ ->
                     case PartitionType of
