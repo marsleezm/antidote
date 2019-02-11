@@ -200,7 +200,10 @@ update_store([], _TxId, _TxCommitTime, _InMemoryStore, _CommittedTxs, _PreparedT
 update_store([Key|Rest], TxId, TxCommitTime, InMemoryStore, CommittedTxs, PreparedTxs, DepDict, Partition, PartitionType) ->
     case ets:lookup(PreparedTxs, Key) of
         [{Key, {LRTime, _FirstPrepTime, _PrepNum}, [{Type, TxId, _PrepareTime, MValue, PendingReaders}|Others]}] ->
-            %lager:warning("~p Pending readers are ~p! Others are ~p", [TxId, PendingReaders, Others]),
+            case Others of
+                [] -> [];
+                _ ->  lager:warning("~p Pending readers are ~p! Others are ~p", [TxId, PendingReaders, Others])
+            end,
             AllPendingReaders = lists:foldl(fun({_, _, _, _ , Readers}, CReaders) ->
                                        Readers++CReaders end, PendingReaders, Others), 
             Value = case Type of pre_commit -> {_, _, V}=MValue, V; _ -> MValue end,
